@@ -6,7 +6,7 @@
 // submission. The database enforces it; this surface explains it rather than
 // offering a button that would fail.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -32,6 +32,7 @@ import {
 import type { AvailablePlugin } from "../data/useMarketplace";
 
 export function ReviewView({
+  reloadToken = 0,
   available,
   installed = [],
   onHelp,
@@ -39,6 +40,8 @@ export function ReviewView({
   onOpenPreview,
   onDecided,
 }: {
+  /** Changes whenever the module refetches (Refresh, a publish): reload too. */
+  reloadToken?: number;
   /** Approved plugins, used to diff a submission against its last release. */
   available: AvailablePlugin[];
   /** The reviewer's installs, so a card can tell a test-drive is ready to open. */
@@ -51,6 +54,10 @@ export function ReviewView({
   onDecided?: () => void;
 }) {
   const { loading, error, queue, refetch } = useReviewQueue();
+  const firstToken = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken !== firstToken.current) refetch();
+  }, [reloadToken, refetch]);
   const user = useUser();
 
   if (loading) {
@@ -180,9 +187,9 @@ function ReviewCard({
         report: scan?.report.raw ?? undefined,
       });
     } catch {
-      // Surfaced below via reviewError. If the author withdrew it meanwhile, the
-      // refetch drops the card, which is the honest outcome.
-      onDone();
+      // Surfaced below via reviewError. Deliberately NO refetch here: it would
+      // unmount this card and its error with it, making a failed Approve look
+      // like nothing happened. Refresh reloads the queue when the reviewer wants.
       return;
     }
     onDone();

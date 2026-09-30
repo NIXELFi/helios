@@ -182,10 +182,16 @@ const PASSING_CHECKS: Array<{ code: string; title: string; when: (codes: Set<str
  *
  * @param texts  bundle-relative path -> file contents, from `pack_plugin_bundle`
  * @param manifest  the parsed manifest.json
+ * @param unscanned  scannable files too large to read (from the packer). The scan
+ *   cannot vouch for them, so the report says so instead of showing green.
  */
-export function preflight(texts: Record<string, string>, manifest: unknown): PreflightReport {
+export function preflight(
+  texts: Record<string, string>,
+  manifest: unknown,
+  unscanned: string[] = [],
+): PreflightReport {
   const manifestResult = validateManifest(manifest);
-  const scan = scanBundle(texts, (manifest ?? {}) as { permissions?: string[] });
+  const scan = scanBundle(texts, (manifest ?? {}) as { permissions?: string[]; entry?: string });
 
   const errors: PreflightFinding[] = [];
   const warnings: PreflightFinding[] = [];
@@ -222,7 +228,31 @@ export function preflight(texts: Record<string, string>, manifest: unknown): Pre
     (explained.level === "error" ? errors : warnings).push(explained);
   }
 
-  const passed: PreflightFinding[] = PASSING_CHECKS.filter((c) => c.when(flagged)).map((c) => ({
+  const entry =
+    typeof (manifest as { entry?: unknown } | null)?.entry === "string"
+      ? ((manifest as { entry: string }).entry).replace(/^\.?\//, "")
+      : null;
+  for (const path of unscanned) {
+    const isEntry = path === entry;
+    (isEntry ? errors : warnings).push({
+      level: isEntry ? "error" : "warning",
+      code: "unscanned",
+      title: isEntry ? "Your entry page is too large to check" : "A file is too large to check",
+      detail:
+        "The check reads every script and page in the bundle, but this file is over 16 MB, so it was " +
+        "not read and nothing here can vouch for it. " +
+        (isEntry
+          ? "Since the entry page is what runs, it has to be checked: trim what the build inlines " +
+            "(unused libraries, embedded data) until it is under 16 MB."
+          : "You can still submit; your reviewer will see this warning too."),
+      path,
+      helpTopic: "bundle",
+    });
+  }
+
+  // Nothing is reported as passing while part of the bundle went unread.
+  const checks = unscanned.length > 0 ? [] : PASSING_CHECKS;
+  const passed: PreflightFinding[] = checks.filter((c) => c.when(flagged)).map((c) => ({
     level: "ok" as const,
     code: c.code,
     title: c.title,

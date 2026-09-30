@@ -73,9 +73,32 @@ describe("marketplace publish-UI migration", () => {
 
   it("strips the default PUBLIC execute grant from the whole schema", () => {
     expect(SQL).toMatch(/revoke execute on all functions in schema marketplace from public, anon;/);
-    expect(SQL).toMatch(
-      /alter default privileges in schema marketplace revoke execute on functions from public;/,
-    );
+    // The per-schema default-privileges revoke is a no-op in Postgres; it must
+    // not come back as if it protected future functions.
+    expect(SQL).not.toMatch(/^alter default privileges in schema marketplace revoke/m);
+  });
+
+  it("keeps service_role on the API surface", () => {
+    expect(finalGrant()).toMatch(/to authenticated, service_role;/);
+  });
+
+  it("locks the row and guards the status in withdraw and yank", () => {
+    const w = bodyOf("withdraw_plugin_version");
+    expect(w).toMatch(/for update/);
+    expect(w).toMatch(/and pv\.review_status = 'pending'/);
+    const y = bodyOf("yank_plugin_version");
+    expect(y).toMatch(/for update/);
+    expect(y).toMatch(/and pv\.review_status = 'approved'/);
+  });
+
+  it("refuses to publish a version whose bundle is not in storage", () => {
+    const body = bodyOf("publish_plugin_version");
+    expect(body).toMatch(/from storage\.objects o/);
+    expect(body).toMatch(/is not in storage/);
+  });
+
+  it("fails the apply when the applying role cannot bypass RLS", () => {
+    expect(SQL).toMatch(/rolbypassrls or rolsuper/);
   });
 
   it.each([
@@ -130,6 +153,10 @@ describe("marketplace publish-UI migration", () => {
     const body = bodyOf("validate_manifest");
     expect(body).toMatch(/not in \('file\.read', 'file\.write', 'storage', 'engine:matlab'\)/);
     expect(body).toMatch(/%\(2e\|2f\|5c\)/);
+    // Mirrors the SDK's ID_RE / SEMVER_RE and demands a numeric format.
+    expect(body).toMatch(/\^\[a-z0-9\]\+\(\[-\.\]\[a-z0-9\]\+\)\*\$/);
+    expect(body).toMatch(/jsonb_typeof\(p_manifest->'format'\) is distinct from 'number'/);
+    expect(body).toMatch(/p_manifest \? 'permissions'/);
   });
 
   it("caps the plugins bucket at 25 MiB", () => {

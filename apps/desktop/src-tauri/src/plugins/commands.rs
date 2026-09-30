@@ -171,6 +171,7 @@ pub struct PackedBundleInfo {
     pub manifest: serde_json::Value,
     pub entries: Vec<String>,
     pub texts: std::collections::BTreeMap<String, String>,
+    pub unscanned: Vec<String>,
     pub warnings: Vec<String>,
     pub largest: Vec<(String, u64)>,
 }
@@ -181,7 +182,9 @@ pub struct PackedBundleInfo {
 /// All the rules (what ships, forward-slash entries, determinism, symlink refusal,
 /// the size ceiling) live in `plugin_host::pack`, which is unit-tested without a
 /// WebView. This is the thin glue: validate the path, call it, stage the bytes.
-#[tauri::command]
+// `async`: walking, zipping and hashing up to 200 MB of input must not run on the
+// main thread, where a synchronous command would freeze the whole window.
+#[tauri::command(async)]
 pub fn pack_plugin_bundle(app: AppHandle, dir: String) -> Result<PackedBundleInfo, String> {
     let root = std::path::PathBuf::from(&dir);
     if !root.is_dir() {
@@ -209,6 +212,7 @@ pub fn pack_plugin_bundle(app: AppHandle, dir: String) -> Result<PackedBundleInf
         manifest,
         entries: packed.entries,
         texts: packed.texts,
+        unscanned: packed.unscanned,
         warnings: packed.warnings,
         largest: packed.largest,
     })
@@ -220,6 +224,7 @@ pub fn pack_plugin_bundle(app: AppHandle, dir: String) -> Result<PackedBundleInf
 pub struct InspectedBundle {
     pub manifest: serde_json::Value,
     pub texts: std::collections::BTreeMap<String, String>,
+    pub unscanned: Vec<String>,
 }
 
 /// Read a published bundle's manifest and sources straight out of Storage, so a
@@ -249,11 +254,11 @@ pub async fn inspect_plugin_bundle(
         return Err("sha256 mismatch (bundle tampered or corrupt)".into());
     }
 
-    let (manifest_json, texts) = pack::read_zip_texts(&bytes)?;
+    let (manifest_json, texts, unscanned) = pack::read_zip_texts(&bytes)?;
     let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
         .map_err(|e| format!("manifest.json in the bundle is not valid JSON: {e}"))?;
 
-    Ok(InspectedBundle { manifest, texts })
+    Ok(InspectedBundle { manifest, texts, unscanned })
 }
 
 /// Delete a staged bundle once its submission has landed. Best-effort.

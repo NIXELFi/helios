@@ -7,7 +7,7 @@
 // that would only fail: withdraw and yank belong to the version's author or a
 // reviewer for the subteam; recommending belongs to a reviewer.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
@@ -35,16 +35,24 @@ const STATUS: Record<ReviewStatus, { label: string; className: string }> = {
 };
 
 export function MyPluginsView({
+  reloadToken = 0,
   onHelp,
   onAdd,
   onChanged,
 }: {
+  /** Changes whenever the module refetches (Refresh, a publish): reload too. */
+  reloadToken?: number;
   onHelp: (t: HelpTopic) => void;
   onAdd: () => void;
   /** Something changed that Browse / Installed also show (a yank, a recommend). */
   onChanged?: () => void;
 }) {
   const my = useMyPlugins();
+  const { refetch: refetchMine } = my;
+  const firstToken = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken !== firstToken.current) refetchMine();
+  }, [reloadToken, refetchMine]);
   const user = useUser();
   const { can } = useMyCapabilities();
   const { data: subteams } = useSubteams();

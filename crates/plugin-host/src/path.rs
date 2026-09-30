@@ -16,6 +16,9 @@ pub fn is_safe_segment(s: &str) -> bool {
     !s.is_empty()
         && s != "."
         && s != ".."
+        // Windows silently drops a trailing dot, so `aero.t.` would resolve to
+        // the same directory as `aero.t` and one plugin could replace another.
+        && !s.ends_with('.')
         && s.len() <= 200
         && s
             .chars()
@@ -70,6 +73,8 @@ mod tests {
         assert!(!is_safe_segment(".."));
         assert!(!is_safe_segment("a/b"));
         assert!(!is_safe_segment("a\\b"));
+        // Windows drops a trailing dot: `aero.t.` would alias `aero.t`.
+        assert!(!is_safe_segment("aero.t."));
         assert!(!is_safe_segment("a\0b"));
         assert!(!is_safe_segment("a b")); // space not in charset
         assert!(!is_safe_segment("a:b")); // drive-letter-ish

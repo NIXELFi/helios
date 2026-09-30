@@ -157,15 +157,30 @@ describe("ReviewView", () => {
     expect(await screen.findByRole("button", { name: /open preview/i })).toBeInTheDocument();
   });
 
-  it("refreshes Browse and Installed after a decision, and after a failed one", async () => {
+  it("refreshes Browse and Installed after a decision", async () => {
     const onDecided = vi.fn();
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
     await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(1));
+    expect(fns.refetch).toHaveBeenCalledTimes(1);
+  });
 
+  it("keeps the card (and so its error) on screen when a decision fails", async () => {
+    const onDecided = vi.fn();
     fns.review.mockImplementationOnce(() => Promise.reject(new Error("only a pending version can be reviewed")));
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
-    await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fns.review).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fns.refetch).not.toHaveBeenCalled();
+    expect(onDecided).not.toHaveBeenCalled();
+  });
+
+  it("reloads the queue when the module refetches", () => {
+    const { rerender } = render(<ReviewView reloadToken={0} available={AVAILABLE} onHelp={() => {}} />);
+    expect(fns.refetch).not.toHaveBeenCalled();
+    rerender(<ReviewView reloadToken={1} available={AVAILABLE} onHelp={() => {}} />);
+    expect(fns.refetch).toHaveBeenCalledTimes(1);
   });
 
   it("blocks approving your own submission and explains why", () => {

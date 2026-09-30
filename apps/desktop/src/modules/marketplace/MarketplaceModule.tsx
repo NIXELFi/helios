@@ -69,9 +69,13 @@ export function MarketplaceModule() {
   const { rows: installRows, loading: installsLoading, refetch: refetchInstalls } = useMyInstalls();
   // Every mutation changes both lists (an install, a yank, an approval), so one
   // refetch refreshes both.
+  // Bumped by every refetch so the tabs that own their own data (My plugins,
+  // Review) reload too: after a publish, and on the header's Refresh.
+  const [reloadToken, setReloadToken] = useState(0);
   const refetch = useCallback(() => {
     refetchAvailable();
     refetchInstalls();
+    setReloadToken((t) => t + 1);
   }, [refetchAvailable, refetchInstalls]);
   const { install, installing, error: installError } = useInstall();
   const { uninstall, removing, error: uninstallError } = useUninstall();
@@ -184,6 +188,15 @@ export function MarketplaceModule() {
     setBusyId(p.id);
     try {
       const loaded = await loadPlugin(baseUrl as string);
+      // The server records an install before the download, so a failed
+      // download leaves the row naming a version the disk does not have.
+      // Never run the old bytes under the new label.
+      if (!DEMO && p.installedVersion && loaded.manifest.version !== p.installedVersion) {
+        throw new Error(
+          `this computer has v${loaded.manifest.version}, not v${p.installedVersion}. ` +
+            (p.isPreview ? "Run Test-drive again from Review." : "Install it again to finish the update."),
+        );
+      }
       setLaunch(loaded);
     } catch (e) {
       setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) });
@@ -406,12 +419,14 @@ export function MarketplaceModule() {
               />
             ) : tab === "mine" ? (
               <MyPluginsView
+                reloadToken={reloadToken}
                 onHelp={help.openHelp}
                 onAdd={() => setWizardOpen(true)}
                 onChanged={refetch}
               />
             ) : (
               <ReviewView
+                reloadToken={reloadToken}
                 available={plugins}
                 installed={installed}
                 onHelp={help.openHelp}

@@ -37,6 +37,8 @@ export interface PackedBundle {
   manifest: PluginManifest;
   entries: string[];
   texts: Record<string, string>;
+  /** Scannable files too large to read; see preflight(). */
+  unscanned?: string[];
   warnings: string[];
   largest: [string, number][];
 }
@@ -110,7 +112,7 @@ export function usePublish() {
       setState((s) => ({ ...s, phase: "packing", busy: true, error: null }));
       try {
         const packed = (await invoke("pack_plugin_bundle", { dir })) as PackedBundle;
-        const report = preflight(packed.texts, packed.manifest);
+        const report = preflight(packed.texts, packed.manifest, packed.unscanned ?? []);
 
         // What did the last APPROVED version of this plugin ask for? Absent means
         // this is a brand-new plugin and every permission is new by definition.

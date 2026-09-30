@@ -32,8 +32,12 @@ pub const MAX_BUNDLE_BYTES: u64 = 25 * 1024 * 1024;
 /// compressing them. Mirrors `bundle::MAX_TOTAL_UNCOMPRESSED`.
 const MAX_TOTAL_INPUT: u64 = 200 * 1024 * 1024;
 
-/// Per-file cap on what we will decode as text for the compliance scan.
-const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
+/// Per-file cap on what we will decode as text for the compliance scan. Generous
+/// on purpose: a single-file build inlines its whole framework into the entry
+/// HTML (Plotly alone is ~3.6 MB), and a file that is not scanned is a file the
+/// scan cannot vouch for. Anything larger is reported in `unscanned`, never
+/// silently skipped.
+const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Directory names that never belong in a bundle. Matched against ANY path
 /// component, so `foo/node_modules/bar` is excluded too.
@@ -66,6 +70,9 @@ pub struct PackedBundle {
     /// Decoded text of every scannable entry, keyed by entry name. Feeds the
     /// pre-flight scan without a second pass over the disk.
     pub texts: BTreeMap<String, String>,
+    /// Scannable entries that could NOT be scanned (over `MAX_TEXT_BYTES`). The
+    /// pre-flight must say so rather than show green over code it never read.
+    pub unscanned: Vec<String>,
     /// Raw `manifest.json` text.
     pub manifest_json: String,
     /// Non-fatal observations worth showing the author.
@@ -145,7 +152,15 @@ pub fn pack_dir(root: &Path) -> Result<PackedBundle, String> {
 
     match &entry_root {
         Some(dir) => collect(&root.join(dir), root, &mut files, &mut total_input, &mut warnings)?,
-        None => collect(root, root, &mut files, &mut total_input, &mut warnings)?,
+        None => {
+            warnings.push(
+                "manifest.entry sits at the top of the plugin folder, so the whole folder is packed \
+                 (except src/, node_modules/ and dotfiles). Point entry into a build folder such as \
+                 dist/ so only the built plugin ships."
+                    .to_string(),
+            );
+            collect(root, root, &mut files, &mut total_input, &mut warnings)?
+        }
     }
 
     // An icon living outside the entry directory still has to ship.
@@ -187,6 +202,7 @@ pub fn pack_dir(root: &Path) -> Result<PackedBundle, String> {
     largest.truncate(5);
 
     let mut texts = BTreeMap::new();
+    let mut unscanned: Vec<String> = Vec::new();
     let mut zip_buf = Vec::new();
     {
         let mut w = zip::ZipWriter::new(Cursor::new(&mut zip_buf));
@@ -202,9 +218,13 @@ pub fn pack_dir(root: &Path) -> Result<PackedBundle, String> {
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("could not read {name}: {e}"))?;
 
-            if is_text_entry(name) && bytes.len() as u64 <= MAX_TEXT_BYTES {
-                if let Ok(s) = String::from_utf8(bytes.clone()) {
-                    texts.insert(name.clone(), s);
+            if is_text_entry(name) {
+                if bytes.len() as u64 <= MAX_TEXT_BYTES {
+                    // Lossy, not strict: one stray non-UTF-8 byte must not take a
+                    // whole bundle file out of the scan.
+                    texts.insert(name.clone(), String::from_utf8_lossy(&bytes).into_owned());
+                } else {
+                    unscanned.push(name.clone());
                 }
             }
 
@@ -237,6 +257,7 @@ pub fn pack_dir(root: &Path) -> Result<PackedBundle, String> {
         sha256,
         entries,
         texts,
+        unscanned,
         manifest_json,
         warnings,
         largest,
@@ -247,12 +268,15 @@ pub fn pack_dir(root: &Path) -> Result<PackedBundle, String> {
 /// without writing anything to disk. This is how a reviewer re-runs the
 /// compliance scan against the bytes that were actually uploaded, rather than
 /// trusting the report the author submitted alongside them.
-pub fn read_zip_texts(bytes: &[u8]) -> Result<(String, BTreeMap<String, String>), String> {
+pub fn read_zip_texts(
+    bytes: &[u8],
+) -> Result<(String, BTreeMap<String, String>, Vec<String>), String> {
     let mut zip =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a valid zip: {e}"))?;
 
     let mut manifest_json = String::new();
     let mut texts = BTreeMap::new();
+    let mut unscanned: Vec<String> = Vec::new();
     let mut total: u64 = 0;
 
     for i in 0..zip.len() {
@@ -278,23 +302,26 @@ pub fn read_zip_texts(bytes: &[u8]) -> Result<(String, BTreeMap<String, String>)
             .read_to_end(&mut buf)
             .map_err(|e| e.to_string())?;
         if buf.len() as u64 > MAX_TEXT_BYTES {
-            continue; // too big to be source we care about
+            // Reported, not dropped: the reviewer must see that this file was
+            // never scanned rather than a clean report that silently skipped it.
+            unscanned.push(name);
+            continue;
         }
         total += buf.len() as u64;
 
-        if let Ok(s) = String::from_utf8(buf) {
-            if name == "manifest.json" {
+        if name == "manifest.json" {
+            if let Ok(s) = String::from_utf8(buf) {
                 manifest_json = s;
-            } else {
-                texts.insert(name, s);
             }
+        } else {
+            texts.insert(name, String::from_utf8_lossy(&buf).into_owned());
         }
     }
 
     if manifest_json.is_empty() {
         return Err("the bundle has no manifest.json".into());
     }
-    Ok((manifest_json, texts))
+    Ok((manifest_json, texts, unscanned))
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +353,7 @@ fn collect(
 
         if meta.is_dir() {
             if EXCLUDED_DIRS.contains(&name.as_str())
+                || name.starts_with('.')
                 || (dir == root && ROOT_ONLY_EXCLUDED_DIRS.contains(&name.as_str()))
             {
                 continue;
@@ -334,7 +362,9 @@ fn collect(
             continue;
         }
 
-        if EXCLUDED_FILES.contains(&name.as_str()) || name.ends_with(".map") {
+        // Dotfiles never ship: `.env` files, editor and tool config. Matters most
+        // when the entry sits at the project root and the whole root is packed.
+        if EXCLUDED_FILES.contains(&name.as_str()) || name.ends_with(".map") || name.starts_with('.') {
             continue;
         }
 
@@ -541,6 +571,53 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_text_file_too_large_to_scan_instead_of_dropping_it() {
+        let d = tempfile::tempdir().unwrap();
+        project(d.path());
+        // Highly compressible, so the bundle stays well under the size ceiling.
+        let big = vec![b'a'; (MAX_TEXT_BYTES + 1) as usize];
+        write(d.path(), "dist/vendor.js", &big);
+
+        let packed = pack_dir(d.path()).unwrap();
+
+        assert_eq!(packed.unscanned, vec!["dist/vendor.js".to_string()]);
+        assert!(!packed.texts.contains_key("dist/vendor.js"));
+        let (_, _, unscanned) = read_zip_texts(&packed.zip).unwrap();
+        assert_eq!(unscanned, vec!["dist/vendor.js".to_string()]);
+    }
+
+    #[test]
+    fn scans_a_file_with_a_stray_non_utf8_byte() {
+        let d = tempfile::tempdir().unwrap();
+        project(d.path());
+        write(d.path(), "dist/app.js", b"fetch('/x');\xff");
+
+        let packed = pack_dir(d.path()).unwrap();
+
+        assert!(packed.texts["dist/app.js"].contains("fetch('/x')"));
+    }
+
+    #[test]
+    fn never_packs_dotfiles_even_from_the_project_root() {
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            "manifest.json",
+            br#"{"format":1,"id":"aero.test","name":"T","version":"1.0.0","entry":"index.html","sdk":"^1.0.0","permissions":[]}"#,
+        );
+        write(d.path(), "index.html", b"<!doctype html>");
+        write(d.path(), ".env", b"SECRET=1");
+        write(d.path(), ".git/config", b"x");
+        write(d.path(), ".vscode/settings.json", b"{}");
+
+        let packed = pack_dir(d.path()).unwrap();
+
+        assert!(packed.entries.contains(&"index.html".to_string()), "{:?}", packed.entries);
+        assert!(!packed.entries.iter().any(|e| e.starts_with('.') || e.contains("/.")), "{:?}", packed.entries);
+        assert!(packed.warnings.iter().any(|w| w.contains("whole folder is packed")));
+    }
+
+    #[test]
     fn keeps_a_src_folder_inside_the_build_output() {
         let d = tempfile::tempdir().unwrap();
         project(d.path());
@@ -654,7 +731,8 @@ mod tests {
         write(d.path(), "dist/logo.png", &[0x89, 0x50, 0x4e, 0x47]);
 
         let packed = pack_dir(d.path()).unwrap();
-        let (manifest, texts) = read_zip_texts(&packed.zip).unwrap();
+        let (manifest, texts, unscanned) = read_zip_texts(&packed.zip).unwrap();
+        assert!(unscanned.is_empty());
 
         assert!(manifest.contains("\"id\":\"aero.test\""));
         assert_eq!(texts["dist/app.js"], "console.log(1)");

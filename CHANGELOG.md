@@ -70,7 +70,15 @@ follow [semver](https://semver.org/).
 - Marketplace (security): the function that signs plugin bundles could be called
   by any signed-in account; it is now reachable only from the publish step.
   Storage also enforces the 25 MB bundle cap itself, and a bundle that already
-  exists under the same fingerprint is checked byte-for-byte before it is used.
+  exists under the same fingerprint is checked byte-for-byte before it is used,
+  and the server refuses to publish a version whose bundle is not in storage.
+- Marketplace: the plugin check no longer skips large files. A single-file build
+  that inlines a big library used to go unread and still show all green; files
+  over 16 MB are now named in the report, and an unread entry page blocks.
+- Marketplace: packing a plugin no longer freezes Helios while it zips, and
+  dotfiles such as `.env` are never packed.
+- Marketplace: a failed Approve or Reject stays on screen with its error instead
+  of the card silently reloading, and Refresh also reloads My plugins and Review.
 
 ## [5.13.5] - 2026-09-29
 

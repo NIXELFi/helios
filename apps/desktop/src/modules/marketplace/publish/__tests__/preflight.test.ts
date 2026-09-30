@@ -154,3 +154,19 @@ describe("preflight — external files the sandbox never loads", () => {
     expect(r.warnings.some((w) => w.code === "external-asset")).toBe(true);
   });
 });
+
+describe("preflight — files too large to scan", () => {
+  it("blocks when the entry page itself was not scanned, and claims nothing passed", () => {
+    const r = preflight({ "dist/app.js": "1" }, manifest, ["dist/index.html"]);
+    expect(r.ok).toBe(false);
+    expect(r.errors.find((e) => e.code === "unscanned")?.title).toMatch(/entry page is too large/i);
+    expect(r.passed.some((p) => p.code === "no-network")).toBe(false);
+  });
+
+  it("only warns about another unscanned file", () => {
+    const r = preflight(cleanBundle, manifest, ["dist/vendor.js"]);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.code === "unscanned" && w.path === "dist/vendor.js")).toBe(true);
+    expect(r.passed.some((p) => p.code === "no-network")).toBe(false);
+  });
+});

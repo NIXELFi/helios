@@ -43,6 +43,16 @@ vi.mock("../../org/data/useOrgData", () => ({
   useSubteams: () => ({ data: [], refetch: () => {} }),
 }));
 
+const loader = vi.hoisted(() => ({ version: "1.0.0" }));
+vi.mock("../runtime/loader", () => ({
+  installedBaseUrl: (id: string) => `plugin://${id}`,
+  loadPlugin: async () => ({
+    manifest: { id: "m", name: "M", version: loader.version, entry: "index.html", format: 1, sdk: "^1.0.0", permissions: [] },
+    baseUrl: "plugin://m",
+    entryHtml: "<!doctype html>",
+  }),
+}));
+
 import { MarketplaceModule } from "../MarketplaceModule";
 
 afterEach(cleanup);
@@ -136,5 +146,16 @@ describe("MarketplaceModule — install consent gate", () => {
     expect(screen.getByText("Bravo")).toBeTruthy();
     // Alpha is not installed, so it should not appear on the Installed tab.
     expect(screen.queryByText("Alpha")).toBeNull();
+  });
+});
+
+describe("MarketplaceModule — opening an installed add-on", () => {
+  it("refuses to run bytes whose version does not match the recorded install", async () => {
+    loader.version = "1.0.0";
+    mocks.state.plugins = [makePlugin({ id: "m", name: "M", installedVersion: "1.2.0", version: "1.2.0" })];
+    render(<MarketplaceModule />);
+    fireEvent.click(screen.getByRole("button", { name: /installed/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^open$/i }));
+    expect(await screen.findByText(/this computer has v1\.0\.0, not v1\.2\.0/i)).toBeTruthy();
   });
 });

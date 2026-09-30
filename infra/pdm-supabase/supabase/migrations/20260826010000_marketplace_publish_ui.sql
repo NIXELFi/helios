@@ -21,6 +21,21 @@
 -- server-side — the UI gating is a convenience, never the boundary.
 
 -- ---------------------------------------------------------------------------
+-- 0. Preflight. publish_plugin_version (10b) now reads storage.objects from a
+--    SECURITY DEFINER function, which only sees rows if the owning role bypasses
+--    RLS (Supabase's `postgres` does; the SQL editor relies on it). Fail the
+--    apply loudly rather than ship a publish RPC that can never find a bundle.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from pg_roles where rolname = current_user and (rolbypassrls or rolsuper)
+  ) then
+    raise exception 'apply this migration as a role that bypasses RLS (e.g. postgres); % does not', current_user;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 1. Widen the review_status check.
 --    The original constraint is a column-level check created inline by
 --    20260626000000_marketplace_schema.sql, so Postgres named it
@@ -162,9 +177,13 @@ begin
     raise exception 'authentication required';
   end if;
 
+  -- FOR UPDATE: review_plugin_version locks the same row, so a concurrent
+  -- approve and withdraw serialise instead of the later write silently
+  -- overwriting the earlier one.
   select pv.review_status into v_status
   from marketplace.plugin_versions pv
-  where pv.plugin_id = p_plugin_id and pv.version = p_version;
+  where pv.plugin_id = p_plugin_id and pv.version = p_version
+  for update;
   if not found then
     raise exception 'no such version: %@%', p_plugin_id, p_version;
   end if;
@@ -181,7 +200,8 @@ begin
 
   update marketplace.plugin_versions pv
     set review_status = 'withdrawn'
-    where pv.plugin_id = p_plugin_id and pv.version = p_version;
+    where pv.plugin_id = p_plugin_id and pv.version = p_version
+      and pv.review_status = 'pending';
 
   return query
     select pv.plugin_id, pv.version, pv.review_status
@@ -215,7 +235,8 @@ begin
 
   select pv.review_status into v_status
   from marketplace.plugin_versions pv
-  where pv.plugin_id = p_plugin_id and pv.version = p_version;
+  where pv.plugin_id = p_plugin_id and pv.version = p_version
+  for update;
   if not found then
     raise exception 'no such version: %@%', p_plugin_id, p_version;
   end if;
@@ -236,7 +257,8 @@ begin
           when p_reason is null or length(trim(p_reason)) = 0 then pv.review_notes
           else concat_ws(E'\n', pv.review_notes, 'Yanked by the author: ' || p_reason)
         end
-    where pv.plugin_id = p_plugin_id and pv.version = p_version;
+    where pv.plugin_id = p_plugin_id and pv.version = p_version
+      and pv.review_status = 'approved';
 
   update marketplace.plugins p
     set latest_version = (
@@ -490,6 +512,103 @@ end $$;
 grant execute on function marketplace.review_plugin_version(text, text, text, text, jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 10b. publish_plugin_version — redefined to refuse a version whose bundle is not
+--      actually in the `plugins` bucket (or is a different size). A version row
+--      is what installs and the reviewer's scan download, so pointing one at a
+--      missing or squatted object would only fail later, for everyone. Body is
+--      the 20260626000300 original plus the storage check.
+-- ---------------------------------------------------------------------------
+create or replace function marketplace.publish_plugin_version(
+  p_manifest jsonb,
+  p_sha256   text,
+  p_bytes    bigint,
+  p_subteam  uuid default null
+) returns table (
+  plugin_id text, version text, review_status text,
+  bundle_sha256 text, signature text, signing_key_id text, published_at timestamptz
+)
+language plpgsql volatile security definer
+set search_path = marketplace, pm, public as $$
+#variable_conflict use_column
+declare
+  v_uid     uuid := auth.uid();
+  v_id      text := p_manifest->>'id';
+  v_version text := p_manifest->>'version';
+  v_name    text := p_manifest->>'name';
+  v_perms   text[];
+  v_subteam uuid;
+  v_sig     record;
+  v_msg     bytea;
+  v_stored  bigint;
+begin
+  if v_uid is null then
+    raise exception 'authentication required';
+  end if;
+  perform marketplace.validate_manifest(p_manifest);
+
+  if p_sha256 is null or p_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'bundle_sha256 must be a 64-char hex digest';
+  end if;
+  if p_bytes is null or p_bytes <= 0 or p_bytes > 26214400 then
+    raise exception 'bundle_bytes out of range (1..25MiB): %', coalesce(p_bytes::text, '<null>');
+  end if;
+
+  -- The bytes must already be uploaded. Storage records the object size in
+  -- metadata; when it is there it must match what the version will claim.
+  select coalesce((o.metadata->>'size')::bigint, -1) into v_stored
+  from storage.objects o
+  where o.bucket_id = 'plugins' and o.name = lower(p_sha256)
+  limit 1;
+  if not found then
+    raise exception 'bundle % is not in storage; upload it before publishing', lower(p_sha256);
+  end if;
+  if v_stored <> -1 and v_stored <> p_bytes then
+    raise exception 'bundle % in storage is % bytes, not %', lower(p_sha256), v_stored, p_bytes;
+  end if;
+
+  v_perms := array(select jsonb_array_elements_text(coalesce(p_manifest->'permissions', '[]'::jsonb)));
+
+  select subteam into v_subteam from marketplace.plugins where id = v_id;
+  if found then
+    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
+      raise exception 'insufficient privilege to publish to plugin % (subteam %)', v_id, v_subteam;
+    end if;
+    update marketplace.plugins
+      set name = v_name, updated_at = now()
+      where id = v_id;
+  else
+    v_subteam := p_subteam;
+    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
+      raise exception 'insufficient privilege to publish a new plugin to subteam %', coalesce(v_subteam::text, '<org>');
+    end if;
+    insert into marketplace.plugins (id, name, subteam, created_by)
+      values (v_id, v_name, v_subteam, v_uid);
+  end if;
+
+  if exists (select 1 from marketplace.plugin_versions pv
+             where pv.plugin_id = v_id and pv.version = v_version) then
+    raise exception 'version % of % already exists (versions are immutable)', v_version, v_id;
+  end if;
+
+  v_msg := marketplace.signing_message(v_id, v_version, p_sha256, p_bytes);
+  select * into v_sig from marketplace.sign_message(v_msg);
+
+  insert into marketplace.plugin_versions (
+    plugin_id, version, manifest, permissions, bundle_sha256, bundle_bytes,
+    review_status, signature, sig_alg, signing_key_id, published_by
+  ) values (
+    v_id, v_version, p_manifest, v_perms, lower(p_sha256), p_bytes,
+    'pending', v_sig.signature, v_sig.sig_alg, v_sig.signing_key_id, v_uid
+  );
+
+  return query
+    select pv.plugin_id, pv.version, pv.review_status,
+           pv.bundle_sha256, pv.signature, pv.signing_key_id, pv.published_at
+    from marketplace.plugin_versions pv
+    where pv.plugin_id = v_id and pv.version = v_version;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 11. my_installed_plugins — the caller's installs, built from THEIR install
 --     rows rather than from the list of currently-offered plugins. Yanking a
 --     plugin's only approved version takes it out of list_available_plugins, but
@@ -559,17 +678,27 @@ begin
   if jsonb_typeof(p_manifest) is distinct from 'object' then
     raise exception 'manifest must be a JSON object';
   end if;
-  if (p_manifest->>'format') is distinct from '1' then
-    raise exception 'manifest.format must be 1';
+  -- Mirrors packages/plugin-sdk/src/manifest.ts (SUPPORTED_FORMAT, ID_RE,
+  -- SEMVER_RE) so nothing the desktop loader would refuse can be published. The
+  -- id and version each become a directory name in the install cache, so a
+  -- trailing dot (Windows drops it, colliding with another plugin's folder) or a
+  -- '/' in a pre-release tag must never get this far.
+  if jsonb_typeof(p_manifest->'format') is distinct from 'number'
+     or (p_manifest->>'format') is distinct from '1' then
+    raise exception 'manifest.format must be the number 1';
   end if;
-  if v_id is null or v_id !~ '^[a-z0-9][a-z0-9._-]*$' or length(v_id) > 200 then
+  if v_id is null or v_id !~ '^[a-z0-9]+([-.][a-z0-9]+)*$' or length(v_id) > 200 then
     raise exception 'manifest.id is missing or invalid: %', coalesce(v_id, '<null>');
   end if;
   if v_name is null or length(trim(v_name)) = 0 then
     raise exception 'manifest.name is required';
   end if;
-  if v_version is null or v_version !~ '^[0-9]+\.[0-9]+\.[0-9]+([.-].+)?$' then
+  if v_version is null or v_version !~ '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+     or right(v_version, 1) = '.' then
     raise exception 'manifest.version must be semver: %', coalesce(v_version, '<null>');
+  end if;
+  if not (p_manifest ? 'permissions') then
+    raise exception 'manifest.permissions is required (use [] for none)';
   end if;
   if v_entry is null or length(trim(v_entry)) = 0
      or left(v_entry, 1) = '/'
@@ -652,13 +781,19 @@ create policy "marketplace_plugins_read_own_upload" on storage.objects
 --     signing_message, validate_manifest, can_manage_version) are reachable only
 --     from the SECURITY DEFINER functions that call them as the owner.
 --     plugin_subteam stays granted: RLS policies call it as the querying user.
+--     service_role (the backend admin key) gets the same API surface it had
+--     through PUBLIC, so admin scripts keep working.
 -- ---------------------------------------------------------------------------
 revoke execute on all functions in schema marketplace from public, anon;
 revoke execute on function marketplace.sign_message(bytea) from authenticated;
 revoke execute on function marketplace.signing_message(text, text, text, bigint) from authenticated;
 revoke execute on function marketplace.validate_manifest(jsonb) from authenticated;
 revoke execute on function marketplace.can_manage_version(uuid, text, text) from authenticated;
-alter default privileges in schema marketplace revoke execute on functions from public;
+-- NOTE: `alter default privileges in schema marketplace revoke ... from public`
+-- would be a no-op (per-schema defaults can only ADD privileges), and the global
+-- form would change every future function in every schema. So each future
+-- migration that creates a marketplace function must revoke PUBLIC itself;
+-- tests/marketplace-function-grants.structure.test.ts enforces that.
 
 grant execute on function
   marketplace.plugin_subteam(text),
@@ -678,4 +813,4 @@ grant execute on function
   marketplace.install_plugin_for_review(text, text, boolean),
   -- Called from a storage.objects policy, which runs as the uploader.
   marketplace.can_publish_anywhere(uuid)
-to authenticated;
+to authenticated, service_role;

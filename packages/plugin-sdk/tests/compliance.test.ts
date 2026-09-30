@@ -99,6 +99,23 @@ describe("scanBundle — external references in the entry HTML", () => {
     expect(f).toHaveLength(0);
   });
 
+  it("ignores tag-like text inside an inline script (an inlined library)", () => {
+    const f = ext(
+      // Bundlers escape a closing tag inside a script as <\/script>; a literal one
+      // would end the script in the browser too.
+      `<script>const tpl = '<script src="x.js"><\\/script><link rel="stylesheet" href="a.css">';</script>`,
+    );
+    expect(f).toHaveLength(0);
+  });
+
+  it("errors on data: and blob: scripts and stylesheets, which the CSP blocks too", () => {
+    const f = ext(
+      '<script src="data:text/javascript,alert(1)"></script>' +
+        '<link rel="stylesheet" href="data:text/css,body{}">',
+    );
+    expect(f.filter((x) => x.level === "error")).toHaveLength(2);
+  });
+
   it("only inspects the manifest's entry document", () => {
     const f = ext("<!doctype html>", { "dist/other.html": '<script src="x.js"></script>' });
     expect(f).toHaveLength(0);

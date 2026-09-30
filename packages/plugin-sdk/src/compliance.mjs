@@ -54,13 +54,15 @@ function isScannable(path) {
 // errors (the plugin cannot work); images and CSS url()s are warnings (it works,
 // minus the picture).
 const EXTERNAL_REF_RULES = [
+  // Scripts and stylesheets: ANY src/href fails, data: and blob: included, because
+  // the CSP's script-src and style-src allow only 'unsafe-inline'.
   {
-    re: /<script\b[^>]*\bsrc\s*=\s*["']?(?!data:|blob:)[^"'\s>]+/i,
+    re: /<script\b[^>]*\bsrc\s*=\s*["']?[^"'\s>]+/i,
     level: "error",
     msg: "the entry HTML loads a script by URL (`<script src=...>`). Plugins run from the entry HTML alone, so it will never load and the page stays blank. Inline the script: build with a single-file setup (e.g. vite-plugin-singlefile).",
   },
   {
-    re: /<link\b(?=[^>]*\brel\s*=\s*["']?[^"'>]*\b(?:stylesheet|modulepreload)\b)[^>]*\bhref\s*=\s*["']?(?!data:|blob:)[^"'\s>]+/i,
+    re: /<link\b(?=[^>]*\brel\s*=\s*["']?[^"'>]*\b(?:stylesheet|modulepreload)\b)[^>]*\bhref\s*=\s*["']?[^"'\s>]+/i,
     level: "error",
     msg: "the entry HTML links a stylesheet or module by URL (`<link href=...>`). It will never load. Inline your CSS/JS into the entry HTML with a single-file build.",
   },
@@ -77,6 +79,13 @@ const EXTERNAL_REF_RULES = [
     msg: "the entry HTML uses a CSS url(...) that is not a data: URI (a font, background image or @import). It will not load in the sandbox. Embed it as a data: URI.",
   },
 ];
+
+/** The entry HTML with every inline script's BODY removed (tags kept). The
+ *  external-reference rules are about the page's markup; an inlined library that
+ *  merely contains the text `<script src="` in a string must not fail the build. */
+function markupOnly(html) {
+  return html.replace(/(<script\b[^>]*>)[\s\S]*?(<\/script\s*>)/gi, "$1$2");
+}
 
 function normalizeEntry(entry) {
   return typeof entry === "string" ? entry.replace(/^\.?\//, "") : null;
@@ -98,8 +107,9 @@ export function scanBundle(files, manifest) {
   for (const [path, content] of Object.entries(files)) {
     if (!isScannable(path) || typeof content !== "string") continue;
     if (entry && path.replace(/^\.?\//, "") === entry) {
+      const markup = markupOnly(content);
       for (const rule of EXTERNAL_REF_RULES) {
-        if (rule.re.test(content)) {
+        if (rule.re.test(markup)) {
           findings.push({ level: rule.level, kind: "external-asset", message: rule.msg, path });
         }
       }

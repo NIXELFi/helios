@@ -187,11 +187,11 @@ export function useReviewInspect(): {
           signedUrl,
           expectedSha256: item.bundleSha256,
           bundleBytes: item.bundleBytes,
-        })) as { manifest: unknown; texts: Record<string, string> };
+        })) as { manifest: unknown; texts: Record<string, string>; unscanned?: string[] };
 
         // Scan the bundle's OWN manifest, not the separately-submitted DB copy:
         // a drift between the two is exactly what this is here to catch.
-        const report = preflight(inspected.texts, inspected.manifest);
+        const report = preflight(inspected.texts, inspected.manifest, inspected.unscanned ?? []);
         setReports((r) => ({
           ...r,
           [key]: { report, disagrees: reportsDisagree(item.reviewReport, report) },
