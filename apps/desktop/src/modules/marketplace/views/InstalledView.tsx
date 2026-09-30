@@ -44,7 +44,11 @@ export function InstalledView({
   return (
     <ul className="space-y-2">
       {plugins.map((p) => {
-        const updatable = hasUpdate(p);
+        // A preview's "update" is swapping it for the approved release, offered
+        // below as its own button; the semver comparison does not apply to it.
+        const updatable = !p.isPreview && hasUpdate(p);
+        const swapForApproved = p.isPreview === true && p.hasApprovedVersion === true;
+        const yanked = !p.isPreview && p.installedStatus === "yanked";
         const busy = busyId === p.id;
         return (
           <li
@@ -71,7 +75,18 @@ export function InstalledView({
                 )}
               </div>
               <div className="mt-0.5 text-[11px] text-helios-dim">
+                {p.isPreview && (
+                  <span className="mr-1.5 rounded-sm border border-helios-warn/50 bg-helios-warn/15 px-1 py-px text-[9px] font-semibold uppercase tracking-wider text-helios-warn">
+                    {previewLabel(p.installedStatus)}
+                  </span>
+                )}
                 Installed <span className="font-mono">v{p.installedVersion}</span>
+                {yanked && (
+                  <span className="text-helios-warn">
+                    {" "}
+                    · pulled by its author: it keeps working here, but can’t be installed again
+                  </span>
+                )}
                 {updatable && (
                   <span className="text-asu-gold">
                     {" "}
@@ -82,6 +97,16 @@ export function InstalledView({
             </button>
 
             <div className="flex shrink-0 items-center gap-2">
+              {swapForApproved && (
+                <button
+                  type="button"
+                  onClick={() => onUpdate(p)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-sm bg-asu-gold px-2.5 py-1.5 text-xs font-semibold text-helios-on-gold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                >
+                  <IconArrowUp size={13} /> Install v{p.version}
+                </button>
+              )}
               {updatable && (
                 <button
                   type="button"
@@ -104,7 +129,8 @@ export function InstalledView({
                 type="button"
                 onClick={() => onUninstall(p)}
                 disabled={busy}
-                aria-label={`Uninstall ${p.name}`}
+                aria-label={p.isPreview ? `Remove the ${p.name} preview` : `Uninstall ${p.name}`}
+                title={p.isPreview ? "Remove this test-drive build (your saved data is kept)" : undefined}
                 className="inline-flex items-center gap-1 rounded-sm border border-helios-line px-2 py-1.5 text-xs text-helios-dim transition-colors hover:border-helios-danger/50 hover:text-helios-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-helios-danger disabled:opacity-50"
               >
                 <IconTrash size={13} />
@@ -115,4 +141,18 @@ export function InstalledView({
       })}
     </ul>
   );
+}
+
+/** Badge text for a reviewer's test-drive row, by the pending build's fate. */
+function previewLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "approved":
+      return "Preview · since approved";
+    case "rejected":
+      return "Preview · rejected";
+    case "withdrawn":
+      return "Preview · withdrawn";
+    default:
+      return "Preview · unapproved";
+  }
 }

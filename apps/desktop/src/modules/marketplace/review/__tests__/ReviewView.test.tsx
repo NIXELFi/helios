@@ -1,0 +1,314 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PreflightReport } from "../../publish/preflight";
+import type { ReviewItem } from "../../data/useReview";
+
+const state = {
+  queue: [] as ReviewItem[],
+  loading: false,
+  error: null as string | null,
+  reports: {} as Record<string, { report: PreflightReport }>,
+  userId: "reviewer-1",
+};
+const fns = {
+  refetch: vi.fn(),
+  inspect: vi.fn(),
+  preview: vi.fn((_item: unknown, _opts?: unknown) => Promise.resolve("installed" as string)),
+  review: vi.fn(() => Promise.resolve()),
+};
+
+vi.mock("@helios/auth", () => ({ useUser: () => ({ id: state.userId }) }));
+vi.mock("../../data/useReview", () => ({
+  useReviewQueue: () => ({
+    loading: state.loading,
+    error: state.error,
+    queue: state.queue,
+    refetch: fns.refetch,
+  }),
+  useReviewInspect: () => ({
+    inspect: fns.inspect,
+    reports: state.reports,
+    inspecting: null,
+    error: null,
+  }),
+  useReviewPreview: () => ({ preview: fns.preview, previewing: null, error: null }),
+  useReviewVersion: () => ({ review: fns.review, reviewing: false, error: null }),
+}));
+
+import { ReviewView } from "../ReviewView";
+
+const ITEM: ReviewItem = {
+  pluginId: "aero.test",
+  name: "Downforce Calculator",
+  subteam: "s1",
+  version: "1.2.0",
+  manifest: {
+    format: 1,
+    id: "aero.test",
+    name: "Downforce Calculator",
+    version: "1.2.0",
+    description: "Computes downforce.",
+    entry: "dist/index.html",
+    sdk: "^1.0.0",
+    permissions: ["storage", "engine:matlab"],
+  } as ReviewItem["manifest"],
+  permissions: ["storage", "engine:matlab"],
+  reviewReport: null,
+  bundleSha256: "a".repeat(64),
+  bundleBytes: 2048,
+  publishedBy: "author-1",
+  publishedAt: "2026-08-26T00:00:00Z",
+};
+
+const AVAILABLE = [
+  { id: "aero.test", permissions: ["storage"] },
+] as unknown as Parameters<typeof ReviewView>[0]["available"];
+
+const CLEAN_REPORT: PreflightReport = {
+  ok: true,
+  errors: [],
+  warnings: [],
+  passed: [],
+  raw: { scan: [], manifestErrors: [], manifestWarnings: [], at: "2026-08-26T00:00:00Z" },
+};
+
+beforeEach(() => {
+  state.queue = [ITEM];
+  state.loading = false;
+  state.error = null;
+  state.reports = {};
+  state.userId = "reviewer-1";
+  vi.clearAllMocks();
+});
+
+describe("ReviewView", () => {
+  it("shows an empty state that explains what the queue is for", () => {
+    state.queue = [];
+
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    expect(screen.getByText(/nothing waiting on you/i)).toBeInTheDocument();
+  });
+
+  it("leads with what changed about the permissions", () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    expect(screen.getByText(/permissions changed: asks for 1 new/i)).toBeInTheDocument();
+    expect(screen.getByText(/new in this version/i)).toBeInTheDocument();
+  });
+
+  it("warns loudly when a version newly reaches outside the sandbox", () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    expect(screen.getByText(/adds a high-trust permission/i)).toBeInTheDocument();
+  });
+
+  it("offers a scan of the uploaded bytes and says why the author's is not enough", () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    expect(screen.getByText(/report submitted with a version comes from the author/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /scan the uploaded bundle/i }));
+    expect(fns.inspect).toHaveBeenCalledWith(ITEM);
+  });
+
+  it("lets a reviewer test-drive the pending build and then open it", async () => {
+    const onOpenPreview = vi.fn();
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onOpenPreview={onOpenPreview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
+
+    await waitFor(() => expect(fns.preview).toHaveBeenCalledWith(ITEM, { replaceInstall: false }));
+    const open = await screen.findByRole("button", { name: /open preview/i });
+    fireEvent.click(open);
+    expect(onOpenPreview).toHaveBeenCalledWith(ITEM);
+    expect(screen.getByText(/installed on this computer as an unapproved preview/i)).toBeInTheDocument();
+  });
+
+  it("offers Open preview straight away when the test-drive build is already installed", () => {
+    const installed = [
+      { id: "aero.test", isPreview: true, installedVersion: "1.2.0" },
+    ] as unknown as Parameters<typeof ReviewView>[0]["installed"];
+    render(
+      <ReviewView available={AVAILABLE} installed={installed} onHelp={() => {}} onOpenPreview={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: /open preview/i })).toBeInTheDocument();
+  });
+
+  it("asks before a test-drive replaces the reviewer's real install", async () => {
+    fns.preview.mockImplementationOnce(() => Promise.resolve("needs-replace-confirm"));
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onOpenPreview={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/replaces your installed copy/i);
+    expect(screen.queryByRole("button", { name: /open preview/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /replace and test-drive/i }));
+    await waitFor(() => expect(fns.preview).toHaveBeenLastCalledWith(ITEM, { replaceInstall: true }));
+    expect(await screen.findByRole("button", { name: /open preview/i })).toBeInTheDocument();
+  });
+
+  it("refreshes Browse and Installed after a decision", async () => {
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
+    const onDecided = vi.fn();
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(1));
+    expect(fns.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the card (and so its error) on screen when a decision fails", async () => {
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
+    const onDecided = vi.fn();
+    fns.review.mockImplementationOnce(() => Promise.reject(new Error("only a pending version can be reviewed")));
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await waitFor(() => expect(fns.review).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fns.refetch).not.toHaveBeenCalled();
+    expect(onDecided).not.toHaveBeenCalled();
+  });
+
+  it("reloads the queue when the module refetches", () => {
+    const { rerender } = render(<ReviewView reloadToken={0} available={AVAILABLE} onHelp={() => {}} />);
+    expect(fns.refetch).not.toHaveBeenCalled();
+    rerender(<ReviewView reloadToken={1} available={AVAILABLE} onHelp={() => {}} />);
+    expect(fns.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks approving your own submission and explains why", () => {
+    state.userId = "author-1"; // the reviewer published it
+
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/you published this version/i)).toBeInTheDocument();
+    expect(screen.getByText(/takes a second person/i)).toBeInTheDocument();
+  });
+
+  it("attaches the reviewer's own scan to the decision, not the author's", async () => {
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
+
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+
+    await waitFor(() =>
+      expect(fns.review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: "aero.test",
+          version: "1.2.0",
+          decision: "approved",
+          report: CLEAN_REPORT.raw,
+        }),
+      ),
+    );
+    expect(fns.refetch).toHaveBeenCalled();
+  });
+
+  it("will not send a rejection without a note", async () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+
+    // First click arms the rejection; the confirm stays disabled while empty.
+    fireEvent.click(screen.getByRole("button", { name: /^reject$/i }));
+    const confirm = screen.getByRole("button", { name: /confirm rejection/i });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/review notes/i), {
+      target: { value: "Drop the matlab permission or explain it." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /confirm rejection/i }));
+
+    await waitFor(() =>
+      expect(fns.review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: "rejected",
+          notes: "Drop the matlab permission or explain it.",
+        }),
+      ),
+    );
+  });
+
+  it("does not allow Approve until the uploaded bundle has been scanned", () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    const approve = screen.getByRole("button", { name: /approve/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(/scan the uploaded bundle first/i)).toBeInTheDocument();
+  });
+
+  it("over blocking findings, requires a note and says Approve anyway", () => {
+    state.reports = {
+      "aero.test@1.2.0": {
+        report: {
+          ...CLEAN_REPORT,
+          ok: false,
+          errors: [{ level: "error", code: "forbidden-api", title: "fetch", detail: "", helpTopic: "network" }],
+        },
+      },
+    };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    const approve = screen.getByRole("button", { name: /approve anyway/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/review notes/i), { target: { value: "False positive: vendored lib" } });
+    expect(approve.disabled).toBe(false);
+  });
+
+  it("keeps the cards mounted while the queue reloads", () => {
+    state.loading = true; // a reload with the previous queue still in hand
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
+    expect(screen.queryByText(/loading the review queue/i)).not.toBeInTheDocument();
+  });
+
+  it("never lets a note override manifest drift", () => {
+    state.reports = {
+      "aero.test@1.2.0": {
+        report: {
+          ...CLEAN_REPORT,
+          ok: false,
+          errors: [{ level: "error", code: "manifest-drift", title: "drift", detail: "", helpTopic: "review" }],
+        },
+      },
+    };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/review notes/i), { target: { value: "looks fine" } });
+    const approve = screen.getByRole("button", { name: /^approve$/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(/does not match what was submitted, so it cannot be approved/i)).toBeInTheDocument();
+  });
+
+  it("shows the submitted name and flags a rename", () => {
+    state.queue = [{ ...ITEM, name: "Old Name" }];
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText(/renames “old name”/i)).toBeInTheDocument();
+  });
+
+  it("drops Open preview once Installed no longer has the preview", async () => {
+    const withPreview = [
+      { id: "aero.test", isPreview: true, installedVersion: "1.2.0" },
+    ] as unknown as Parameters<typeof ReviewView>[0]["installed"];
+    const { rerender } = render(
+      <ReviewView available={AVAILABLE} installed={[]} onHelp={() => {}} onOpenPreview={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
+    await screen.findByRole("button", { name: /open preview/i });
+    rerender(<ReviewView available={AVAILABLE} installed={withPreview} onHelp={() => {}} onOpenPreview={() => {}} />);
+    rerender(<ReviewView available={AVAILABLE} installed={[]} onHelp={() => {}} onOpenPreview={() => {}} />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /open preview/i })).not.toBeInTheDocument());
+  });
+
+  it("keeps the cards and says so when a reload fails", () => {
+    state.error = "Failed to fetch";
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
+    expect(screen.getByText(/couldn’t refresh the review queue/i)).toBeInTheDocument();
+  });
+
+  it("lets a holder of approve-own approve their own submission", () => {
+    state.userId = "author-1"; // published it
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} canApproveOwn />);
+    expect(screen.queryByText(/you published this version/i)).not.toBeInTheDocument();
+    expect((screen.getByRole("button", { name: /^approve$/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});

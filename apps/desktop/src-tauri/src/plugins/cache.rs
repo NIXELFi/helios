@@ -45,9 +45,44 @@ const STAGING_DIR_NAME: &str = "~staging";
 /// segment, for the same reason.
 const BACKUP_SUFFIX: &str = "~old";
 
+/// Name of the PUBLISH staging area — where a `.hplugin` packed from an author's
+/// folder waits between packing and upload. Same `~` convention as `~staging`, so
+/// a cache-root scan can never mistake it for an installed plugin either.
+const PUBLISH_DIR_NAME: &str = "~publish";
+
 /// Root of the install staging area: `<cache_root>/~staging`.
 pub fn staging_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(cache_root(app)?.join(STAGING_DIR_NAME))
+}
+
+/// Root of the publish staging area: `<cache_root>/~publish`. Holds packed
+/// bundles keyed by their sha256, so a failed upload can be retried without
+/// re-packing the folder.
+pub fn publish_staging_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(cache_root(app)?.join(PUBLISH_DIR_NAME))
+}
+
+/// Delete packed bundles left in the publish staging area for more than a week.
+/// Best-effort: a bundle still in flight is at most minutes old, so anything this
+/// finds is debris from an abandoned submission. Never fails the caller.
+pub fn sweep_publish_staging(app: &AppHandle) {
+    const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+    let Ok(root) = publish_staging_root(app) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return; // nothing staged yet
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().map(|age| age > MAX_AGE).unwrap_or(false))
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Where a plugin's NEW version is unpacked and verified before it replaces the

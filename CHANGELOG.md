@@ -27,6 +27,73 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Add to Marketplace — publish a plugin from inside Helios.** Subteam
+  engineers, leads and VPs can now submit their own add-ons without a terminal:
+  pick your plugin folder and Helios packs it, checks it, and submits it for
+  review. The check is the same compliance scan your reviewer runs, so a green
+  tick here means a green tick in review — and every finding is explained in
+  plain English with a link to the help panel, rather than an error code. Until
+  now every plugin in the marketplace had to be published by hand by one person.
+- **A Review tab for leads and VPs.** Pending submissions arrive with a
+  permission diff against the last approved version (so "asks for nothing new"
+  and "now wants to run MATLAB" look nothing alike), a compliance scan Helios
+  re-runs against the uploaded bundle rather than trusting the author's copy, and
+  a Test-drive button that installs the pending build locally and an Open
+  preview button to run it (clearly labelled as an unapproved preview) before
+  deciding. If you already have that plugin installed, Helios asks before the
+  preview replaces it. You still cannot approve your own submission, and a
+  version its author has withdrawn can no longer be approved from a stale queue.
+- **A My plugins tab** for anyone who can publish: every version you and your
+  subteam have submitted with its review status and the reviewer's note inline,
+  one-click withdraw of a pending submission, and yank of a bad release (anyone
+  who already installed it keeps a working copy). Only the version's author or a
+  lead/VP can withdraw or yank it, and "recommended for my subteam" is a lead/VP
+  toggle.
+- **A plugin author help panel**, reachable from the Marketplace header and from
+  every step of the submit wizard: what the sandbox blocks and why, what each
+  permission actually grants, how review works, and what to do after a rejection.
+
+### Changed
+
+- Marketplace: while self-serve publishing is new, plugin review is done by the
+  owner role only, and owners can approve their own submissions. Everyone else
+  still needs an independent reviewer.
+
+### Fixed
+
+- Marketplace: a plugin's owning subteam shows by name everywhere instead of as
+  an internal id.
+- Marketplace: a plugin whose only release was yanked no longer disappears from
+  Installed. It stays openable and uninstallable, marked as pulled by its author.
+- Marketplace: the plugin check now fails a normal multi-file build (a separate
+  script or stylesheet next to index.html). Those passed before and then opened
+  as a blank page, because a plugin runs from its entry HTML alone. The help
+  panel and authoring docs no longer say relative files work.
+- Marketplace: installs verify a plugin against the key it was actually signed
+  with, so rotating the signing key will not break older versions; bundle
+  downloads now time out instead of spinning forever on a stalled connection;
+  approving a plugin shows it in Browse straight away.
+- Marketplace (security): the function that signs plugin bundles could be called
+  by any signed-in account; it is now reachable only from the publish step.
+  Storage also enforces the 25 MB bundle cap itself, and a bundle that already
+  exists under the same fingerprint is checked byte-for-byte before it is used,
+  and the server refuses to publish a version whose bundle is not in storage.
+- Marketplace: the plugin check no longer skips large files. A single-file build
+  that inlines a big library used to go unread and still show all green; files
+  over 16 MB are now named in the report, and an unread entry page blocks.
+- Marketplace: packing a plugin no longer freezes Helios while it zips, and
+  dotfiles such as `.env` are never packed.
+- Marketplace: a failed Approve or Reject stays on screen with its error instead
+  of the card silently reloading, and Refresh also reloads My plugins and Review
+  without losing a scan, notes or a half-typed reason.
+- Marketplace: Approve now waits for the reviewer's own scan of the uploaded
+  bundle, and approving over blocking findings needs a written note. The scan
+  also blocks when the bundle's manifest differs from what was submitted.
+- Marketplace: a pending submission no longer renames the live plugin; the name
+  changes when that version is approved.
+
 ## [5.13.5] - 2026-09-29
 
 ### Fixed

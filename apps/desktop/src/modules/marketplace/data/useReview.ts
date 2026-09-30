@@ -4,8 +4,11 @@
 // capability server-side, so these are a convenience, not the security boundary.
 
 import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSupabaseClient } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
+import { manifestDrift, preflight, type PreflightReport } from "../publish/preflight";
+import { installBundle, signedBundleUrl, type InstallMetaRow } from "./installBundle";
 
 const SCHEMA = "marketplace";
 
@@ -78,16 +81,17 @@ export function useReviewQueue(): {
       try {
         const res = await client.schema(SCHEMA).rpc("review_queue");
         if (!active) return;
+        // On failure the previous queue is KEPT: a reload that blips must not
+        // throw away the cards (and the scans and notes on them). The view
+        // shows `error` inline when it still has cards to show.
         if (res.error) {
           setError(res.error.message);
-          setQueue(EMPTY);
           return;
         }
         setQueue(((res.data ?? []) as ReviewQueueRow[]).map(toItem));
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
-        setQueue(EMPTY);
       } finally {
         if (active) setLoading(false);
       }
@@ -149,4 +153,113 @@ export function useReviewVersion(): {
   );
 
   return { review, reviewing, error };
+}
+
+// ---------------------------------------------------------------------------
+// Reviewer-side additions for the in-app Review tab.
+// ---------------------------------------------------------------------------
+
+/** Re-run the compliance scan against the bytes ACTUALLY in Storage.
+ *
+ *  The `review_report` submitted alongside a version is author-supplied: a client
+ *  can call the publish RPC directly with any report it likes. So the reviewer's
+ *  copy is regenerated from the uploaded bundle, and the bundle's own manifest is
+ *  checked against the one recorded with the version (see manifestDrift). */
+export function useReviewInspect(): {
+  inspect: (item: ReviewItem) => Promise<void>;
+  reports: Record<string, { report: PreflightReport }>;
+  inspecting: string | null;
+  error: string | null;
+} {
+  const client = useSupabaseClient();
+  const [reports, setReports] = useState<Record<string, { report: PreflightReport }>>({});
+  const [inspecting, setInspecting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const inspect = useCallback(
+    async (item: ReviewItem) => {
+      const key = `${item.pluginId}@${item.version}`;
+      setInspecting(key);
+      setError(null);
+      try {
+        const signedUrl = await signedBundleUrl(client, item.bundleSha256);
+        const inspected = (await invoke("inspect_plugin_bundle", {
+          signedUrl,
+          expectedSha256: item.bundleSha256,
+          bundleBytes: item.bundleBytes,
+        })) as { manifest: unknown; texts: Record<string, string>; unscanned?: string[] };
+
+        // Scan the bundle's OWN manifest, not the separately-submitted DB copy:
+        // a drift between the two is exactly what this is here to catch.
+        const scanned = preflight(inspected.texts, inspected.manifest, inspected.unscanned ?? []);
+        const drift = manifestDrift(item.manifest, inspected.manifest);
+        const report: PreflightReport = drift.length
+          ? { ...scanned, ok: false, errors: [...drift, ...scanned.errors] }
+          : scanned;
+        setReports((r) => ({ ...r, [key]: { report } }));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setInspecting(null);
+      }
+    },
+    [client],
+  );
+
+  return { inspect, reports, inspecting, error };
+}
+
+/** Outcome of a test-drive request. `needs-replace-confirm` means the reviewer
+ *  already has a real install of this plugin, which a preview would replace on
+ *  disk (the install cache holds one copy per plugin); ask, then call again with
+ *  `replaceInstall: true`. */
+export type PreviewOutcome = "installed" | "needs-replace-confirm";
+
+/** The server's refusal text for that case (install_plugin_for_review). */
+export const PREVIEW_REPLACES_INSTALL = "PREVIEW_REPLACES_INSTALL";
+
+/** Install a PENDING version locally so a reviewer can actually run it before
+ *  deciding. Goes through `install_plugin_for_review`, a separate RPC, so the
+ *  approved-only rule in `install_plugin` stays unconditional, and the install
+ *  is recorded as a preview so it never reads as "installed" in Browse. */
+export function useReviewPreview(): {
+  preview: (item: ReviewItem, opts?: { replaceInstall?: boolean }) => Promise<PreviewOutcome>;
+  previewing: string | null;
+  error: string | null;
+} {
+  const client = useSupabaseClient();
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const preview = useCallback(
+    async (item: ReviewItem, opts?: { replaceInstall?: boolean }): Promise<PreviewOutcome> => {
+      const key = `${item.pluginId}@${item.version}`;
+      setPreviewing(key);
+      setError(null);
+      try {
+        const meta = await client.schema(SCHEMA).rpc("install_plugin_for_review", {
+          p_plugin_id: item.pluginId,
+          p_version: item.version,
+          p_replace_install: opts?.replaceInstall ?? false,
+        });
+        if (meta.error) {
+          if (meta.error.message.includes(PREVIEW_REPLACES_INSTALL)) return "needs-replace-confirm";
+          throw new Error(meta.error.message);
+        }
+        const row = ((meta.data ?? []) as InstallMetaRow[])[0];
+        if (!row) throw new Error("install_plugin_for_review returned no version metadata");
+        await installBundle(client, row);
+        return "installed";
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        throw e instanceof Error ? e : new Error(msg);
+      } finally {
+        setPreviewing(null);
+      }
+    },
+    [client],
+  );
+
+  return { preview, previewing, error };
 }

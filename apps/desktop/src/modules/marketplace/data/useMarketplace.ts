@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { installBundle, type InstallMetaRow } from "./installBundle";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
 import { isMarketplaceDemo, demoList, demoSubscribe, demoInstall, demoUninstall } from "./demoStore";
@@ -35,6 +36,15 @@ export interface AvailablePlugin {
   permissions: string[];
   installedVersion: string | null;
   publishedAt: string;
+  /** Set on Installed rows only: this install is a reviewer's test-drive of an
+   *  UNAPPROVED build, not a normal install. */
+  isPreview?: boolean;
+  /** Set on Installed rows only: the review state of the INSTALLED version, so a
+   *  yanked or still-pending install can say so. */
+  installedStatus?: string | null;
+  /** Set on Installed rows only: an approved version of this plugin is on offer,
+   *  so a preview can be swapped for the real thing. */
+  hasApprovedVersion?: boolean;
 }
 
 /** Raw row shape from `marketplace.list_available_plugins()` (snake_case). */
@@ -48,25 +58,6 @@ interface AvailableRow {
   permissions: string[] | null;
   installed_version: string | null;
   published_at: string;
-}
-
-/** Raw row from `marketplace.install_plugin()` — everything needed to download +
- *  verify the bundle on the Rust side. */
-interface InstallMetaRow {
-  plugin_id: string;
-  version: string;
-  manifest: PluginManifest;
-  bundle_sha256: string;
-  bundle_bytes: number;
-  signature: string;
-  sig_alg: string;
-  signing_key_id: string;
-}
-
-interface PublicKeyRow {
-  key_id: string;
-  public_key: string;
-  alg: string;
 }
 
 function toAvailable(r: AvailableRow): AvailablePlugin {
@@ -138,16 +129,139 @@ export function useAvailablePlugins(): {
   return { loading, error, plugins, refetch };
 }
 
-/** The subset the caller has installed. */
+/** Raw row shape from `marketplace.my_installed_plugins()`. */
+export interface MyInstallRow {
+  plugin_id: string;
+  name: string;
+  subteam: string | null;
+  is_recommended: boolean;
+  installed_version: string;
+  is_preview: boolean;
+  installed_at: string;
+  review_status: string | null;
+  manifest: PluginManifest | null;
+  permissions: string[] | null;
+  latest_version: string | null;
+}
+
+/**
+ * The caller's installs, as Installed rows.
+ *
+ * Built from the caller's OWN install rows (`my_installed_plugins`), not by
+ * filtering the Browse list. Browse only carries plugins that still have an
+ * approved version, so yanking a plugin's only release used to make it vanish
+ * from Installed while it was still unpacked on disk, with no way to open or
+ * uninstall it. Where the plugin IS still offered, the Browse row supplies the
+ * newest approved version so "Update" keeps working.
+ *
+ * `rows === null` means the install list could not be fetched (e.g. a backend
+ * without the RPC yet); fall back to the Browse-derived list rather than showing
+ * nothing.
+ */
+export function mergeInstalled(
+  available: AvailablePlugin[],
+  rows: MyInstallRow[] | null,
+): AvailablePlugin[] {
+  if (rows === null) return available.filter((p) => p.installedVersion !== null);
+  const byId = new Map(available.map((p) => [p.id, p]));
+  return rows.map((r) => {
+    const offered = byId.get(r.plugin_id);
+    const manifest = r.manifest ?? offered?.manifest ?? null;
+    return {
+      id: r.plugin_id,
+      name: r.name,
+      subteam: r.subteam,
+      isRecommended: r.is_recommended,
+      // Newest APPROVED version, for the Update affordance. A plugin with none
+      // left (all yanked) has nothing to update to.
+      version: offered?.version ?? r.latest_version ?? r.installed_version,
+      manifest:
+        manifest ??
+        ({
+          format: 1,
+          id: r.plugin_id,
+          name: r.name,
+          version: r.installed_version,
+          entry: "index.html",
+          sdk: "^1.0.0",
+          permissions: [],
+        } as PluginManifest),
+      permissions: offered?.permissions ?? r.permissions ?? [],
+      installedVersion: r.installed_version,
+      publishedAt: offered?.publishedAt ?? r.installed_at,
+      isPreview: r.is_preview,
+      installedStatus: r.review_status,
+      hasApprovedVersion: offered !== undefined || r.latest_version !== null,
+    };
+  });
+}
+
+/** The caller's install rows. `rows` is null when they could not be fetched. */
+export function useMyInstalls(): {
+  loading: boolean;
+  rows: MyInstallRow[] | null;
+  refetch: () => void;
+  /** Drop a row locally the moment an uninstall succeeds, so a failed reload
+   *  (which keeps the last good rows) can never resurrect it. */
+  forget: (pluginId: string) => void;
+} {
+  const client = useSupabaseClient();
+  const [rows, setRows] = useState<MyInstallRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+  const forget = useCallback(
+    (pluginId: string) => setRows((r) => (r ? r.filter((x) => x.plugin_id !== pluginId) : r)),
+    [],
+  );
+
+  useEffect(() => {
+    if (DEMO) {
+      setRows(null);
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await client.schema(SCHEMA).rpc("my_installed_plugins");
+        if (!active) return;
+        // A failure keeps the rows from the last successful load (so previews
+        // do not flicker out of Installed and Review); only if there never was
+        // one does it fall back to the Browse-derived list (see mergeInstalled).
+        if (!res.error) setRows((res.data ?? []) as MyInstallRow[]);
+      } catch {
+        /* keep the previous rows */
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [client, reloadKey]);
+
+  return { loading, rows, refetch, forget };
+}
+
+/** The caller's installed plugins (see `mergeInstalled`). */
 export function useInstalledPlugins(): {
   loading: boolean;
   error: string | null;
   plugins: AvailablePlugin[];
   refetch: () => void;
 } {
-  const { loading, error, plugins, refetch } = useAvailablePlugins();
-  const installed = useMemo(() => plugins.filter((p) => p.installedVersion !== null), [plugins]);
-  return { loading, error, plugins: installed, refetch };
+  const avail = useAvailablePlugins();
+  const mine = useMyInstalls();
+  const installed = useMemo(() => mergeInstalled(avail.plugins, mine.rows), [avail.plugins, mine.rows]);
+  const { refetch: refetchAvail } = avail;
+  const { refetch: refetchMine } = mine;
+  const refetch = useCallback(() => {
+    refetchAvail();
+    refetchMine();
+  }, [refetchAvail, refetchMine]);
+  return { loading: avail.loading || mine.loading, error: avail.error, plugins: installed, refetch };
 }
 
 /** Download + verify + install a plugin's current (approved) version. */
@@ -177,36 +291,9 @@ export function useInstall(): {
         const row = ((meta.data ?? []) as InstallMetaRow[])[0];
         if (!row) throw new Error("install_plugin returned no version metadata");
 
-        // 2. Short-lived signed URL for the content-addressed bundle.
-        const signed = await client.storage
-          .from(BUNDLE_BUCKET)
-          .createSignedUrl(row.bundle_sha256, SIGNED_URL_TTL);
-        if (signed.error || !signed.data?.signedUrl) {
-          throw new Error(signed.error?.message ?? "could not sign bundle URL");
-        }
-
-        // 3. Marketplace public key for client-side signature verification.
-        const pk = await client.schema(SCHEMA).rpc("signing_public_key");
-        if (pk.error) throw new Error(pk.error.message);
-        const keyRow = ((pk.data ?? []) as PublicKeyRow[])[0];
-        if (!keyRow) throw new Error("no marketplace signing key available");
-
-        // 4. Hand off to Rust: verifies sha256 + signature, then unpacks. Tauri
-        //    maps these camelCase args to the command's snake_case params.
-        await invoke("install_plugin_bundle", {
-          pluginId: row.plugin_id,
-          version: row.version,
-          signedUrl: signed.data.signedUrl,
-          expectedSha256: row.bundle_sha256,
-          bundleBytes: row.bundle_bytes,
-          signature: row.signature,
-          sigAlg: row.sig_alg,
-          publicKey: keyRow.public_key,
-          // H1: the approved/consented permission set (from install_plugin's
-          // manifest). The Rust side refuses to install a bundle whose own
-          // manifest.json declares any permission not in this set.
-          approvedPermissions: row.manifest.permissions ?? [],
-        });
+        // 2-4. Signed URL -> signing key -> Rust verify + unpack. Shared with the
+        //      reviewer's test-drive so both run the identical verification.
+        await installBundle(client, row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
@@ -227,7 +314,7 @@ export function useInstall(): {
  *  resurrected old config, and the keys kept eating the plugin's 1 MB quota
  *  forever. */
 export function useUninstall(): {
-  uninstall: (pluginId: string) => Promise<void>;
+  uninstall: (pluginId: string, opts?: { keepData?: boolean }) => Promise<void>;
   removing: boolean;
   error: string | null;
 } {
@@ -238,7 +325,7 @@ export function useUninstall(): {
   const [error, setError] = useState<string | null>(null);
 
   const uninstall = useCallback(
-    async (pluginId: string) => {
+    async (pluginId: string, opts?: { keepData?: boolean }) => {
       if (DEMO) {
         demoUninstall(pluginId);
         return;
@@ -257,7 +344,12 @@ export function useUninstall(): {
         // Erase this member's data vault for the plugin. Done last, after the
         // server-side removal succeeded, so a failed uninstall doesn't throw away
         // the settings of an add-on that is still installed.
-        if (userId) purgePluginStorage(userId, pluginId);
+        //
+        // Removing a reviewer's TEST-DRIVE keeps it: the preview shared the plugin's
+        // storage namespace with any real install the reviewer had, and throwing
+        // away their settings because they reviewed an update would be a nasty
+        // surprise.
+        if (userId && !opts?.keepData) purgePluginStorage(userId, pluginId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);

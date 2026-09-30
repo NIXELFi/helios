@@ -64,3 +64,28 @@ describe("InstalledView", () => {
     expect(screen.getByText(/haven’t installed any add-ons/i)).toBeTruthy();
   });
 });
+
+describe("InstalledView - previews and yanked installs", () => {
+  it("labels a test-drive, hides Update, and offers the approved version instead", () => {
+    const onUpdate = vi.fn();
+    const p = makePlugin({
+      installedVersion: "1.2.0",
+      version: "1.1.0",
+      isPreview: true,
+      installedStatus: "pending",
+      hasApprovedVersion: true,
+    });
+    renderInstalled([p], { onUpdate });
+    expect(screen.getByText(/preview · unapproved/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^update$/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /install v1\.1\.0/i }));
+    expect(onUpdate).toHaveBeenCalledWith(p);
+    expect(screen.getByRole("button", { name: /remove the .* preview/i })).toBeTruthy();
+  });
+
+  it("explains that a yanked install keeps working", () => {
+    renderInstalled([makePlugin({ installedVersion: "1.0.0", version: "1.0.0", installedStatus: "yanked" })]);
+    expect(screen.getByText(/pulled by its author/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^open$/i })).toBeTruthy();
+  });
+});

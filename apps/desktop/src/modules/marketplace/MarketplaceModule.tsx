@@ -8,12 +8,28 @@
 // PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload, IconRefresh } from "@tabler/icons-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  IconArrowLeft,
+  IconPuzzle,
+  IconTerminal2,
+  IconBolt,
+  IconUpload,
+  IconRefresh,
+  IconHelpCircle,
+} from "@tabler/icons-react";
 import { useUser } from "@helios/auth";
 import { useModuleLive } from "../../shell/module-activity";
 import { useThrottledFocus } from "../../lib/use-throttled-focus";
-import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
+import {
+  mergeInstalled,
+  useAvailablePlugins,
+  useInstall,
+  useMyInstalls,
+  useUninstall,
+  type AvailablePlugin,
+} from "./data/useMarketplace";
+import type { ReviewItem } from "./data/useReview";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
 import { PluginHost } from "./runtime/PluginHost";
@@ -25,6 +41,11 @@ import { InstallConsentModal } from "./components/InstallConsentModal";
 import { UninstallConfirmModal } from "./components/UninstallConfirmModal";
 import { hasHighTrust } from "./components/PermissionList";
 import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
+import { useMyCapabilities, useSubteams } from "../org/data/useOrgData";
+import { SubmitWizard } from "./publish/SubmitWizard";
+import { HelpDrawer, useHelpDrawer } from "./authoring/HelpDrawer";
+import { ReviewView } from "./review/ReviewView";
+import { MyPluginsView } from "./manage/MyPluginsView";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled";
 
 interface LoadError {
@@ -38,30 +59,85 @@ interface ConsoleLine {
   level?: "info" | "warn" | "error";
 }
 
-type Tab = "browse" | "installed";
+type Tab = "browse" | "installed" | "review" | "mine";
 
 // DEV-ONLY preview flag (see data/demoStore.ts). OFF by default.
 const DEMO = isMarketplaceDemo();
 
 export function MarketplaceModule() {
-  const { plugins, loading, error, refetch } = useAvailablePlugins();
+  const { plugins: rawPlugins, loading, error, refetch: refetchAvailable } = useAvailablePlugins();
+  // The backend returns the owning subteam as an id; every view shows it as a
+  // label (card, detail, consent, filters, search). Resolve it once here. An id
+  // that is not in the list (a deleted subteam) is shown as "Unknown subteam"
+  // rather than as a raw UUID.
+  const { data: subteams } = useSubteams();
+  const subteamNames = useMemo(() => new Map(subteams.map((s) => [s.id, s.name])), [subteams]);
+  const withSubteamNames = useCallback(
+    (list: AvailablePlugin[]) =>
+      list.map((p) =>
+        p.subteam ? { ...p, subteam: subteamNames.get(p.subteam) ?? "Unknown subteam" } : p,
+      ),
+    [subteamNames],
+  );
+  const plugins = useMemo(() => withSubteamNames(rawPlugins), [withSubteamNames, rawPlugins]);
+  const {
+    rows: installRows,
+    loading: installsLoading,
+    refetch: refetchInstalls,
+    forget: forgetInstall,
+  } = useMyInstalls();
+  // Every mutation changes both lists (an install, a yank, an approval), so one
+  // refetch refreshes both.
+  // Bumped by every refetch so the tabs that own their own data (My plugins,
+  // Review) reload too: after a publish, and on the header's Refresh.
+  const [reloadToken, setReloadToken] = useState(0);
+  const refetch = useCallback(() => {
+    refetchAvailable();
+    refetchInstalls();
+    setReloadToken((t) => t + 1);
+  }, [refetchAvailable, refetchInstalls]);
   const { install, installing, error: installError } = useInstall();
   const { uninstall, removing, error: uninstallError } = useUninstall();
 
   const [tab, setTab] = useState<Tab>("browse");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const { canAnywhere } = useMyCapabilities();
+  const help = useHelpDrawer();
+  // Publishing and reviewing are capability-gated, but the Add button stays
+  // visible either way: it explains what the capability is rather than leaving
+  // someone to wonder why the feature seems not to exist.
+  const canReview = canAnywhere("marketplace.review");
+  const canPublish = canAnywhere("marketplace.publish");
+  const canApproveOwn = canAnywhere("marketplace.approve_own");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [consentFor, setConsentFor] = useState<AvailablePlugin | null>(null);
   const [uninstallFor, setUninstallFor] = useState<AvailablePlugin | null>(null);
   const [launch, setLaunch] = useState<LoadedPlugin | null>(null);
+  // Set when the running add-on is a reviewer's test-drive of an unapproved build.
+  const [launchIsPreview, setLaunchIsPreview] = useState(false);
   const [launchError, setLaunchError] = useState<LoadError | null>(null);
+  // Scroll the "Couldn't launch" banner into view once per NEW error (an inline
+  // ref callback would re-run on every render and yank the page back up).
+  const launchBannerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (launchError) launchBannerRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [launchError]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [builtIn, setBuiltIn] = useState<FirstPartyApp | null>(null);
 
-  const installed = useMemo(() => plugins.filter((p) => p.installedVersion !== null), [plugins]);
-  const detail = useMemo(
-    () => (detailId ? (plugins.find((p) => p.id === detailId) ?? null) : null),
-    [plugins, detailId],
+  const installed = useMemo(
+    () => withSubteamNames(mergeInstalled(rawPlugins, installRows)),
+    [withSubteamNames, rawPlugins, installRows],
   );
+  // Detail works from Installed too, including for a plugin no longer offered
+  // (every version yanked), which is only in the install list. Previews have no
+  // detail page: their card lives in Review.
+  const detail = useMemo(() => {
+    if (!detailId) return null;
+    const offered = plugins.find((p) => p.id === detailId);
+    if (offered) return offered;
+    return installed.find((p) => p.id === detailId && !p.isPreview) ?? null;
+  }, [plugins, installed, detailId]);
 
   const openDetail = useCallback((p: AvailablePlugin) => setDetailId(p.id), []);
   const requestInstall = useCallback((p: AvailablePlugin) => setConsentFor(p), []);
@@ -89,7 +165,29 @@ export function MarketplaceModule() {
   // delete + stored-data purge), so the trash icon only OPENS the confirmation —
   // exactly like Install only opens the consent modal. There is no code path from
   // a click to `useUninstall` that skips it.
-  const requestUninstall = useCallback((p: AvailablePlugin) => setUninstallFor(p), []);
+  const requestUninstall = useCallback(
+    (p: AvailablePlugin) => {
+      // Removing a test-drive keeps the reviewer's saved data and loses nothing
+      // they cannot reinstall, so it does not need the destructive-uninstall
+      // confirmation.
+      if (p.isPreview) {
+        setBusyId(p.id);
+        setLaunchError(null);
+        void uninstall(p.id, { keepData: true })
+          .then(() => {
+            forgetInstall(p.id);
+            refetch();
+          })
+          .catch((e: unknown) =>
+            setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) }),
+          )
+          .finally(() => setBusyId(null));
+        return;
+      }
+      setUninstallFor(p);
+    },
+    [uninstall, refetch, forgetInstall],
+  );
 
   const confirmUninstall = useCallback(async () => {
     if (!uninstallFor) return;
@@ -97,6 +195,7 @@ export function MarketplaceModule() {
     setBusyId(p.id);
     try {
       await uninstall(p.id);
+      forgetInstall(p.id);
       setUninstallFor(null);
       refetch();
     } catch {
@@ -104,10 +203,11 @@ export function MarketplaceModule() {
     } finally {
       setBusyId(null);
     }
-  }, [uninstallFor, uninstall, refetch]);
+  }, [uninstallFor, uninstall, refetch, forgetInstall]);
 
   const handleOpen = useCallback(async (p: AvailablePlugin) => {
     setLaunchError(null);
+    setLaunchIsPreview(p.isPreview === true);
     // DEV preview: only the bundled example has a real, openable bundle; the rest
     // would need the verified-install runtime (gated on the 0.2 nav guard).
     const baseUrl = DEMO ? demoLaunchUrl(p.id) : installedBaseUrl(p.id);
@@ -121,6 +221,15 @@ export function MarketplaceModule() {
     setBusyId(p.id);
     try {
       const loaded = await loadPlugin(baseUrl as string);
+      // The server records an install before the download, so a failed
+      // download leaves the row naming a version the disk does not have.
+      // Never run the old bytes under the new label.
+      if (!DEMO && p.installedVersion && loaded.manifest.version !== p.installedVersion) {
+        throw new Error(
+          `this computer has v${loaded.manifest.version}, not v${p.installedVersion}. ` +
+            (p.isPreview ? "Run Test-drive again from Review." : "Install it again to finish the update."),
+        );
+      }
       setLaunch(loaded);
     } catch (e) {
       setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) });
@@ -146,8 +255,31 @@ export function MarketplaceModule() {
   // the one Tier-2 handler throws — a coincidence, not a guard). So the tier bound
   // is asserted here, at load, and fails LOUDLY: a bundled plugin is Tier-0/1 only,
   // and anything higher must go through the marketplace's review + consent path.
+  // A reviewer opening the test-drive build of a pending version. The bytes were
+  // downloaded and verified exactly like a normal install; the stage just labels
+  // it so nobody mistakes it for an approved release.
+  const openPreview = useCallback(async (item: ReviewItem) => {
+    setLaunchError(null);
+    setBusyId(item.pluginId);
+    try {
+      const loaded = await loadPlugin(installedBaseUrl(item.pluginId));
+      if (loaded.manifest.version !== item.version) {
+        throw new Error(
+          `the installed copy is v${loaded.manifest.version}, not the pending v${item.version} - run Test-drive again`,
+        );
+      }
+      setLaunchIsPreview(true);
+      setLaunch(loaded);
+    } catch (e) {
+      setLaunchError({ baseUrl: item.name, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusyId(null);
+    }
+  }, []);
+
   const openBundled = useCallback(async (bp: BundledPlugin) => {
     setLaunchError(null);
+    setLaunchIsPreview(false);
     setBusyId(bp.id);
     try {
       const loaded = await loadPlugin(bp.baseUrl);
@@ -165,15 +297,26 @@ export function MarketplaceModule() {
     }
   }, []);
 
-  if (builtIn) {
-    return <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />;
-  }
-  if (launch) {
-    return <PluginStage plugin={launch} onBack={() => setLaunch(null)} />;
-  }
+  // A running add-on covers the module instead of replacing it: the tabs stay
+  // mounted underneath, so a reviewer who opens a preview comes back to the same
+  // card with their scan and notes intact.
+  const stage = builtIn ? (
+    <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />
+  ) : launch ? (
+    <PluginStage
+      plugin={launch}
+      preview={launchIsPreview}
+      onBack={() => {
+        setLaunch(null);
+        setLaunchIsPreview(false);
+      }}
+    />
+  ) : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-helios-base">
+    <>
+    {stage}
+    <div className={stage ? "hidden" : "h-full overflow-y-auto bg-helios-base"}>
       <div className="mx-auto max-w-4xl px-6 py-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -200,22 +343,36 @@ export function MarketplaceModule() {
               <IconRefresh size={14} className={loading ? "animate-spin" : undefined} />
               Refresh
             </button>
-            {/* Publish/upload UI is not built yet — show the affordance disabled so the
-                beta hints at where it's going without pretending it works. */}
             <button
               type="button"
-              disabled
-              title="Coming soon!"
-              aria-label="Upload plugin — coming soon"
-              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim opacity-60"
+              onClick={() => help.openHelp("getting-started")}
+              title="How to build and publish a plugin"
+              aria-label="Plugin author help"
+              className="inline-flex items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim transition-colors hover:border-asu-gold/40 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
-              <IconUpload size={14} /> Upload plugin
-              <span className="ml-1 rounded-sm bg-helios-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim">
-                Soon
-              </span>
+              <IconHelpCircle size={14} /> Help
+            </button>
+            <button
+              type="button"
+              onClick={() => setWizardOpen(true)}
+              title="Publish a plugin you have built"
+              aria-label="Add to Marketplace"
+              className="inline-flex items-center gap-1.5 rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >
+              <IconUpload size={14} /> Add to Marketplace
             </button>
           </div>
         </header>
+
+        {launchError && (
+          <div
+            ref={launchBannerRef}
+            role="alert"
+            className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger"
+          >
+            Couldn’t launch {launchError.baseUrl}: {launchError.message}
+          </div>
+        )}
 
         {detail ? (
           <PluginDetail
@@ -236,13 +393,17 @@ export function MarketplaceModule() {
               <TabButton active={tab === "installed"} onClick={() => setTab("installed")}>
                 Installed{installed.length > 0 ? ` (${installed.length})` : ""}
               </TabButton>
+              {canPublish && (
+                <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
+                  My plugins
+                </TabButton>
+              )}
+              {canReview && (
+                <TabButton active={tab === "review"} onClick={() => setTab("review")}>
+                  Review
+                </TabButton>
+              )}
             </div>
-
-            {launchError && (
-              <div className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
-                Couldn’t launch {launchError.baseUrl}: {launchError.message}
-              </div>
-            )}
 
             {tab === "browse" ? (
               <>
@@ -284,10 +445,10 @@ export function MarketplaceModule() {
                   onOpen={handleOpen}
                 />
               </>
-            ) : (
+            ) : tab === "installed" ? (
               <InstalledView
                 plugins={installed}
-                loading={loading}
+                loading={loading || installsLoading}
                 error={error}
                 busyId={busyId}
                 onOpen={handleOpen}
@@ -295,10 +456,44 @@ export function MarketplaceModule() {
                 onUninstall={requestUninstall}
                 onOpenDetail={openDetail}
               />
-            )}
+            ) : tab === "mine" ? (
+              <MyPluginsView
+                reloadToken={reloadToken}
+                onHelp={help.openHelp}
+                onAdd={() => setWizardOpen(true)}
+                onChanged={refetch}
+              />
+            ) : null}
           </>
         )}
+        {/* Review stays mounted (hidden) across tab switches and the detail
+            page, so an in-progress review keeps its scan and notes. */}
+        {canReview && (
+          <div hidden={detail !== null || tab !== "review"}>
+            <ReviewView
+              reloadToken={reloadToken}
+              canApproveOwn={canApproveOwn}
+              available={plugins}
+              installed={installed}
+              onHelp={help.openHelp}
+              onPreviewInstalled={refetch}
+              onOpenPreview={openPreview}
+              onDecided={refetch}
+            />
+          </div>
+        )}
       </div>
+
+      {wizardOpen && (
+        <SubmitWizard onClose={() => setWizardOpen(false)} onPublished={refetch} />
+      )}
+
+      <HelpDrawer
+        open={help.open}
+        topic={help.topic}
+        onClose={help.closeHelp}
+        onTopicChange={help.setTopic}
+      />
 
       {consentFor && (
         <InstallConsentModal
@@ -320,6 +515,7 @@ export function MarketplaceModule() {
         />
       )}
     </div>
+    </>
   );
 }
 
@@ -457,7 +653,15 @@ function TabButton({
   );
 }
 
-function PluginStage({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
+function PluginStage({
+  plugin,
+  preview = false,
+  onBack,
+}: {
+  plugin: LoadedPlugin;
+  preview?: boolean;
+  onBack: () => void;
+}) {
   // Read the member here rather than in MarketplaceModule: the stage only exists
   // while an add-on is actually running, which is the only time the plugin's
   // per-user storage namespace is needed.
@@ -500,6 +704,14 @@ function PluginStage({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => v
           </button>
           <span className="text-sm text-helios-text">{plugin.manifest.name}</span>
           <span className="text-[10px] text-helios-dim">v{plugin.manifest.version}</span>
+          {preview && (
+            <span
+              className="rounded-sm border border-helios-warn/50 bg-helios-warn/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-helios-warn"
+              title="A pending build installed for review. Nobody else can install it until it is approved."
+            >
+              Unapproved preview
+            </span>
+          )}
         </div>
         <button
           type="button"

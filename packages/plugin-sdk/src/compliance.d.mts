@@ -1,13 +1,17 @@
 // Types for the plain-ESM canonical compliance rules (compliance.mjs). Hand-written
 // so TS consumers (the review pipeline, vitest) import the same module typed.
 
-export type FindingKind = "forbidden-api" | "undeclared-permission" | "unused-permission";
+export type FindingKind =
+  | "forbidden-api"
+  | "undeclared-permission"
+  | "unused-permission"
+  | "external-asset";
 
 export interface ComplianceFinding {
   level: "error" | "warn";
   kind: FindingKind;
   message: string;
-  /** Bundle-relative file path (forbidden-api findings only). */
+  /** Bundle-relative file path (forbidden-api / external-asset findings only). */
   path?: string;
   /** The capability key (declared/used findings only). */
   permission?: string;
@@ -21,5 +25,5 @@ export const SCANNABLE_EXTENSIONS: string[];
 /** Scan a built bundle (path -> contents) against a manifest for findings. */
 export function scanBundle(
   files: Record<string, string>,
-  manifest: { permissions?: string[] },
+  manifest: { permissions?: string[]; entry?: string },
 ): ComplianceFinding[];

@@ -96,7 +96,8 @@ If you write code that assumes a network, a host, or browser storage, it will fa
 | `@import url("https://fonts…")` / CDN web fonts | Use system fonts, or embed the font as a `data:` URI (`font-src data:`). |
 | `<img src="https://…/logo.png">` | Embed as a `data:` URI: `<img src="data:image/png;base64,…">` (`img-src data: blob:`). |
 | `background-image: url("https://…")` | Use a `data:` URI or `blob:` URL instead. |
-| Load an icon/asset from a remote URL | Package it inside `dist/` and reference it by relative path, or inline as `data:`. |
+| Load an icon/asset from a remote URL | Inline it as a `data:` URI. |
+| `<script src="./assets/index.js">` / `<link href="./assets/index.css">` (a normal multi-file build) | **Inline everything into the entry HTML** (e.g. `vite-plugin-singlefile`). The entry HTML runs on its own as an iframe `srcdoc`; files next to it in `dist/` are never loaded, even by relative path, and the plugin opens blank. Pre-flight fails on this. |
 
 ---
 

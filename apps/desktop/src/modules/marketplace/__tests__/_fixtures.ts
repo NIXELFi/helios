@@ -18,6 +18,9 @@ export function makePlugin(over: Partial<AvailablePlugin> = {}): AvailablePlugin
     subteam: over.subteam ?? "Aero",
     isRecommended: over.isRecommended ?? false,
     installedVersion: over.installedVersion ?? null,
+    isPreview: over.isPreview,
+    installedStatus: over.installedStatus,
+    hasApprovedVersion: over.hasApprovedVersion,
     publishedAt: over.publishedAt ?? "2026-06-26T00:00:00Z",
     manifest: over.manifest ?? {
       format: 1,

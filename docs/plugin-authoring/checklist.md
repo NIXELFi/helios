@@ -74,8 +74,7 @@ helios-plugin check ./my-plugin
 
 ## 4. Build & packaging
 
-- [ ] `dist/index.html` is fully self-contained (JS + CSS inlined; assets relative
-      or `data:`).
+- [ ] `dist/index.html` is fully self-contained (JS + CSS inlined; images and fonts as `data:` URIs; no `<script src>` / `<link href>` to other files).
 - [ ] The `.hplugin` zip contains **only** `manifest.json` + `dist/`.
 - [ ] **No** `src/`, **no** `node_modules`, **no** `PLUGIN.md`, **no** build configs
       inside the zip.
