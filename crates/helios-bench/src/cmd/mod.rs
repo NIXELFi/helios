@@ -6,3 +6,4 @@ pub mod run;
 pub mod sweep;
 pub mod validate;
 pub mod ensemble;
+pub mod vrli;

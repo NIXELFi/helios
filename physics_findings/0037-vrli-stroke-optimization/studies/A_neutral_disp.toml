@@ -1,0 +1,37 @@
+# Finding 0037 VRLI study A_neutral_disp. Run from the repo root:
+#   helios-bench vrli physics_findings/0037-vrli-stroke-optimization/studies/A_neutral_disp.toml --out physics_findings/0037-vrli-stroke-optimization/out/A_neutral_disp
+[vrli]
+config = "../../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json"
+cycles = 30
+threads = 15
+tune = "neutral"                 # neutral = no logged afr/spark maps (lambda 0.89 from afr_target, slope spark)
+trumpet_od_mm = 44.0            # 44 mm trumpet OD over the 40 mm ID; 0 = no plenum displacement
+displacement_ref_mm = 0.0      # as-built runner mouth = plenum floor
+rpm = { min = 4000, max = 12500, step = 250 }
+extension_mm = { min = -120, max = 160, step = 10 }
+cache = "../vrli_cache.ndjson"
+avg_cycles = 5                 # metrics = mean of the last 5 cycles
+conv_window = 6
+max_spread = 0.02              # VE spread over the last 6 cycles; above = not periodic, excluded
+
+[design]
+band_rpm = [6000, 12000]          # P1 band (VRLI problem definition)
+driver_band_rpm = [7000, 10500]   # driver interview: autocross band
+baseline_extension_mm = 0.0       # the as-built SDM26 runner
+strokes_mm = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300]
+placement_step_mm = 5.0
+position_step_mm = 1.0
+f3_resolution_mm = 2.0
+sweep_rate_rpm_s = 6000.0         # ~6000 rpm in 1 s, first gear (chief engineer)
+full_stroke_time_s = 0.5          # F2
+metric = "torque"
+knee_fraction = 0.9
+max_protrusion_mm = 200.0         # assumed VRLI plenum clearance; check against CAD
+min_plenum_fraction = 0.5         # trumpets may displace at most half the plenum (C3: fixed envelope)
+
+[design.mass]                     # CDR mass breakdown, ~1.0 kg at 100 mm
+fixed_kg = 0.30
+per_100mm_kg = 0.42
+actuator_kg_at_100mm = 0.30
+actuator_exponent = 0.7
+limit_kg = 1.5                    # C2

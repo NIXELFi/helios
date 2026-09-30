@@ -8,3 +8,4 @@ pub mod environment;
 pub mod locks;
 pub mod ndjson;
 pub mod study;
+pub mod vrli;
