@@ -2,79 +2,144 @@
  "duty_cycles": {
   "josh_0426": {
    "below4k": 0.09724066696178248
+  },
+  "ld416_ax": {
+   "below4k": 0.14142630548081994
+  },
+  "ld416_optshift": {
+   "below4k": 0.0
+  },
+  "ld419_endu": {
+   "below4k": 0.023064204151556533
   }
  },
  "tiers": [
   {
    "tier": "T1 static, same envelope (runner <= as-built, plenum <= 1.44 L)",
    "robust": {
-    "design": "0.75 L plenum, runner 248 mm above flange (+0)",
-    "worst": NaN,
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L plenum, runner 248 mm above flange (+0)",
+    "worst": 0.27496510077593683,
+    "P1 6-12k": 0.3256877006171166,
+    "driver 7-10.5k": 0.39933287609861257,
+    "josh_0426": 0.3567976454841748,
+    "josh_0426 shift4": 0.345766550669091,
+    "ld416_ax": 0.35923741746650695,
+    "ld416_ax shift4": 0.36401241373236193,
+    "ld416_optshift": 0.3036226848887713,
+    "ld416_optshift shift4": 0.3274354841789062,
+    "ld419_endu": 0.27496510077593683,
+    "ld419_endu shift4": 0.33659854028771363,
+    "duty_mean": 0.3236557121538475
    },
    "best_p1": {
-    "design": "0.75 L plenum, runner 248 mm above flange (+0)",
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "0.75 L plenum, runner 208 mm above flange (-40)",
+    "P1 6-12k": 0.6640622904223514,
+    "driver 7-10.5k": -0.6846526543146436,
+    "josh_0426": -0.0881717676451288,
+    "josh_0426 shift4": 0.48924359151416574,
+    "ld416_ax": -0.1196104689914157,
+    "ld416_ax shift4": -0.1339725470284936,
+    "ld416_optshift": -0.5202334460580826,
+    "ld416_optshift shift4": -0.4107928948262618,
+    "ld419_endu": 0.49522321349360077,
+    "ld419_endu shift4": 1.4329454348692927,
+    "duty_mean": -0.05819811730025659
    }
   },
   {
    "tier": "T2 static, +40 mm reach, plenum <= 2.0 L",
    "robust": {
-    "design": "0.75 L plenum, runner 288 mm above flange (+40)",
-    "worst": NaN,
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L plenum, runner 248 mm above flange (+0)",
+    "worst": 0.27496510077593683,
+    "P1 6-12k": 0.3256877006171166,
+    "driver 7-10.5k": 0.39933287609861257,
+    "josh_0426": 0.3567976454841748,
+    "josh_0426 shift4": 0.345766550669091,
+    "ld416_ax": 0.35923741746650695,
+    "ld416_ax shift4": 0.36401241373236193,
+    "ld416_optshift": 0.3036226848887713,
+    "ld416_optshift shift4": 0.3274354841789062,
+    "ld419_endu": 0.27496510077593683,
+    "ld419_endu shift4": 0.33659854028771363,
+    "duty_mean": 0.3236557121538475
    },
    "best_p1": {
-    "design": "0.75 L plenum, runner 288 mm above flange (+40)",
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L plenum, runner 288 mm above flange (+40)",
+    "P1 6-12k": 0.7931938094558166,
+    "driver 7-10.5k": -0.6294422905397501,
+    "josh_0426": -0.25118238724789466,
+    "josh_0426 shift4": -0.25160049928224515,
+    "ld416_ax": 0.40460374858293235,
+    "ld416_ax shift4": 0.08382271080955572,
+    "ld416_optshift": 0.8924194338132407,
+    "ld416_optshift shift4": 0.4924924117172713,
+    "ld419_endu": -0.4720523566256518,
+    "ld419_endu shift4": 0.36832944620361907,
+    "duty_mean": 0.14344710963065666
    }
   },
   {
    "tier": "T3 VRLI in a 1.44 L box, reach <= as-built, stroke <= 100",
    "robust": {
-    "design": "0.75 L box, runner 223-248 mm (25 stroke)",
-    "worst": NaN,
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L box, runner 198-248 mm (50 stroke)",
+    "worst": 1.449360076425532,
+    "P1 6-12k": 3.052993999342668,
+    "driver 7-10.5k": 1.449360076425532,
+    "josh_0426": 2.281265228510243,
+    "josh_0426 shift4": 2.7185432163124634,
+    "ld416_ax": 2.1408131213938475,
+    "ld416_ax shift4": 2.3115267624477243,
+    "ld416_optshift": 1.9795326909729294,
+    "ld416_optshift shift4": 2.1741225286478594,
+    "ld419_endu": 2.644527698789245,
+    "ld419_endu shift4": 3.471149476120061,
+    "duty_mean": 2.2615346849165663
    },
    "best_p1": {
-    "design": "0.75 L box, runner 223-248 mm (25 stroke)",
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L box, runner 173-248 mm (75 stroke)",
+    "P1 6-12k": 3.4640876691528932,
+    "driver 7-10.5k": 1.3838521404712756,
+    "josh_0426": 2.390388803281218,
+    "josh_0426 shift4": 2.974080491145381,
+    "ld416_ax": 2.2072852568122636,
+    "ld416_ax shift4": 2.4125293289439353,
+    "ld416_optshift": 2.0177563860298786,
+    "ld416_optshift shift4": 2.385444233554268,
+    "ld419_endu": 2.752292664932532,
+    "ld419_endu shift4": 3.817643295529649,
+    "duty_mean": 2.341930777763973
    }
   },
   {
    "tier": "T4 VRLI in a 2.0 L box, reach <= +40 mm, stroke <= 150",
    "robust": {
-    "design": "0.75 L box, runner 263-288 mm (25 stroke)",
-    "worst": NaN,
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1 L box, runner 213-288 mm (75 stroke)",
+    "worst": 2.7809539868121957,
+    "P1 6-12k": 3.518060142858004,
+    "driver 7-10.5k": 2.7809539868121957,
+    "josh_0426": 2.9770046511441217,
+    "josh_0426 shift4": 3.1560086922736375,
+    "ld416_ax": 2.8911951102782663,
+    "ld416_ax shift4": 2.8296711195051394,
+    "ld416_optshift": 3.2660846352667416,
+    "ld416_optshift shift4": 3.034838943345397,
+    "ld419_endu": 3.237870338151727,
+    "ld419_endu shift4": 3.784359141859972,
+    "duty_mean": 3.0930386837102137
    },
    "best_p1": {
-    "design": "0.75 L box, runner 263-288 mm (25 stroke)",
-    "P1 6-12k": NaN,
-    "driver 7-10.5k": NaN,
-    "josh_0426": NaN,
-    "josh_0426 shift4": NaN
+    "design": "1.44 L box, runner 138-288 mm (150 stroke)",
+    "P1 6-12k": 4.481485908352156,
+    "driver 7-10.5k": 2.778316968550043,
+    "josh_0426": 3.17558520976875,
+    "josh_0426 shift4": 3.544616654141719,
+    "ld416_ax": 2.965484590162215,
+    "ld416_ax shift4": 2.9229381495033735,
+    "ld416_optshift": 3.4454956561545513,
+    "ld416_optshift shift4": 3.4014292431640003,
+    "ld419_endu": 3.500522556128316,
+    "ld419_endu shift4": 4.470380146787645,
+    "duty_mean": 3.2717720030534583
    }
   }
  ]
