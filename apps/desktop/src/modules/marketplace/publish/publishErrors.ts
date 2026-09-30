@@ -71,7 +71,7 @@ export function explainPublishError(e: unknown, context?: { version?: string }):
     };
   }
 
-  if (msg.includes(BUNDLE_SLOT_TAKEN.toLowerCase())) {
+  if (msg.includes(BUNDLE_SLOT_TAKEN.toLowerCase()) || msg.includes("was uploaded by someone else")) {
     return {
       title: "A different file is stored under this bundle's fingerprint",
       detail:

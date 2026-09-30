@@ -8,7 +8,7 @@
 // PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   IconArrowLeft,
   IconPuzzle,
@@ -96,6 +96,12 @@ export function MarketplaceModule() {
   // Set when the running add-on is a reviewer's test-drive of an unapproved build.
   const [launchIsPreview, setLaunchIsPreview] = useState(false);
   const [launchError, setLaunchError] = useState<LoadError | null>(null);
+  // Scroll the "Couldn't launch" banner into view once per NEW error (an inline
+  // ref callback would re-run on every render and yank the page back up).
+  const launchBannerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (launchError) launchBannerRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [launchError]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [builtIn, setBuiltIn] = useState<FirstPartyApp | null>(null);
 
@@ -333,7 +339,7 @@ export function MarketplaceModule() {
 
         {launchError && (
           <div
-            ref={(el) => el?.scrollIntoView?.({ block: "nearest" })}
+            ref={launchBannerRef}
             role="alert"
             className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger"
           >

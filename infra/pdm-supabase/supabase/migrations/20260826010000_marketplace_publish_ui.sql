@@ -784,7 +784,9 @@ create or replace function marketplace.can_publish_anywhere(p_uid uuid)
 returns boolean
 language sql stable security definer
 set search_path = marketplace, pm, public as $$
-  select p_uid is not null and exists (
+  -- Answers only for the caller: granted to authenticated for the storage
+  -- policy, so it must not double as a "does user X hold publish?" oracle.
+  select p_uid is not null and p_uid = auth.uid() and exists (
     select 1
     from pm.role_memberships m
     join pm.role_capabilities rc on rc.role_id = m.role_id

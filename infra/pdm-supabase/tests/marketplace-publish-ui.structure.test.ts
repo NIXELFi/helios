@@ -120,6 +120,10 @@ describe("marketplace publish-UI migration", () => {
     expect(body).toMatch(/pv\.review_status = 'approved'\s*\n\s*or pm\.has_capability\(v_uid, 'marketplace\.publish'/);
   });
 
+  it("answers can_publish_anywhere only for the caller", () => {
+    expect(bodyOf("can_publish_anywhere")).toMatch(/p_uid = auth\.uid\(\)/);
+  });
+
   it("lets uploaders read their own objects by owner or owner_id", () => {
     expect(SQL).toMatch(/owner = auth\.uid\(\) or owner_id = auth\.uid\(\)::text/);
   });

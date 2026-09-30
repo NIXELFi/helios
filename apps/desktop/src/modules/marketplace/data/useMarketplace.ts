@@ -220,11 +220,12 @@ export function useMyInstalls(): {
       try {
         const res = await client.schema(SCHEMA).rpc("my_installed_plugins");
         if (!active) return;
-        // A failure falls back to the Browse-derived list (see mergeInstalled)
-        // instead of blanking Installed, so it is not surfaced as an error here.
-        setRows(res.error ? null : ((res.data ?? []) as MyInstallRow[]));
+        // A failure keeps the rows from the last successful load (so previews
+        // do not flicker out of Installed and Review); only if there never was
+        // one does it fall back to the Browse-derived list (see mergeInstalled).
+        if (!res.error) setRows((res.data ?? []) as MyInstallRow[]);
       } catch {
-        if (active) setRows(null);
+        /* keep the previous rows */
       } finally {
         if (active) setLoading(false);
       }

@@ -144,4 +144,11 @@ describe("MyPluginsView", () => {
     render(<MyPluginsView onHelp={() => {}} onAdd={() => {}} />);
     expect(screen.getByText("Aero Tool")).toBeInTheDocument();
   });
+
+  it("keeps the list and warns when a reload fails", () => {
+    state.error = "Failed to fetch";
+    render(<MyPluginsView onHelp={() => {}} onAdd={() => {}} />);
+    expect(screen.getByText("Aero Tool")).toBeInTheDocument();
+    expect(screen.getByText(/couldn’t refresh your plugins/i)).toBeInTheDocument();
+  });
 });

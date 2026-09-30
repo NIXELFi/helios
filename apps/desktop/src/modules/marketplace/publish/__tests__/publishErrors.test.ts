@@ -94,4 +94,10 @@ describe("explainPublishError — 0930 additions", () => {
   it("maps Storage's size refusal to the size explanation", () => {
     expect(explainPublishError({ message: "Payload too large" }).title).toMatch(/too large/i);
   });
+
+  it("treats the server's someone-else's-upload refusal as not retryable", () => {
+    const e = explainPublishError({ message: "bundle abc was uploaded by someone else; upload your own build" });
+    expect(e.title).toMatch(/different file is stored/i);
+    expect(e.retryable).toBe(false);
+  });
 });

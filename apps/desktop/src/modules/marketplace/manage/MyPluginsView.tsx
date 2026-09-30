@@ -105,6 +105,11 @@ export function MyPluginsView({
 
   return (
     <div className="space-y-4">
+      {my.error && (
+        <div role="status" className="rounded-sm border border-helios-warn/40 bg-helios-warn/10 p-2 text-[11px] text-helios-text/90">
+          Couldn’t refresh your plugins ({my.error}). Showing the last copy.
+        </div>
+      )}
       {my.actionError && (
         <div role="alert" className="rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
           {my.actionError}
