@@ -37,7 +37,12 @@ const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Directory names that never belong in a bundle. Matched against ANY path
 /// component, so `foo/node_modules/bar` is excluded too.
-const EXCLUDED_DIRS: &[&str] = &["node_modules", ".git", "src", ".vscode", ".idea"];
+const EXCLUDED_DIRS: &[&str] = &["node_modules", ".git", ".vscode", ".idea"];
+
+/// Excluded only directly under the project root. A build is free to emit a
+/// `dist/src/` folder, and dropping it silently would ship a bundle whose files
+/// 404 at runtime; the project's own `src/` is the thing that must stay out.
+const ROOT_ONLY_EXCLUDED_DIRS: &[&str] = &["src"];
 
 /// File names that never belong in a bundle.
 const EXCLUDED_FILES: &[&str] = &[".DS_Store", "Thumbs.db", "desktop.ini"];
@@ -320,7 +325,9 @@ fn collect(
         }
 
         if meta.is_dir() {
-            if EXCLUDED_DIRS.contains(&name.as_str()) {
+            if EXCLUDED_DIRS.contains(&name.as_str())
+                || (dir == root && ROOT_ONLY_EXCLUDED_DIRS.contains(&name.as_str()))
+            {
                 continue;
             }
             collect(&path, root, out, total, warnings)?;
@@ -531,6 +538,19 @@ mod tests {
         let err = pack_dir(d.path()).unwrap_err();
 
         assert!(err.contains("shortcut/symlink"), "got: {err}");
+    }
+
+    #[test]
+    fn keeps_a_src_folder_inside_the_build_output() {
+        let d = tempfile::tempdir().unwrap();
+        project(d.path());
+        write(d.path(), "src/main.ts", b"export {}");
+        write(d.path(), "dist/src/chunk.js", b"console.log(2)");
+
+        let packed = pack_dir(d.path()).unwrap();
+
+        assert!(packed.entries.contains(&"dist/src/chunk.js".to_string()), "{:?}", packed.entries);
+        assert!(!packed.entries.iter().any(|e| e.starts_with("src/")), "{:?}", packed.entries);
     }
 
     #[test]

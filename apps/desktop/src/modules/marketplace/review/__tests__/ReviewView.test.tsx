@@ -13,7 +13,7 @@ const state = {
 const fns = {
   refetch: vi.fn(),
   inspect: vi.fn(),
-  preview: vi.fn(() => Promise.resolve()),
+  preview: vi.fn((_item: unknown, _opts?: unknown) => Promise.resolve("installed" as string)),
   review: vi.fn(() => Promise.resolve()),
 };
 
@@ -120,13 +120,52 @@ describe("ReviewView", () => {
     expect(screen.getByText(/does not match the report submitted/i)).toBeInTheDocument();
   });
 
-  it("lets a reviewer test-drive the pending build", async () => {
-    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+  it("lets a reviewer test-drive the pending build and then open it", async () => {
+    const onOpenPreview = vi.fn();
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onOpenPreview={onOpenPreview} />);
 
     fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
 
-    await waitFor(() => expect(fns.preview).toHaveBeenCalledWith(ITEM));
-    expect(screen.getByText(/unapproved preview/i)).toBeInTheDocument();
+    await waitFor(() => expect(fns.preview).toHaveBeenCalledWith(ITEM, { replaceInstall: false }));
+    const open = await screen.findByRole("button", { name: /open preview/i });
+    fireEvent.click(open);
+    expect(onOpenPreview).toHaveBeenCalledWith(ITEM);
+    expect(screen.getByText(/installed on this computer as an unapproved preview/i)).toBeInTheDocument();
+  });
+
+  it("offers Open preview straight away when the test-drive build is already installed", () => {
+    const installed = [
+      { id: "aero.test", isPreview: true, installedVersion: "1.2.0" },
+    ] as unknown as Parameters<typeof ReviewView>[0]["installed"];
+    render(
+      <ReviewView available={AVAILABLE} installed={installed} onHelp={() => {}} onOpenPreview={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: /open preview/i })).toBeInTheDocument();
+  });
+
+  it("asks before a test-drive replaces the reviewer's real install", async () => {
+    fns.preview.mockImplementationOnce(() => Promise.resolve("needs-replace-confirm"));
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onOpenPreview={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/replaces your installed copy/i);
+    expect(screen.queryByRole("button", { name: /open preview/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /replace and test-drive/i }));
+    await waitFor(() => expect(fns.preview).toHaveBeenLastCalledWith(ITEM, { replaceInstall: true }));
+    expect(await screen.findByRole("button", { name: /open preview/i })).toBeInTheDocument();
+  });
+
+  it("refreshes Browse and Installed after a decision, and after a failed one", async () => {
+    const onDecided = vi.fn();
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(1));
+
+    fns.review.mockImplementationOnce(() => Promise.reject(new Error("only a pending version can be reviewed")));
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(2));
   });
 
   it("blocks approving your own submission and explains why", () => {

@@ -36,6 +36,15 @@ export interface AvailablePlugin {
   permissions: string[];
   installedVersion: string | null;
   publishedAt: string;
+  /** Set on Installed rows only: this install is a reviewer's test-drive of an
+   *  UNAPPROVED build, not a normal install. */
+  isPreview?: boolean;
+  /** Set on Installed rows only: the review state of the INSTALLED version, so a
+   *  yanked or still-pending install can say so. */
+  installedStatus?: string | null;
+  /** Set on Installed rows only: an approved version of this plugin is on offer,
+   *  so a preview can be swapped for the real thing. */
+  hasApprovedVersion?: boolean;
 }
 
 /** Raw row shape from `marketplace.list_available_plugins()` (snake_case). */
@@ -120,16 +129,131 @@ export function useAvailablePlugins(): {
   return { loading, error, plugins, refetch };
 }
 
-/** The subset the caller has installed. */
+/** Raw row shape from `marketplace.my_installed_plugins()`. */
+export interface MyInstallRow {
+  plugin_id: string;
+  name: string;
+  subteam: string | null;
+  is_recommended: boolean;
+  installed_version: string;
+  is_preview: boolean;
+  installed_at: string;
+  review_status: string | null;
+  manifest: PluginManifest | null;
+  permissions: string[] | null;
+  latest_version: string | null;
+}
+
+/**
+ * The caller's installs, as Installed rows.
+ *
+ * Built from the caller's OWN install rows (`my_installed_plugins`), not by
+ * filtering the Browse list. Browse only carries plugins that still have an
+ * approved version, so yanking a plugin's only release used to make it vanish
+ * from Installed while it was still unpacked on disk, with no way to open or
+ * uninstall it. Where the plugin IS still offered, the Browse row supplies the
+ * newest approved version so "Update" keeps working.
+ *
+ * `rows === null` means the install list could not be fetched (e.g. a backend
+ * without the RPC yet); fall back to the Browse-derived list rather than showing
+ * nothing.
+ */
+export function mergeInstalled(
+  available: AvailablePlugin[],
+  rows: MyInstallRow[] | null,
+): AvailablePlugin[] {
+  if (rows === null) return available.filter((p) => p.installedVersion !== null);
+  const byId = new Map(available.map((p) => [p.id, p]));
+  return rows.map((r) => {
+    const offered = byId.get(r.plugin_id);
+    const manifest = r.manifest ?? offered?.manifest ?? null;
+    return {
+      id: r.plugin_id,
+      name: r.name,
+      subteam: r.subteam,
+      isRecommended: r.is_recommended,
+      // Newest APPROVED version, for the Update affordance. A plugin with none
+      // left (all yanked) has nothing to update to.
+      version: offered?.version ?? r.latest_version ?? r.installed_version,
+      manifest:
+        manifest ??
+        ({
+          format: 1,
+          id: r.plugin_id,
+          name: r.name,
+          version: r.installed_version,
+          entry: "index.html",
+          sdk: "^1.0.0",
+          permissions: [],
+        } as PluginManifest),
+      permissions: offered?.permissions ?? r.permissions ?? [],
+      installedVersion: r.installed_version,
+      publishedAt: offered?.publishedAt ?? r.installed_at,
+      isPreview: r.is_preview,
+      installedStatus: r.review_status,
+      hasApprovedVersion: offered !== undefined || r.latest_version !== null,
+    };
+  });
+}
+
+/** The caller's install rows. `rows` is null when they could not be fetched. */
+export function useMyInstalls(): {
+  loading: boolean;
+  rows: MyInstallRow[] | null;
+  refetch: () => void;
+} {
+  const client = useSupabaseClient();
+  const [rows, setRows] = useState<MyInstallRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  useEffect(() => {
+    if (DEMO) {
+      setRows(null);
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await client.schema(SCHEMA).rpc("my_installed_plugins");
+        if (!active) return;
+        // A failure falls back to the Browse-derived list (see mergeInstalled)
+        // instead of blanking Installed, so it is not surfaced as an error here.
+        setRows(res.error ? null : ((res.data ?? []) as MyInstallRow[]));
+      } catch {
+        if (active) setRows(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [client, reloadKey]);
+
+  return { loading, rows, refetch };
+}
+
+/** The caller's installed plugins (see `mergeInstalled`). */
 export function useInstalledPlugins(): {
   loading: boolean;
   error: string | null;
   plugins: AvailablePlugin[];
   refetch: () => void;
 } {
-  const { loading, error, plugins, refetch } = useAvailablePlugins();
-  const installed = useMemo(() => plugins.filter((p) => p.installedVersion !== null), [plugins]);
-  return { loading, error, plugins: installed, refetch };
+  const avail = useAvailablePlugins();
+  const mine = useMyInstalls();
+  const installed = useMemo(() => mergeInstalled(avail.plugins, mine.rows), [avail.plugins, mine.rows]);
+  const { refetch: refetchAvail } = avail;
+  const { refetch: refetchMine } = mine;
+  const refetch = useCallback(() => {
+    refetchAvail();
+    refetchMine();
+  }, [refetchAvail, refetchMine]);
+  return { loading: avail.loading || mine.loading, error: avail.error, plugins: installed, refetch };
 }
 
 /** Download + verify + install a plugin's current (approved) version. */
@@ -182,7 +306,7 @@ export function useInstall(): {
  *  resurrected old config, and the keys kept eating the plugin's 1 MB quota
  *  forever. */
 export function useUninstall(): {
-  uninstall: (pluginId: string) => Promise<void>;
+  uninstall: (pluginId: string, opts?: { keepData?: boolean }) => Promise<void>;
   removing: boolean;
   error: string | null;
 } {
@@ -193,7 +317,7 @@ export function useUninstall(): {
   const [error, setError] = useState<string | null>(null);
 
   const uninstall = useCallback(
-    async (pluginId: string) => {
+    async (pluginId: string, opts?: { keepData?: boolean }) => {
       if (DEMO) {
         demoUninstall(pluginId);
         return;
@@ -212,7 +336,12 @@ export function useUninstall(): {
         // Erase this member's data vault for the plugin. Done last, after the
         // server-side removal succeeded, so a failed uninstall doesn't throw away
         // the settings of an add-on that is still installed.
-        if (userId) purgePluginStorage(userId, pluginId);
+        //
+        // Removing a reviewer's TEST-DRIVE keeps it: the preview shared the plugin's
+        // storage namespace with any real install the reviewer had, and throwing
+        // away their settings because they reviewed an update would be a nasty
+        // surprise.
+        if (userId && !opts?.keepData) purgePluginStorage(userId, pluginId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);

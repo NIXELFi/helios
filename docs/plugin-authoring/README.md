@@ -26,7 +26,7 @@ bundled) that:
 - Renders its own UI and computes freely (this is where it has full freedom).
 - Is delivered as a `.hplugin` zip containing `manifest.json` + a `dist/` folder.
 - Has a **self-contained `dist/index.html`** entry: all JS, CSS, and assets are
-  inlined or referenced by **relative** paths inside `dist/`.
+  inlined into the entry HTML (a separate file in `dist/` is never loaded, even by relative path).
 - Runs at an **opaque origin** — it cannot load anything cross-origin (no CDNs, no
   remote fonts, no remote images, no remote scripts).
 - Talks to Helios **only** through `@helios/plugin-sdk`.

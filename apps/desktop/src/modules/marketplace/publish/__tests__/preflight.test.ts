@@ -134,3 +134,23 @@ describe("reportsDisagree", () => {
     expect(reportsDisagree(null, fresh)).toBe(false);
   });
 });
+
+describe("preflight — external files the sandbox never loads", () => {
+  it("blocks a multi-file build with an explanation that names the fix", () => {
+    const r = preflight(
+      { "dist/index.html": '<script type="module" src="./assets/index.js"></script>' },
+      manifest,
+    );
+    expect(r.ok).toBe(false);
+    const f = r.errors.find((e) => e.code === "external-asset");
+    expect(f?.title).toMatch(/loads code from a separate file/i);
+    expect(f?.detail).toMatch(/single-file/i);
+    expect(f?.helpTopic).toBe("bundle");
+  });
+
+  it("only warns about a missing image", () => {
+    const r = preflight({ "dist/index.html": '<img src="logo.png">' }, manifest);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.code === "external-asset")).toBe(true);
+  });
+});

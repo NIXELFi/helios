@@ -74,3 +74,24 @@ describe("isDuplicateObjectError", () => {
     expect(isDuplicateObjectError({ message: "Payload too large", statusCode: "413" })).toBe(false);
   });
 });
+
+describe("explainPublishError — 0930 additions", () => {
+  it("says an existing plugin id belongs to another subteam instead of suggesting a subteam change", () => {
+    const e = explainPublishError({
+      message: "insufficient privilege to publish to plugin aero.x (subteam 1234)",
+    });
+    expect(e.title).toMatch(/belongs to another subteam/i);
+    expect(e.detail).toMatch(/different "id"/i);
+    expect(e.retryable).toBe(false);
+  });
+
+  it("explains a squatted or unreadable bundle slot", () => {
+    const e = explainPublishError(new Error("BUNDLE_SLOT_TAKEN: sha256 mismatch"));
+    expect(e.title).toMatch(/different file is stored/i);
+    expect(e.retryable).toBe(false);
+  });
+
+  it("maps Storage's size refusal to the size explanation", () => {
+    expect(explainPublishError({ message: "Payload too large" }).title).toMatch(/too large/i);
+  });
+});

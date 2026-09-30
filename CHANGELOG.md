@@ -40,11 +40,37 @@ follow [semver](https://semver.org/).
   permission diff against the last approved version (so "asks for nothing new"
   and "now wants to run MATLAB" look nothing alike), a compliance scan Helios
   re-runs against the uploaded bundle rather than trusting the author's copy, and
-  a Test-drive button that installs the pending build locally so you can run it
-  before deciding. You still cannot approve your own submission.
+  a Test-drive button that installs the pending build locally and an Open
+  preview button to run it (clearly labelled as an unapproved preview) before
+  deciding. If you already have that plugin installed, Helios asks before the
+  preview replaces it. You still cannot approve your own submission, and a
+  version its author has withdrawn can no longer be approved from a stale queue.
+- **A My plugins tab** for anyone who can publish: every version you and your
+  subteam have submitted with its review status and the reviewer's note inline,
+  one-click withdraw of a pending submission, and yank of a bad release (anyone
+  who already installed it keeps a working copy). Only the version's author or a
+  lead/VP can withdraw or yank it, and "recommended for my subteam" is a lead/VP
+  toggle.
 - **A plugin author help panel**, reachable from the Marketplace header and from
   every step of the submit wizard: what the sandbox blocks and why, what each
   permission actually grants, how review works, and what to do after a rejection.
+
+### Fixed
+
+- Marketplace: a plugin whose only release was yanked no longer disappears from
+  Installed. It stays openable and uninstallable, marked as pulled by its author.
+- Marketplace: the plugin check now fails a normal multi-file build (a separate
+  script or stylesheet next to index.html). Those passed before and then opened
+  as a blank page, because a plugin runs from its entry HTML alone. The help
+  panel and authoring docs no longer say relative files work.
+- Marketplace: installs verify a plugin against the key it was actually signed
+  with, so rotating the signing key will not break older versions; bundle
+  downloads now time out instead of spinning forever on a stalled connection;
+  approving a plugin shows it in Browse straight away.
+- Marketplace (security): the function that signs plugin bundles could be called
+  by any signed-in account; it is now reachable only from the publish step.
+  Storage also enforces the 25 MB bundle cap itself, and a bundle that already
+  exists under the same fingerprint is checked byte-for-byte before it is used.
 
 ## [5.13.5] - 2026-09-29
 

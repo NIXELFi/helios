@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import {
   IconAlertTriangle,
   IconCircleCheck,
+  IconDownload,
   IconLoader2,
   IconPlayerPlay,
   IconScan,
@@ -32,13 +33,22 @@ import type { AvailablePlugin } from "../data/useMarketplace";
 
 export function ReviewView({
   available,
+  installed = [],
   onHelp,
   onPreviewInstalled,
+  onOpenPreview,
+  onDecided,
 }: {
   /** Approved plugins, used to diff a submission against its last release. */
   available: AvailablePlugin[];
+  /** The reviewer's installs, so a card can tell a test-drive is ready to open. */
+  installed?: AvailablePlugin[];
   onHelp: (t: HelpTopic) => void;
   onPreviewInstalled?: () => void;
+  /** Launch the locally installed test-drive build of this item. */
+  onOpenPreview?: (item: ReviewItem) => void;
+  /** A decision landed: Browse and Installed are now stale too. */
+  onDecided?: () => void;
 }) {
   const { loading, error, queue, refetch } = useReviewQueue();
   const user = useUser();
@@ -84,9 +94,16 @@ export function ReviewView({
           item={item}
           available={available}
           isOwnSubmission={item.publishedBy === user?.id}
-          onDone={refetch}
+          previewReady={installed.some(
+            (p) => p.id === item.pluginId && p.isPreview && p.installedVersion === item.version,
+          )}
+          onDone={() => {
+            refetch();
+            onDecided?.();
+          }}
           onHelp={onHelp}
           onPreviewInstalled={onPreviewInstalled}
+          onOpenPreview={onOpenPreview}
         />
       ))}
     </div>
@@ -97,16 +114,20 @@ function ReviewCard({
   item,
   available,
   isOwnSubmission,
+  previewReady,
   onDone,
   onHelp,
   onPreviewInstalled,
+  onOpenPreview,
 }: {
   item: ReviewItem;
   available: AvailablePlugin[];
   isOwnSubmission: boolean;
+  previewReady: boolean;
   onDone: () => void;
   onHelp: (t: HelpTopic) => void;
   onPreviewInstalled?: () => void;
+  onOpenPreview?: (item: ReviewItem) => void;
 }) {
   const key = `${item.pluginId}@${item.version}`;
   const { inspect, reports, inspecting, error: inspectError } = useReviewInspect();
@@ -114,6 +135,27 @@ function ReviewCard({
   const { review, reviewing, error: reviewError } = useReviewVersion();
   const [notes, setNotes] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  // Set the moment this card's own test-drive finishes, so Open appears without
+  // waiting for the Installed list to refetch.
+  const [justPreviewed, setJustPreviewed] = useState(false);
+  const canOpenPreview = previewReady || justPreviewed;
+
+  function startPreview(replaceInstall: boolean) {
+    setConfirmReplace(false);
+    void preview(item, { replaceInstall })
+      .then((outcome) => {
+        if (outcome === "needs-replace-confirm") {
+          setConfirmReplace(true);
+          return;
+        }
+        setJustPreviewed(true);
+        onPreviewInstalled?.();
+      })
+      .catch(() => {
+        /* surfaced below */
+      });
+  }
 
   const previousApproved = useMemo(
     () => available.find((p) => p.id === item.pluginId)?.permissions ?? null,
@@ -128,14 +170,21 @@ function ReviewCard({
   const busy = inspecting === key || previewing === key || reviewing;
 
   async function decide(decision: "approved" | "rejected") {
-    await review({
-      pluginId: item.pluginId,
-      version: item.version,
-      decision,
-      notes: notes.trim() || undefined,
-      // Attach the reviewer's own scan, not the author's.
-      report: scan?.report.raw ?? undefined,
-    });
+    try {
+      await review({
+        pluginId: item.pluginId,
+        version: item.version,
+        decision,
+        notes: notes.trim() || undefined,
+        // Attach the reviewer's own scan, not the author's.
+        report: scan?.report.raw ?? undefined,
+      });
+    } catch {
+      // Surfaced below via reviewError. If the author withdrew it meanwhile, the
+      // refetch drops the card, which is the honest outcome.
+      onDone();
+      return;
+    }
     onDone();
   }
 
@@ -255,30 +304,66 @@ function ReviewCard({
       </div>
 
       {/* Test-drive. Approving something nobody ran is most of the way to not reviewing it. */}
-      <div className="mt-3 flex items-center justify-between gap-2 rounded-sm border border-helios-line bg-helios-base p-3">
-        <div className="min-w-0 text-[11px] leading-relaxed text-helios-text/90">
-          Install this pending build locally and run it. It is marked as an unapproved preview and does
-          not affect what Browse says you have installed.
+      <div className="mt-3 rounded-sm border border-helios-line bg-helios-base p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 text-[11px] leading-relaxed text-helios-text/90">
+            {canOpenPreview
+              ? "The pending build is installed on this computer as an unapproved preview."
+              : "Install this pending build locally and run it. It is marked as an unapproved preview and does not show as installed in Browse."}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {canOpenPreview && onOpenPreview && (
+              <button
+                type="button"
+                onClick={() => onOpenPreview(item)}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-sm border border-asu-gold/60 px-2.5 py-1 text-[11px] font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+              >
+                <IconPlayerPlay size={12} /> Open preview
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => startPreview(false)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-sm border border-helios-line px-2.5 py-1 text-[11px] font-medium text-helios-dim transition-colors hover:border-asu-gold/40 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+            >
+              {previewing === key ? (
+                <IconLoader2 size={12} className="animate-spin" />
+              ) : (
+                <IconDownload size={12} />
+              )}
+              {canOpenPreview ? "Reinstall" : "Test-drive"}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            void preview(item)
-              .then(() => onPreviewInstalled?.())
-              .catch(() => {
-                /* surfaced below */
-              });
-          }}
-          disabled={busy}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-helios-line px-2.5 py-1 text-[11px] font-medium text-helios-dim transition-colors hover:border-asu-gold/40 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
-        >
-          {previewing === key ? (
-            <IconLoader2 size={12} className="animate-spin" />
-          ) : (
-            <IconPlayerPlay size={12} />
-          )}
-          Test-drive
-        </button>
+        {confirmReplace && (
+          <div
+            role="alertdialog"
+            aria-label="Replace your installed copy?"
+            className="mt-2 rounded-sm border border-helios-warn/50 bg-helios-warn/10 p-2.5 text-[11px] leading-relaxed text-helios-text/90"
+          >
+            You already have {item.name} installed. Test-driving this build replaces your installed copy on
+            this computer (your saved data is kept). When you are done, remove the preview from Installed and
+            install the approved version again from Browse.
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmReplace(false)}
+                className="rounded-sm border border-helios-line px-2.5 py-1 text-[11px] text-helios-dim hover:text-helios-text"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => startPreview(true)}
+                className="rounded-sm bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-base hover:opacity-90"
+              >
+                Replace and test-drive
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       {previewError && (
         <p className="mt-1.5 text-[11px] text-helios-danger">Test-drive failed: {previewError}</p>

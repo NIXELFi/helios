@@ -46,20 +46,64 @@ function isScannable(path) {
   return SCANNABLE_EXTENSIONS.some((e) => p.endsWith(e));
 }
 
+// External references in the ENTRY document. The host reads the entry HTML and
+// runs it as an iframe `srcdoc` under a CSP that only allows inline script/style
+// and data:/blob: images, so nothing the entry points at by URL is ever loaded,
+// relative path or not. A default multi-file build (Vite's `assets/index-abc.js`)
+// therefore packs fine and opens as a blank page. Scripts and stylesheets are
+// errors (the plugin cannot work); images and CSS url()s are warnings (it works,
+// minus the picture).
+const EXTERNAL_REF_RULES = [
+  {
+    re: /<script\b[^>]*\bsrc\s*=\s*["']?(?!data:|blob:)[^"'\s>]+/i,
+    level: "error",
+    msg: "the entry HTML loads a script by URL (`<script src=...>`). Plugins run from the entry HTML alone, so it will never load and the page stays blank. Inline the script: build with a single-file setup (e.g. vite-plugin-singlefile).",
+  },
+  {
+    re: /<link\b(?=[^>]*\brel\s*=\s*["']?[^"'>]*\b(?:stylesheet|modulepreload)\b)[^>]*\bhref\s*=\s*["']?(?!data:|blob:)[^"'\s>]+/i,
+    level: "error",
+    msg: "the entry HTML links a stylesheet or module by URL (`<link href=...>`). It will never load. Inline your CSS/JS into the entry HTML with a single-file build.",
+  },
+  {
+    re: /<(?:img|source|image)\b[^>]*\b(?:src|href)\s*=\s*["']?(?!data:|blob:|#)[^"'\s>]+/i,
+    level: "warn",
+    msg: "the entry HTML references an image by URL. Only data: and blob: images load in the sandbox, so it will show as broken. Embed it as a data: URI.",
+  },
+  {
+    // Lower-case and not part of an identifier, so JS like `URL.createObjectURL(`
+    // or `canvas.toDataURL(` in an inlined bundle does not trip it.
+    re: /(?<![\w.$])url\(\s*["']?(?!data:|blob:|#)[^)"'\s]+/,
+    level: "warn",
+    msg: "the entry HTML uses a CSS url(...) that is not a data: URI (a font, background image or @import). It will not load in the sandbox. Embed it as a data: URI.",
+  },
+];
+
+function normalizeEntry(entry) {
+  return typeof entry === "string" ? entry.replace(/^\.?\//, "") : null;
+}
+
 /**
  * Scan a built bundle for compliance findings.
  * @param {Record<string, string>} files  path -> file contents (only scannable
  *   extensions are inspected; the rest are ignored)
- * @param {{ permissions?: string[] }} manifest  the (already-parsed) manifest
+ * @param {{ permissions?: string[], entry?: string }} manifest  the (already-parsed) manifest
  * @returns {Array<{level:"error"|"warn", kind:string, message:string, path?:string, permission?:string}>}
  */
 export function scanBundle(files, manifest) {
   const findings = [];
   const declared = new Set(Array.isArray(manifest?.permissions) ? manifest.permissions : []);
   const used = new Set();
+  const entry = normalizeEntry(manifest?.entry);
 
   for (const [path, content] of Object.entries(files)) {
     if (!isScannable(path) || typeof content !== "string") continue;
+    if (entry && path.replace(/^\.?\//, "") === entry) {
+      for (const rule of EXTERNAL_REF_RULES) {
+        if (rule.re.test(content)) {
+          findings.push({ level: rule.level, kind: "external-asset", message: rule.msg, path });
+        }
+      }
+    }
     for (const rule of FORBIDDEN) {
       if (rule.re.test(content)) {
         findings.push({ level: "error", kind: "forbidden-api", message: rule.msg, path });

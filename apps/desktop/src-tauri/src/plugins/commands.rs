@@ -116,7 +116,9 @@ pub async fn install_plugin_bundle(
 /// cannot drift on the one behavior that keeps a hostile URL from exhausting
 /// memory.
 async fn download_capped(signed_url: &str, expected_bytes: u64) -> Result<Vec<u8>, String> {
-    let mut resp = reqwest::get(signed_url)
+    let mut resp = download_client()
+        .get(signed_url)
+        .send()
         .await
         .map_err(|e| format!("download failed: {e}"))?;
     if !resp.status().is_success() {
@@ -136,6 +138,22 @@ async fn download_capped(signed_url: &str, expected_bytes: u64) -> Result<Vec<u8
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
+}
+
+/// One shared client for bundle downloads, with timeouts. The bare
+/// `reqwest::get` this replaced had none, so a stalled connection left the
+/// Install / Scan / Test-drive spinner running forever (the same class of hang
+/// the vault sync fixed with its 30 s timeout). The total cap is generous: a
+/// 25 MiB bundle still fits at ~90 KB/s.
+fn download_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 /// What `pack_plugin_bundle` hands back to the submit wizard.

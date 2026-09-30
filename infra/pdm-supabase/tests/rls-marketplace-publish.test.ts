@@ -257,13 +257,15 @@ describe("marketplace — author-side management RPCs", () => {
     expect(installErr?.message).toMatch(/not installable/i);
   });
 
-  it("toggles is_recommended only for a publisher on the owning subteam", async () => {
+  it("toggles is_recommended only for a lead/VP on the owning subteam", async () => {
     const subA = await makeSubteam("aero");
     const subB = await makeSubteam("chassis");
     const author = await createTestUser(uniqueEmail("author"));
+    const lead = await createTestUser(uniqueEmail("lead"));
     const outsider = await createTestUser(uniqueEmail("outsider"));
     await grantPmRole(author.id, "engineer", subA);
-    await grantPmRole(outsider.id, "engineer", subB);
+    await grantPmRole(lead.id, "lead", subA);
+    await grantPmRole(outsider.id, "lead", subB);
     const pluginId = await seedPlugin({
       subteam: subA,
       createdBy: author.id,
@@ -275,9 +277,16 @@ describe("marketplace — author-side management RPCs", () => {
     const { error: badErr } = await bad
       .schema("marketplace")
       .rpc("set_plugin_recommended", { p_plugin_id: pluginId, p_value: true });
-    expect(badErr?.message).toMatch(/insufficient privilege/i);
+    expect(badErr?.message).toMatch(/only a lead or VP/i);
 
-    const good = await signInAs(author.email!);
+    // Publishing a plugin does not make you the one who recommends it.
+    const authorClient = await signInAs(author.email!);
+    const { error: authorErr } = await authorClient
+      .schema("marketplace")
+      .rpc("set_plugin_recommended", { p_plugin_id: pluginId, p_value: true });
+    expect(authorErr?.message).toMatch(/only a lead or VP/i);
+
+    const good = await signInAs(lead.email!);
     const { error: goodErr } = await good
       .schema("marketplace")
       .rpc("set_plugin_recommended", { p_plugin_id: pluginId, p_value: true });
@@ -423,5 +432,169 @@ describe("marketplace — reviewer preview installs", () => {
     expect(row).toBeTruthy();
     // The preview must NOT read as "you have 1.1.0 installed".
     expect(row.installed_version).toBeNull();
+  });
+});
+
+describe("marketplace — 0930 triage fixes", () => {
+  beforeEach(async () => {
+    await resetAuthUsers();
+  });
+  afterEach(async () => {
+    await resetAuthUsers();
+  });
+
+  it("refuses a withdraw from a teammate who did not publish the version", async () => {
+    const sub = await makeSubteam("aero");
+    const author = await createTestUser(uniqueEmail("author"));
+    const teammate = await createTestUser(uniqueEmail("teammate"));
+    await grantPmRole(author.id, "engineer", sub);
+    await grantPmRole(teammate.id, "engineer", sub);
+    const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "pending" });
+
+    const client = await signInAs(teammate.email!);
+    const { error } = await client
+      .schema("marketplace")
+      .rpc("withdraw_plugin_version", { p_plugin_id: pluginId, p_version: "1.0.0" });
+    expect(error?.message).toMatch(/only the author .* or a reviewer/i);
+    expect(await versionStatus(pluginId, "1.0.0")).toBe("pending");
+  });
+
+  it("lets a reviewer on the owning subteam yank a release they did not publish", async () => {
+    const sub = await makeSubteam("aero");
+    const author = await createTestUser(uniqueEmail("author"));
+    const lead = await createTestUser(uniqueEmail("lead"));
+    await grantPmRole(author.id, "engineer", sub);
+    await grantPmRole(lead.id, "lead", sub);
+    const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "approved" });
+
+    const client = await signInAs(lead.email!);
+    const { error } = await client
+      .schema("marketplace")
+      .rpc("yank_plugin_version", { p_plugin_id: pluginId, p_version: "1.0.0" });
+    expect(error).toBeNull();
+    expect(await versionStatus(pluginId, "1.0.0")).toBe("yanked");
+  });
+
+  it.each(["withdrawn", "yanked", "approved", "rejected"])(
+    "refuses to review a version that is already %s",
+    async (status) => {
+      const sub = await makeSubteam("aero");
+      const author = await createTestUser(uniqueEmail("author"));
+      const lead = await createTestUser(uniqueEmail("lead"));
+      await grantPmRole(lead.id, "lead", sub);
+      const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "pending" });
+      await serviceClient()
+        .schema("marketplace")
+        .from("plugin_versions")
+        .update({ review_status: status })
+        .eq("plugin_id", pluginId)
+        .eq("version", "1.0.0");
+
+      const client = await signInAs(lead.email!);
+      const { error } = await client.schema("marketplace").rpc("review_plugin_version", {
+        p_plugin_id: pluginId,
+        p_version: "1.0.0",
+        p_decision: "approved",
+      });
+      expect(error?.message).toMatch(/only a pending version can be reviewed/i);
+      expect(await versionStatus(pluginId, "1.0.0")).toBe(status);
+    },
+  );
+
+  it("refuses a preview that would replace a real install unless asked, and a normal install clears the flag", async () => {
+    const sub = await makeSubteam("aero");
+    const author = await createTestUser(uniqueEmail("author"));
+    const lead = await createTestUser(uniqueEmail("lead"));
+    await grantPmRole(lead.id, "lead", sub);
+    const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "approved" });
+    await serviceClient()
+      .schema("marketplace")
+      .from("plugin_versions")
+      .insert({
+        plugin_id: pluginId,
+        version: "1.1.0",
+        manifest: { format: 1, id: pluginId, name: "t", version: "1.1.0", entry: "dist/index.html", sdk: "^1.0.0", permissions: [] },
+        permissions: [],
+        bundle_sha256: "d".repeat(64),
+        bundle_bytes: 2048,
+        review_status: "pending",
+        published_by: author.id,
+      });
+    const client = await signInAs(lead.email!);
+    const mp = client.schema("marketplace");
+
+    expect((await mp.rpc("install_plugin", { p_plugin_id: pluginId, p_version: "1.0.0" })).error).toBeNull();
+
+    const refused = await mp.rpc("install_plugin_for_review", { p_plugin_id: pluginId, p_version: "1.1.0" });
+    expect(refused.error?.message).toMatch(/PREVIEW_REPLACES_INSTALL/);
+
+    const replaced = await mp.rpc("install_plugin_for_review", {
+      p_plugin_id: pluginId,
+      p_version: "1.1.0",
+      p_replace_install: true,
+    });
+    expect(replaced.error).toBeNull();
+
+    expect((await mp.rpc("install_plugin", { p_plugin_id: pluginId, p_version: "1.0.0" })).error).toBeNull();
+    const { data } = await serviceClient()
+      .schema("marketplace")
+      .from("plugin_installs")
+      .select("is_preview,installed_version")
+      .eq("user_id", lead.id)
+      .eq("plugin_id", pluginId)
+      .single();
+    expect(data).toEqual({ is_preview: false, installed_version: "1.0.0" });
+  });
+
+  it("keeps a yanked install in my_installed_plugins", async () => {
+    const sub = await makeSubteam("aero");
+    const author = await createTestUser(uniqueEmail("author"));
+    const member = await createTestUser(uniqueEmail("member"));
+    const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "approved" });
+    const client = await signInAs(member.email!);
+    const mp = client.schema("marketplace");
+    expect((await mp.rpc("install_plugin", { p_plugin_id: pluginId, p_version: "1.0.0" })).error).toBeNull();
+
+    await serviceClient()
+      .schema("marketplace")
+      .from("plugin_versions")
+      .update({ review_status: "yanked" })
+      .eq("plugin_id", pluginId)
+      .eq("version", "1.0.0");
+
+    const { data, error } = await mp.rpc("my_installed_plugins");
+    expect(error).toBeNull();
+    const row = (data ?? []).find((r: { plugin_id: string }) => r.plugin_id === pluginId);
+    expect(row).toMatchObject({ installed_version: "1.0.0", review_status: "yanked", is_preview: false });
+  });
+
+  it("does not let a signed-in member call the signing function", async () => {
+    const member = await createTestUser(uniqueEmail("member"));
+    const client = await signInAs(member.email!);
+    const { data, error } = await client.schema("marketplace").rpc("sign_message", { p_msg: "\\x00" });
+    expect(data).toBeNull();
+    expect(error).not.toBeNull();
+  });
+
+  it("rejects a manifest with a permission outside the catalog", async () => {
+    const sub = await makeSubteam("aero");
+    const author = await createTestUser(uniqueEmail("author"));
+    await grantPmRole(author.id, "engineer", sub);
+    const client = await signInAs(author.email!);
+    const { error } = await client.schema("marketplace").rpc("publish_plugin_version", {
+      p_manifest: {
+        format: 1,
+        id: `test.bad-${suffix()}`,
+        name: "Bad",
+        version: "0.1.0",
+        entry: "index.html",
+        sdk: "^1.0.0",
+        permissions: ["network"],
+      },
+      p_sha256: "e".repeat(64),
+      p_bytes: 100,
+      p_subteam: sub,
+    });
+    expect(error?.message).toMatch(/unknown permission/i);
   });
 });

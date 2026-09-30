@@ -110,6 +110,26 @@ function explain(f: ComplianceFinding): PreflightFinding {
           "permissions array — or, if the capability is not actually needed, remove the code that calls it.",
         helpTopic: "permissions",
       };
+    case "external-asset":
+      return {
+        level: f.level === "error" ? "error" : "warning",
+        code: "external-asset",
+        title:
+          f.level === "error"
+            ? "Your entry page loads code from a separate file"
+            : "Your entry page points at an image or font file",
+        detail:
+          "Helios runs your plugin from the entry HTML file alone, inside a sandbox that only allows " +
+          "inline code and data: images. Anything the page loads by URL, even a file sitting next to it " +
+          "in dist/, is never fetched. " +
+          (f.level === "error"
+            ? "With a script or stylesheet that means a blank page. Ask your agent to switch the build " +
+              "to a single-file output (for Vite: vite-plugin-singlefile) so everything is inlined."
+            : "The plugin still runs, but the image or font will be missing. Embed it as a data: URI.") +
+          `\n\nThe scanner reported: ${f.message}`,
+        path: f.path,
+        helpTopic: "bundle",
+      };
     case "unused-permission":
       return {
         level: "warning",

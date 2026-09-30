@@ -83,10 +83,10 @@ export const HELP_ARTICLES: Record<HelpTopic, HelpArticle> = {
       {
         heading: "Everything must be self-contained",
         body: [
-          "The entry HTML has to work with no network. Scripts, styles, fonts, and images must be inlined or referenced by relative paths inside the bundle. A CDN link, a Google Font, or a remote image will simply not load.",
+          "Helios runs your plugin from the entry HTML file alone. Scripts, styles, fonts, and images must be INLINED into that one file: a CDN link, a Google Font, or a remote image will not load, and neither will a separate file next to it in dist/ (a normal multi-file build opens as a blank page). Build with a single-file setup, for Vite that is vite-plugin-singlefile.",
         ],
         bullets: [
-          "Images go in as data: URIs or files inside dist/.",
+          "Images and fonts go in as data: URIs.",
           "No <script src=\"https://...\">, no remote stylesheets, no web fonts from a URL.",
           "Bundle your framework in rather than loading it from a CDN.",
         ],

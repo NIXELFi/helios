@@ -56,19 +56,84 @@ describe("marketplace publish-UI migration", () => {
     for (const d of defs) expect(d).toMatch(/set search_path =/);
   });
 
-  it("grants execute to authenticated for every function it defines", () => {
-    const defined = [...SQL.matchAll(/create or replace function marketplace\.(\w+)/g)].map(
-      (m) => m[1],
-    );
+  // Helpers only SECURITY DEFINER functions may call, as the owner.
+  const INTERNAL = ["validate_manifest", "can_manage_version"];
+  const finalGrant = () => SQL.split("grant execute on function\n").pop()!;
+
+  it("grants execute to authenticated for every API function it defines", () => {
+    const defined = [...SQL.matchAll(/create or replace function marketplace\.(\w+)/g)]
+      .map((m) => m[1])
+      .filter((fn) => !INTERNAL.includes(fn));
     for (const fn of defined) {
-      expect(SQL).toMatch(new RegExp(`grant execute on function marketplace\\.${fn}\\(`));
+      expect(finalGrant(), `${fn} missing from the final grant`).toMatch(
+        new RegExp(`marketplace\\.${fn}\\(`),
+      );
     }
   });
 
-  it("re-checks the publish capability inside every author-side RPC", () => {
-    for (const fn of ["withdraw_plugin_version", "yank_plugin_version", "set_plugin_recommended"]) {
-      expect(bodyOf(fn)).toMatch(/pm\.has_capability\(v_uid, 'marketplace\.publish'/);
+  it("strips the default PUBLIC execute grant from the whole schema", () => {
+    expect(SQL).toMatch(/revoke execute on all functions in schema marketplace from public, anon;/);
+    expect(SQL).toMatch(
+      /alter default privileges in schema marketplace revoke execute on functions from public;/,
+    );
+  });
+
+  it.each([
+    ["sign_message", "sign_message\\(bytea\\)"],
+    ["validate_manifest", "validate_manifest\\(jsonb\\)"],
+    ["can_manage_version", "can_manage_version\\(uuid, text, text\\)"],
+  ])("never grants the internal helper %s to authenticated", (_name, sig) => {
+    expect(SQL).toMatch(new RegExp(`revoke execute on function marketplace\\.${sig} from authenticated`));
+    expect(finalGrant()).not.toMatch(new RegExp(`marketplace\\.${sig}`));
+  });
+
+  it("lets only the author or a reviewer withdraw or yank", () => {
+    for (const fn of ["withdraw_plugin_version", "yank_plugin_version"]) {
+      expect(bodyOf(fn)).toMatch(/marketplace\.can_manage_version\(v_uid, p_plugin_id, p_version\)/);
     }
+    const helper = bodyOf("can_manage_version");
+    expect(helper).toMatch(/pv\.published_by = p_uid/);
+    expect(helper).toMatch(/'marketplace\.review'/);
+  });
+
+  it("makes recommending a lead/VP decision", () => {
+    expect(bodyOf("set_plugin_recommended")).toMatch(
+      /pm\.has_capability\(v_uid, 'marketplace\.review'/,
+    );
+  });
+
+  it("only reviews pending versions, under a row lock", () => {
+    const body = bodyOf("review_plugin_version");
+    expect(body).toMatch(/for update/);
+    expect(body).toMatch(/v_status <> 'pending'/);
+    expect(body).toMatch(/you cannot approve your own submission/);
+  });
+
+  it("clears is_preview on every normal install", () => {
+    expect(bodyOf("install_plugin(")).toMatch(/is_preview\s*=\s*false/);
+  });
+
+  it("refuses a preview that would silently replace a real install", () => {
+    const body = bodyOf("install_plugin_for_review");
+    expect(body).toMatch(/p_replace_install/);
+    expect(body).toMatch(/PREVIEW_REPLACES_INSTALL/);
+  });
+
+  it("builds Installed from the caller's own install rows", () => {
+    const body = bodyOf("my_installed_plugins");
+    expect(body).toMatch(/from marketplace\.plugin_installs i/);
+    expect(body).toMatch(/i\.user_id = auth\.uid\(\)/);
+    expect(body).toMatch(/left join marketplace\.plugin_versions/);
+  });
+
+  it("validates permissions against the SDK catalog", () => {
+    const body = bodyOf("validate_manifest");
+    expect(body).toMatch(/not in \('file\.read', 'file\.write', 'storage', 'engine:matlab'\)/);
+    expect(body).toMatch(/%\(2e\|2f\|5c\)/);
+  });
+
+  it("caps the plugins bucket at 25 MiB", () => {
+    expect(SQL).toMatch(/file_size_limit = 26214400/);
   });
 
   it("requires the review capability for a reviewer preview install", () => {

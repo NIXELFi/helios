@@ -55,10 +55,7 @@ export async function signedBundleUrl(client: Client, sha256: string): Promise<s
 export async function installBundle(client: Client, row: InstallMetaRow): Promise<void> {
   const signedUrl = await signedBundleUrl(client, row.bundle_sha256);
 
-  const pk = await client.schema(SCHEMA).rpc("signing_public_key");
-  if (pk.error) throw new Error(pk.error.message);
-  const keyRow = ((pk.data ?? []) as PublicKeyRow[])[0];
-  if (!keyRow) throw new Error("no marketplace signing key available");
+  const keyRow = await publicKeyFor(client, row.signing_key_id);
 
   await invoke("install_plugin_bundle", {
     pluginId: row.plugin_id,
@@ -72,4 +69,26 @@ export async function installBundle(client: Client, row: InstallMetaRow): Promis
     // H1: the bundle's own manifest cannot grant itself more than was approved.
     approvedPermissions: row.manifest.permissions ?? [],
   });
+}
+
+/**
+ * The public key THIS version was signed with, not whichever key is active now.
+ * Otherwise the first key rotation would make every older version fail signature
+ * verification on install. Falls back to the active key only when the backend
+ * predates `signing_public_key_for` (PostgREST PGRST202: no such function).
+ */
+async function publicKeyFor(client: Client, keyId: string): Promise<PublicKeyRow> {
+  const byId = await client.schema(SCHEMA).rpc("signing_public_key_for", { p_key_id: keyId });
+  if (!byId.error) {
+    const row = ((byId.data ?? []) as PublicKeyRow[])[0];
+    if (!row) throw new Error(`the key this version was signed with (${keyId}) is not on the server`);
+    return row;
+  }
+  if (byId.error.code !== "PGRST202") throw new Error(byId.error.message);
+
+  const active = await client.schema(SCHEMA).rpc("signing_public_key");
+  if (active.error) throw new Error(active.error.message);
+  const row = ((active.data ?? []) as PublicKeyRow[])[0];
+  if (!row) throw new Error("no marketplace signing key available");
+  return row;
 }

@@ -18,6 +18,10 @@ export interface ExplainedError {
   retryable: boolean;
 }
 
+/** Raised by the submit flow when an object already stored under the bundle's
+ *  sha256 cannot be proven to be the same bytes. */
+export const BUNDLE_SLOT_TAKEN = "BUNDLE_SLOT_TAKEN";
+
 function messageOf(e: unknown): string {
   if (typeof e === "string") return e;
   if (e && typeof e === "object") {
@@ -47,6 +51,46 @@ export function explainPublishError(e: unknown, context?: { version?: string }):
         "Published versions can never be changed — people install specific versions, and results have to stay " +
         `reproducible. Bump "version" in manifest.json to ${next}, rebuild, and submit again.`,
       helpTopic: "versions",
+      retryable: false,
+    };
+  }
+
+  // An EXISTING plugin whose id belongs to a subteam the caller cannot publish to.
+  // Distinct from the generic case below: picking another subteam will not help,
+  // because ownership of an existing plugin never moves.
+  if (msg.includes("insufficient privilege to publish to plugin")) {
+    return {
+      title: "This plugin id belongs to another subteam",
+      detail:
+        "A plugin with this id is already published by a subteam you cannot publish to, and a plugin's " +
+        "owner never changes. If this is your own new plugin, give it a different \"id\" in manifest.json " +
+        "(for example prefix it with your subteam). If you are meant to maintain that plugin, ask its " +
+        "subteam's lead to add you.",
+      helpTopic: "manifest",
+      retryable: false,
+    };
+  }
+
+  if (msg.includes(BUNDLE_SLOT_TAKEN.toLowerCase())) {
+    return {
+      title: "A different file is stored under this bundle's fingerprint",
+      detail:
+        "The marketplace stores bundles by their SHA-256, and something already stored under this one is " +
+        "not your bundle (or cannot be checked). Nothing was published. Change anything in the plugin " +
+        "(for example bump the version), rebuild, and submit again, and tell your lead so the stray file " +
+        "can be looked at.",
+      helpTopic: "bundle",
+      retryable: false,
+    };
+  }
+
+  if (msg.includes("payload too large") || msg.includes("exceeded the maximum allowed size")) {
+    return {
+      title: "The bundle is too large",
+      detail:
+        "A plugin bundle is capped at 25 MB. It is almost always one large asset — check for uncompressed " +
+        "images or data files that could be trimmed or left out of dist/.",
+      helpTopic: "bundle",
       retryable: false,
     };
   }

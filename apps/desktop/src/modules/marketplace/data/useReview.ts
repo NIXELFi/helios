@@ -208,12 +208,21 @@ export function useReviewInspect(): {
   return { inspect, reports, inspecting, error };
 }
 
+/** Outcome of a test-drive request. `needs-replace-confirm` means the reviewer
+ *  already has a real install of this plugin, which a preview would replace on
+ *  disk (the install cache holds one copy per plugin); ask, then call again with
+ *  `replaceInstall: true`. */
+export type PreviewOutcome = "installed" | "needs-replace-confirm";
+
+/** The server's refusal text for that case (install_plugin_for_review). */
+export const PREVIEW_REPLACES_INSTALL = "PREVIEW_REPLACES_INSTALL";
+
 /** Install a PENDING version locally so a reviewer can actually run it before
- *  deciding. Goes through `install_plugin_for_review` — a separate RPC, so the
- *  approved-only rule in `install_plugin` stays unconditional — and the install
+ *  deciding. Goes through `install_plugin_for_review`, a separate RPC, so the
+ *  approved-only rule in `install_plugin` stays unconditional, and the install
  *  is recorded as a preview so it never reads as "installed" in Browse. */
 export function useReviewPreview(): {
-  preview: (item: ReviewItem) => Promise<void>;
+  preview: (item: ReviewItem, opts?: { replaceInstall?: boolean }) => Promise<PreviewOutcome>;
   previewing: string | null;
   error: string | null;
 } {
@@ -222,7 +231,7 @@ export function useReviewPreview(): {
   const [error, setError] = useState<string | null>(null);
 
   const preview = useCallback(
-    async (item: ReviewItem) => {
+    async (item: ReviewItem, opts?: { replaceInstall?: boolean }): Promise<PreviewOutcome> => {
       const key = `${item.pluginId}@${item.version}`;
       setPreviewing(key);
       setError(null);
@@ -230,11 +239,16 @@ export function useReviewPreview(): {
         const meta = await client.schema(SCHEMA).rpc("install_plugin_for_review", {
           p_plugin_id: item.pluginId,
           p_version: item.version,
+          p_replace_install: opts?.replaceInstall ?? false,
         });
-        if (meta.error) throw new Error(meta.error.message);
+        if (meta.error) {
+          if (meta.error.message.includes(PREVIEW_REPLACES_INSTALL)) return "needs-replace-confirm";
+          throw new Error(meta.error.message);
+        }
         const row = ((meta.data ?? []) as InstallMetaRow[])[0];
         if (!row) throw new Error("install_plugin_for_review returned no version metadata");
         await installBundle(client, row);
+        return "installed";
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);

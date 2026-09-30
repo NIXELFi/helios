@@ -66,3 +66,41 @@ describe("scanBundle — declared-vs-used", () => {
     ).toBe(true);
   });
 });
+
+describe("scanBundle — external references in the entry HTML", () => {
+  const ext = (html: string, extra: Record<string, string> = {}) =>
+    scanBundle({ "dist/index.html": html, ...extra }, manifest([])).filter(
+      (x) => x.kind === "external-asset",
+    );
+
+  it("errors on a default multi-file Vite build (script src + stylesheet link)", () => {
+    const f = ext(
+      '<!doctype html><head><script type="module" crossorigin src="./assets/index-abc.js"></script>' +
+        '<link rel="stylesheet" crossorigin href="./assets/index-abc.css"></head>',
+    );
+    expect(f.filter((x) => x.level === "error")).toHaveLength(2);
+    expect(f.every((x) => x.path === "dist/index.html")).toBe(true);
+  });
+
+  it("errors on a modulepreload link", () => {
+    expect(ext('<link rel="modulepreload" href="/assets/vendor.js">')[0]?.level).toBe("error");
+  });
+
+  it("warns (not errors) on a relative image or a CSS url() font", () => {
+    const f = ext('<img src="logo.png"><style>@font-face{src:url(fonts/a.woff2)}</style>');
+    expect(f.map((x) => x.level)).toEqual(["warn", "warn"]);
+  });
+
+  it("allows inline scripts and data:/blob: assets", () => {
+    const f = ext(
+      '<script>const u = URL.createObjectURL(b); c.toDataURL("image/png");</script>' +
+        '<img src="data:image/png;base64,AAAA"><style>.a{background:url(data:image/png;base64,AA)} .b{fill:url(#g)}</style>',
+    );
+    expect(f).toHaveLength(0);
+  });
+
+  it("only inspects the manifest's entry document", () => {
+    const f = ext("<!doctype html>", { "dist/other.html": '<script src="x.js"></script>' });
+    expect(f).toHaveLength(0);
+  });
+});

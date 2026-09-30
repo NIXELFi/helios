@@ -6,6 +6,7 @@ const invoke = vi.fn();
 const openDialog = vi.fn();
 const readFile = vi.fn();
 const upload = vi.fn();
+const createSignedUrl = vi.fn();
 const rpc = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
@@ -14,7 +15,12 @@ vi.mock("@tauri-apps/plugin-fs", () => ({ readFile: (...a: unknown[]) => readFil
 vi.mock("@helios/auth", () => ({
   useSupabaseClient: () => ({
     schema: () => ({ rpc: (...a: unknown[]) => rpc(...a) }),
-    storage: { from: () => ({ upload: (...a: unknown[]) => upload(...a) }) },
+    storage: {
+      from: () => ({
+        upload: (...a: unknown[]) => upload(...a),
+        createSignedUrl: (...a: unknown[]) => createSignedUrl(...a),
+      }),
+    },
   }),
 }));
 
@@ -67,6 +73,7 @@ beforeEach(() => {
   });
   readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
   upload.mockResolvedValue({ data: { path: "x" }, error: null });
+  createSignedUrl.mockResolvedValue({ data: { signedUrl: "https://signed.example/b" }, error: null });
 });
 
 describe("usePublish", () => {
@@ -172,7 +179,7 @@ describe("usePublish", () => {
     });
   });
 
-  it("treats a duplicate-object upload as success — the key is the content hash", async () => {
+  it("treats a duplicate-object upload as success once the stored bytes are verified", async () => {
     upload.mockResolvedValue({ data: null, error: { message: "The resource already exists" } });
     const { result } = renderHook(() => usePublish());
     await packed(result);
@@ -182,7 +189,67 @@ describe("usePublish", () => {
       await result.current.submit(null);
     });
 
+    expect(invoke).toHaveBeenCalledWith("inspect_plugin_bundle", {
+      signedUrl: "https://signed.example/b",
+      expectedSha256: PACKED.sha256,
+      bundleBytes: PACKED.bytes,
+    });
     expect(result.current.phase).toBe("done");
+  });
+
+  it("refuses to publish over a stored object that is not these bytes", async () => {
+    upload.mockResolvedValue({ data: null, error: { message: "The resource already exists" } });
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "pack_plugin_bundle") return Promise.resolve(PACKED);
+      if (cmd === "inspect_plugin_bundle")
+        return Promise.reject(new Error("sha256 mismatch (bundle tampered or corrupt)"));
+      return Promise.resolve(undefined);
+    });
+    const { result } = renderHook(() => usePublish());
+    await packed(result);
+    act(() => result.current.toConfirm());
+
+    await act(async () => {
+      await result.current.submit(null);
+    });
+
+    expect(result.current.phase).toBe("confirm");
+    expect(result.current.error?.title).toMatch(/different file is stored/i);
+    expect(result.current.error?.retryable).toBe(false);
+    expect(rpc).not.toHaveBeenCalledWith("publish_plugin_version", expect.anything());
+  });
+
+  it("refuses when a stored object under this sha cannot even be read back", async () => {
+    upload.mockResolvedValue({ data: null, error: { message: "The resource already exists" } });
+    createSignedUrl.mockResolvedValue({ data: null, error: { message: "Object not found" } });
+    const { result } = renderHook(() => usePublish());
+    await packed(result);
+    act(() => result.current.toConfirm());
+
+    await act(async () => {
+      await result.current.submit(null);
+    });
+
+    expect(result.current.error?.title).toMatch(/different file is stored/i);
+    expect(rpc).not.toHaveBeenCalledWith("publish_plugin_version", expect.anything());
+  });
+
+  it("stops with an explained error when the publish-history lookup fails", async () => {
+    rpc.mockImplementation((fn: string) =>
+      fn === "my_published_plugins"
+        ? Promise.resolve({ data: null, error: { message: "Failed to fetch" } })
+        : Promise.resolve({ data: [], error: null }),
+    );
+    const { result } = renderHook(() => usePublish());
+    openDialog.mockResolvedValue("C:/proj/my-plugin");
+    await act(async () => {
+      await result.current.chooseFolder();
+    });
+
+    expect(result.current.phase).toBe("idle");
+    expect(result.current.error?.title).toMatch(/publish history/i);
+    expect(result.current.isNewPlugin).toBe(true);
+    expect(result.current.packed).toBeNull();
   });
 
   it("does not swallow a genuine upload failure", async () => {

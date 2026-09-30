@@ -39,7 +39,16 @@ export function useReviewInspect() {
   return { inspect: () => Promise.resolve(), reports: {}, inspecting: null, error: null };
 }
 export function useReviewPreview() {
-  return { preview: () => Promise.resolve(), previewing: null, error: null };
+  // The bolt-torque item plays a reviewer who already has that plugin installed,
+  // so the harness can show the replace-your-install confirmation.
+  return {
+    preview: (item: ReviewItem, opts?: { replaceInstall?: boolean }) =>
+      Promise.resolve(
+        item.pluginId === "chassis.bolt-torque" && !opts?.replaceInstall ? "needs-replace-confirm" : "installed",
+      ),
+    previewing: null,
+    error: null,
+  };
 }
 export function useReviewVersion() {
   return { review: () => Promise.resolve(), reviewing: false, error: null };

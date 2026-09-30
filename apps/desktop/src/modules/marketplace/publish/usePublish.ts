@@ -19,7 +19,12 @@ import { useSupabaseClient } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
 import { preflight, type PreflightReport } from "./preflight";
 import { permissionDiff, type PermissionDiff } from "./permissionDiff";
-import { explainPublishError, isDuplicateObjectError, type ExplainedError } from "./publishErrors";
+import {
+  BUNDLE_SLOT_TAKEN,
+  explainPublishError,
+  isDuplicateObjectError,
+  type ExplainedError,
+} from "./publishErrors";
 
 const SCHEMA = "marketplace";
 const BUNDLE_BUCKET = "plugins";
@@ -113,7 +118,11 @@ export function usePublish() {
         let lockedSubteam: string | null = null;
         let isNewPlugin = true;
         const mine = await client.schema(SCHEMA).rpc("my_published_plugins");
-        if (!mine.error) {
+        // Guessing "new plugin" when the lookup failed would show an existing
+        // plugin's author a subteam picker and a diff calling every permission
+        // new. Stop and say so instead; Re-check retries the lookup.
+        if (mine.error) throw new LookupError(mine.error.message);
+        {
           const rows = ((mine.data ?? []) as MyVersionRow[]).filter(
             (r) => r.plugin_id === packed.manifest.id,
           );
@@ -144,9 +153,20 @@ export function usePublish() {
           ...s,
           phase: "idle",
           busy: false,
-          // A pack failure is already a plain-English sentence from pack.rs —
-          // explainPublishError would only wrap it in a worse one.
-          error: { title: "Could not pack this folder", detail: messageOf(e), retryable: true },
+          sourceDir: dir,
+          error:
+            e instanceof LookupError
+              ? {
+                  title: "Could not check this plugin's publish history",
+                  detail:
+                    "Helios needs to know whether this plugin already exists (to lock its subteam and show " +
+                    `what changed) and the marketplace did not answer: ${e.message}. Check your connection ` +
+                    "and try again.",
+                  retryable: true,
+                }
+              : // A pack failure is already a plain-English sentence from pack.rs —
+                // explainPublishError would only wrap it in a worse one.
+                { title: "Could not pack this folder", detail: messageOf(e), retryable: true },
         }));
       }
     },
@@ -202,7 +222,14 @@ export function usePublish() {
             upsert: false,
             contentType: "application/zip",
           });
-        if (upload.error && !isDuplicateObjectError(upload.error)) throw upload.error;
+        if (upload.error) {
+          if (!isDuplicateObjectError(upload.error)) throw upload.error;
+          // "Already exists" is only success if it is really these bytes. The name
+          // is predictable (packing is deterministic), so prove it: download what
+          // is stored and let the Rust side check size + sha256. If it cannot even
+          // be read, it is not ours (we can always read our own uploads).
+          await verifyStoredBundle(client, packed);
+        }
 
         // 2. Record the version. Lands 'pending'; the server re-validates the
         //    manifest and re-checks the publish capability regardless of anything
@@ -266,3 +293,27 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+class LookupError extends Error {}
+
+/** Prove the object already stored under `packed.sha256` is exactly these bytes. */
+async function verifyStoredBundle(
+  client: ReturnType<typeof useSupabaseClient>,
+  packed: PackedBundle,
+): Promise<void> {
+  const signed = await client.storage.from(BUNDLE_BUCKET).createSignedUrl(packed.sha256, 120);
+  if (signed.error || !signed.data?.signedUrl) {
+    throw new Error(`${BUNDLE_SLOT_TAKEN}: the stored object cannot be read back`);
+  }
+  try {
+    await invoke("inspect_plugin_bundle", {
+      signedUrl: signed.data.signedUrl,
+      expectedSha256: packed.sha256,
+      bundleBytes: packed.bytes,
+    });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    // A plain network failure is retryable and says so; a mismatch is not.
+    if (/mismatch/i.test(detail)) throw new Error(`${BUNDLE_SLOT_TAKEN}: ${detail}`);
+    throw e instanceof Error ? e : new Error(detail);
+  }
+}
