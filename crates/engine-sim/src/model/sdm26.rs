@@ -102,6 +102,44 @@ pub fn exhaust_pipe_area(
 }
 
 /// Diameter of a piecewise-linear `[(x, d)]` profile at `x` (ends held).
+/// Finding 0038: a valve Cd table scaled by `m` (a clone when m == 1).
+fn scaled_cd(table: &[f64], m: f64) -> Vec<f64> {
+    if m == 1.0 { table.to_vec() } else { table.iter().map(|c| c * m).collect() }
+}
+
+#[derive(Clone, Copy)]
+enum PortEnd { First, Last }
+
+/// Finding 0038: lengthen / shorten the head-port segment of a pipe by
+/// `delta` (m). With a diameter profile (x stretched to `l` first), the
+/// port is the LAST segment for a runner (valve at the right end) or the
+/// FIRST for a primary (valve at the left end): only that segment changes
+/// length, the rest of the geometry is kept. Without a profile the pipe is
+/// just `l + delta`. Returns None when `delta == 0` (parity path). The
+/// segment is never shortened below 5 mm.
+fn port_adjusted(
+    l: f64, prof: Option<&[(f64, f64)]>, delta: f64, end: PortEnd,
+) -> Option<(f64, Option<Vec<(f64, f64)>>)> {
+    if delta == 0.0 {
+        return None;
+    }
+    let Some(prof) = prof else { return Some(((l + delta).max(0.01), None)) };
+    let n = prof.len();
+    let scale = l / prof[n - 1].0.max(1e-20);
+    let mut pts: Vec<(f64, f64)> = prof.iter().map(|&(x, d)| (x * scale, d)).collect();
+    let seg = match end {
+        PortEnd::Last => pts[n - 1].0 - pts[n - 2].0,
+        PortEnd::First => pts[1].0 - pts[0].0,
+    };
+    let delta = delta.max(0.005 - seg);
+    match end {
+        PortEnd::Last => pts[n - 1].0 += delta,
+        PortEnd::First => for p in pts.iter_mut().skip(1) { p.0 += delta; },
+    }
+    let l2 = pts[n - 1].0;
+    Some((l2, Some(pts)))
+}
+
 pub fn profile_diameter_at(prof: &[(f64, f64)], x: f64) -> f64 {
     if prof.is_empty() { return 0.0; }
     if x <= prof[0].0 { return prof[0].1; }
@@ -334,6 +372,16 @@ pub struct SDM26Config {
     /// only (primaries, secondaries, collector), applied on top of
     /// `pipe_heat_transfer_multiplier`. 1.0 → parity.
     pub exhaust_heat_transfer_multiplier: f64,
+    /// Finding 0038 (UQ): multipliers on the intake / exhaust valve Cd
+    /// tables (steady-bench Cd vs the real, unmeasured head). 1.0 → parity.
+    pub intake_cd_multiplier: f64,
+    pub exhaust_cd_multiplier: f64,
+    /// Finding 0038 (UQ): change of the head-port length (m) at the VALVE
+    /// end of each runner (last diameter-profile segment) and of each
+    /// primary (first profile segment). The owner could not measure either
+    /// port; 0.0 → parity. With no profile the pipe is simply lengthened.
+    pub intake_port_length_delta: f64,
+    pub exhaust_port_length_delta: f64,
     // restrictor
     pub restrictor_throat_diameter: f64,
     pub restrictor_cd: f64,
@@ -620,6 +668,10 @@ impl Default for SDM26Config {
             pipe_friction_multiplier: 1.0,
             pipe_heat_transfer_multiplier: 1.0,
             exhaust_heat_transfer_multiplier: 1.0,
+            intake_cd_multiplier: 1.0,
+            exhaust_cd_multiplier: 1.0,
+            intake_port_length_delta: 0.0,
+            exhaust_port_length_delta: 0.0,
             restrictor_throat_diameter: 0.020,
             restrictor_cd: 0.967,
             restrictor_loss_coef: 0.0,
@@ -1036,10 +1088,16 @@ impl SDM26Engine {
         let mut runner_idx = Vec::with_capacity(n_cyl);
         for i in 0..n_cyl {
             let (l, d_in, d_out, n, wt) = cfg.runner_spec(i);
+            // 0038: head-port length change at the valve end (last segment).
+            let port_adj = port_adjusted(l, cfg.runner_profile(i), cfg.intake_port_length_delta, PortEnd::Last);
+            let (l, prof_adj) = match &port_adj {
+                Some((l2, p2)) => (*l2, p2.as_deref()),
+                None => (l, cfg.runner_profile(i)),
+            };
             // 0032 fix 4: flanged open-end correction at the plenum mouth.
             let l_geo = l;
             let l = l + cfg.runner_end_correction(i);
-            let mut p = match cfg.runner_profile(i) {
+            let mut p = match prof_adj {
                 // 0033: the end correction extends the pipe at the plenum
                 // mouth with the mouth diameter, so shift the profile by δ.
                 Some(prof) => {
@@ -1066,8 +1124,14 @@ impl SDM26Engine {
         let mut primary_idx = Vec::with_capacity(n_cyl);
         for i in 0..n_cyl {
             let (l, d_in, d_out, n, wt) = cfg.primary_spec(i);
+            // 0038: exhaust head-port length change (first profile segment).
+            let port_adj = port_adjusted(l, cfg.primary_profile(i), cfg.exhaust_port_length_delta, PortEnd::First);
+            let (l, prof_adj) = match &port_adj {
+                Some((l2, p2)) => (*l2, p2.as_deref()),
+                None => (l, cfg.primary_profile(i)),
+            };
             let mut p = make_pipe_state(
-                n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, cfg.primary_profile(i)),
+                n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, prof_adj),
                 g_ex, r_ex, wt, 2,
             );
             set_uniform(&mut p, cfg.p_ambient / (r_ex * cfg.t_ambient),
@@ -1320,7 +1384,7 @@ impl SDM26Engine {
             seat_angle_deg: cfg.intake_valve_seat_angle,
             n_valves: cfg.intake_n_valves,
             ld_table: cfg.intake_ld_table.clone(),
-            cd_table: cfg.intake_cd_table.clone(),
+            cd_table: scaled_cd(&cfg.intake_cd_table, cfg.intake_cd_multiplier),
             profile: intake_profile,
             re_correction_enabled: cfg.intake_valve_re_correction_enabled,
             re_cd_min: cfg.intake_valve_re_cd_min,
@@ -1334,7 +1398,7 @@ impl SDM26Engine {
             seat_angle_deg: cfg.exhaust_valve_seat_angle,
             n_valves: cfg.exhaust_n_valves,
             ld_table: cfg.exhaust_ld_table.clone(),
-            cd_table: cfg.exhaust_cd_table.clone(),
+            cd_table: scaled_cd(&cfg.exhaust_cd_table, cfg.exhaust_cd_multiplier),
             profile: exhaust_profile,
             re_correction_enabled: false,
             re_cd_min: 1.0,
