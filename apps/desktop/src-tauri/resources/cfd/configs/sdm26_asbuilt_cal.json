@@ -1,0 +1,752 @@
+{
+ "name": "Honda CBR600RR (FSAE) - SDM26 as-built, dyno-calibrated EXPERIMENTAL",
+ "n_cylinders": 4,
+ "firing_order": [
+  1,
+  2,
+  4,
+  3
+ ],
+ "firing_interval": 180.0,
+ "cylinder": {
+  "bore": 0.067,
+  "stroke": 0.0425,
+  "con_rod_length": 0.0963,
+  "compression_ratio": 12.2,
+  "n_intake_valves": 2,
+  "n_exhaust_valves": 2
+ },
+ "intake_valve": {
+  "diameter": 0.0275,
+  "max_lift": 0.00856,
+  "open_angle": 339.0,
+  "close_angle": 584.0,
+  "seat_angle": 45.0,
+  "cd_table": [
+   [
+    0.05,
+    0.19
+   ],
+   [
+    0.1,
+    0.38
+   ],
+   [
+    0.15,
+    0.494
+   ],
+   [
+    0.2,
+    0.551
+   ],
+   [
+    0.25,
+    0.57
+   ],
+   [
+    0.3,
+    0.57
+   ]
+  ]
+ },
+ "exhaust_valve": {
+  "diameter": 0.023,
+  "max_lift": 0.00735,
+  "open_angle": 140.0,
+  "close_angle": 365.0,
+  "seat_angle": 45.0,
+  "cd_table": [
+   [
+    0.05,
+    0.171
+   ],
+   [
+    0.1,
+    0.333
+   ],
+   [
+    0.15,
+    0.456
+   ],
+   [
+    0.2,
+    0.523
+   ],
+   [
+    0.25,
+    0.542
+   ],
+   [
+    0.3,
+    0.551
+   ]
+  ]
+ },
+ "intake_pipes": [
+  {
+   "name": "intake_runner_1",
+   "length": 0.3281,
+   "diameter": 0.04,
+   "diameter_out": null,
+   "n_points": 40,
+   "wall_temperature": 325.0,
+   "roughness": 3e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.04
+    ],
+    [
+     0.2481,
+     0.036
+    ],
+    [
+     0.3281,
+     0.033
+    ]
+   ]
+  },
+  {
+   "name": "intake_runner_2",
+   "length": 0.3281,
+   "diameter": 0.04,
+   "diameter_out": null,
+   "n_points": 40,
+   "wall_temperature": 325.0,
+   "roughness": 3e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.04
+    ],
+    [
+     0.2481,
+     0.036
+    ],
+    [
+     0.3281,
+     0.033
+    ]
+   ]
+  },
+  {
+   "name": "intake_runner_3",
+   "length": 0.3281,
+   "diameter": 0.04,
+   "diameter_out": null,
+   "n_points": 40,
+   "wall_temperature": 325.0,
+   "roughness": 3e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.04
+    ],
+    [
+     0.2481,
+     0.036
+    ],
+    [
+     0.3281,
+     0.033
+    ]
+   ]
+  },
+  {
+   "name": "intake_runner_4",
+   "length": 0.3281,
+   "diameter": 0.04,
+   "diameter_out": null,
+   "n_points": 40,
+   "wall_temperature": 325.0,
+   "roughness": 3e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.04
+    ],
+    [
+     0.2481,
+     0.036
+    ],
+    [
+     0.3281,
+     0.033
+    ]
+   ]
+  }
+ ],
+ "_intake_pipes_note": "Each runner pipe = runner + head port as ONE pipe (diameter_profile, x from the plenum mouth): 0 m 40 mm -> 0.2481 m 36 mm (head flange) -> 0.3281 m 33 mm (valve seat). The port (80 mm flange->seat, 33 mm = two 23.4 mm valve throats as one pipe) is an ESTIMATE (owner cannot measure); finding 0033 sweeps 50-110 mm. Runners are S-curved, 3D printed (rough): bend loss and wall roughness are not modelled. Injector 79 mm up from the flange (not modelled).",
+ "exhaust_primaries": [
+  {
+   "name": "exhaust_primary_1",
+   "length": 0.4239,
+   "diameter": 0.02765,
+   "diameter_out": 0.03561,
+   "n_points": 47,
+   "wall_temperature": 900.0,
+   "roughness": 4.6e-05,
+   "artificial_viscosity": 0.0,
+   "diameter_profile": [
+    [
+     0.0,
+     0.02765
+    ],
+    [
+     0.065,
+     0.02926
+    ],
+    [
+     0.3673,
+     0.02926
+    ],
+    [
+     0.3773,
+     0.03561
+    ],
+    [
+     0.4239,
+     0.03561
+    ]
+   ]
+  },
+  {
+   "name": "exhaust_primary_2",
+   "length": 0.4239,
+   "diameter": 0.02765,
+   "diameter_out": 0.03561,
+   "n_points": 47,
+   "wall_temperature": 900.0,
+   "roughness": 4.6e-05,
+   "artificial_viscosity": 0.0,
+   "diameter_profile": [
+    [
+     0.0,
+     0.02765
+    ],
+    [
+     0.065,
+     0.02926
+    ],
+    [
+     0.3673,
+     0.02926
+    ],
+    [
+     0.3773,
+     0.03561
+    ],
+    [
+     0.4239,
+     0.03561
+    ]
+   ]
+  },
+  {
+   "name": "exhaust_primary_3",
+   "length": 0.4239,
+   "diameter": 0.02765,
+   "diameter_out": 0.03561,
+   "n_points": 47,
+   "wall_temperature": 900.0,
+   "roughness": 4.6e-05,
+   "artificial_viscosity": 0.0,
+   "diameter_profile": [
+    [
+     0.0,
+     0.02765
+    ],
+    [
+     0.065,
+     0.02926
+    ],
+    [
+     0.3673,
+     0.02926
+    ],
+    [
+     0.3773,
+     0.03561
+    ],
+    [
+     0.4239,
+     0.03561
+    ]
+   ]
+  },
+  {
+   "name": "exhaust_primary_4",
+   "length": 0.4239,
+   "diameter": 0.02765,
+   "diameter_out": 0.03561,
+   "n_points": 47,
+   "wall_temperature": 900.0,
+   "roughness": 4.6e-05,
+   "artificial_viscosity": 0.0,
+   "diameter_profile": [
+    [
+     0.0,
+     0.02765
+    ],
+    [
+     0.065,
+     0.02926
+    ],
+    [
+     0.3673,
+     0.02926
+    ],
+    [
+     0.3773,
+     0.03561
+    ],
+    [
+     0.4239,
+     0.03561
+    ]
+   ]
+  }
+ ],
+ "_exhaust_note": "Finding 0034: owner-supplied SDM26 as-built 4-2-1, tube sizes are OD with 0.049 in wall (1.25 in -> ID 29.26 mm, 1.5 -> 35.61, 1.75 -> 41.96, 2.0 -> 48.31 mm). Pairing 1&4 / 2&3 (360 deg, unconfirmed from CAD). Each PRIMARY = head port (ESTIMATED 65 mm, 27.65 mm = two 0.85 x 23 mm throats -> 29.26 mm) + 312.3 mm of 1.25 in tube to the first-collector start (last 10 mm steps to 1.5 in) + the 46.6 mm where the two pipes run side by side inside the collector; the junction sits at the merge point. Each SECONDARY = 59.7 mm merged collector cone (area 2 x 1.5 in pipe -> 1.5 in) + 361.0 mm of 1.5 in tube (reading '467.3 mm from the first collector to the end of the second' as first-collector exit to second-collector exit) + 46.6 mm side-by-side in the second collector. The COLLECTOR pipe = 59.7 mm merged cone + ESTIMATED 300 mm straight run / V-band / 90 deg elbow (1.75 in for 100 mm, then 2.0 in; bend loss not modelled) + 12 in (305 mm) straight-through muffler as a plain 2 in pipe (perforation loss not modelled), open end with the 0032 physical reflection + 0.6133 r end correction. Finding 0034 sweeps port 40-90 mm, step/elbow 200-400 mm, 12 vs 17 in muffler and the secondary-length reading.",
+ "exhaust_secondaries": [
+  {
+   "name": "exhaust_secondary_1",
+   "length": 0.4673,
+   "diameter": 0.05036,
+   "diameter_out": 0.03561,
+   "n_points": 52,
+   "wall_temperature": 750.0,
+   "roughness": 4.6e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.05036
+    ],
+    [
+     0.0597,
+     0.03561
+    ],
+    [
+     0.4673,
+     0.03561
+    ]
+   ]
+  },
+  {
+   "name": "exhaust_secondary_2",
+   "length": 0.4673,
+   "diameter": 0.05036,
+   "diameter_out": 0.03561,
+   "n_points": 52,
+   "wall_temperature": 750.0,
+   "roughness": 4.6e-05,
+   "diameter_profile": [
+    [
+     0.0,
+     0.05036
+    ],
+    [
+     0.0597,
+     0.03561
+    ],
+    [
+     0.4673,
+     0.03561
+    ]
+   ]
+  }
+ ],
+ "exhaust_collector": {
+  "name": "exhaust_collector",
+  "length": 0.6647,
+  "diameter": 0.05036,
+  "diameter_out": 0.04831,
+  "n_points": 74,
+  "wall_temperature": 650.0,
+  "roughness": 4.6e-05,
+  "length_note": "geometric length; the 0.6133*r Levine-Schwinger end correction is added by physics.exhaust_collector_end_correction",
+  "diameter_profile": [
+   [
+    0.0,
+    0.05036
+   ],
+   [
+    0.0597,
+    0.03561
+   ],
+   [
+    0.0697,
+    0.04196
+   ],
+   [
+    0.1597,
+    0.04196
+   ],
+   [
+    0.1697,
+    0.04831
+   ],
+   [
+    0.3597,
+    0.04831
+   ],
+   [
+    0.6647,
+    0.04831
+   ]
+  ]
+ },
+ "combustion": {
+  "wiebe_a": 5.0,
+  "wiebe_m": 2.0,
+  "combustion_duration": 50.0,
+  "spark_advance": 25.0,
+  "ignition_delay": 7.0,
+  "combustion_efficiency": 0.98,
+  "q_lhv": 44000000.0,
+  "afr_stoich": 14.7,
+  "afr_target": 13.1
+ },
+ "restrictor": {
+  "throat_diameter": 0.02,
+  "discharge_coefficient": 0.95,
+  "converging_half_angle": 8.0,
+  "diverging_half_angle": 3.2,
+  "outlet_diameter": 0.038
+ },
+ "_restrictor_note": "32 mm Bosch butterfly (WOT) upstream of the 36 mm venturi inlet is not modelled (est. <1 % mass-flow effect). The 228 mm venturi is a quasi-steady BC (no neck inertance): its Helmholtz mode with the 1.44 L plenum is ~75 Hz, well below the 4-cyl induction frequency above 4000 rpm.",
+ "plenum": {
+  "volume": 0.00144,
+  "length": 0.12,
+  "n_cells": 20,
+  "initial_pressure": 101325.0,
+  "initial_temperature": 300.0,
+  "diameter_profile": [
+   [
+    0.0,
+    0.038
+   ],
+   [
+    0.01,
+    0.05483
+   ],
+   [
+    0.02,
+    0.070756
+   ],
+   [
+    0.03,
+    0.085743
+   ],
+   [
+    0.04,
+    0.099752
+   ],
+   [
+    0.05,
+    0.112737
+   ],
+   [
+    0.06,
+    0.124641
+   ],
+   [
+    0.07,
+    0.135396
+   ],
+   [
+    0.08,
+    0.144918
+   ],
+   [
+    0.09,
+    0.153091
+   ],
+   [
+    0.1,
+    0.159749
+   ],
+   [
+    0.11,
+    0.164619
+   ],
+   [
+    0.12,
+    0.167
+   ]
+  ]
+ },
+ "_plenum_note": "Axisymmetric bell loft 38 -> 167 mm, d(t) = 38 + 129 (1 - (1 - t)^1.607) mm over an ESTIMATED 120 mm height (volume held at 1.44 L). Restrictor at x = 0 (top), all four runners at x = L (floor).",
+ "simulation": {
+  "rpm_start": 6000.0,
+  "rpm_end": 13500.0,
+  "rpm_step": 500.0,
+  "n_cycles": 5,
+  "cfl_number": 0.85,
+  "convergence_tolerance": 0.005,
+  "crank_step_max": 1.0,
+  "artificial_viscosity": 0.05
+ },
+ "p_ambient": 97300.0,
+ "T_ambient": 305.0,
+ "drivetrain_efficiency": 0.85,
+ "physics": {
+  "spark_advance_rpm_slope_deg_per_krpm": 1.5,
+  "duration_rpm_exp": 0.4,
+  "fmep_c": 0.0005812500000000001,
+  "limiter": 1,
+  "cfl": 0.5,
+  "intake_valve_re_correction_enabled": true,
+  "octane_number": 98.0,
+  "knock_tau_scale": 2.0,
+  "intake_junction_directional_loss": true,
+  "intake_runner_entry_k": 0.2,
+  "restrictor_venturi_model": true,
+  "intake_runner_end_correction": true,
+  "exhaust_collector_end_correction": true,
+  "exhaust_collector_open_end_physical": true,
+  "fuel_mass_from_trapped_air": true,
+  "heat_release_o2_limited": true,
+  "enable_residual_tracking": true,
+  "valve_events_at_reference_lift": true,
+  "valve_event_reference_lift": 0.001,
+  "valve_lift_shape_exponent": 1.3,
+  "spark_advance_map": [
+   [
+    4000.0,
+    20.5
+   ],
+   [
+    4250.0,
+    21.0
+   ],
+   [
+    4500.0,
+    21.5
+   ],
+   [
+    4750.0,
+    22.0
+   ],
+   [
+    5000.0,
+    22.5
+   ],
+   [
+    5250.0,
+    23.7
+   ],
+   [
+    5500.0,
+    24.8
+   ],
+   [
+    5750.0,
+    26.3
+   ],
+   [
+    6000.0,
+    27.7
+   ],
+   [
+    6250.0,
+    28.2
+   ],
+   [
+    6500.0,
+    28.6
+   ],
+   [
+    6750.0,
+    29.1
+   ],
+   [
+    7000.0,
+    29.5
+   ],
+   [
+    7250.0,
+    29.8
+   ],
+   [
+    7500.0,
+    30.0
+   ],
+   [
+    7750.0,
+    30.2
+   ],
+   [
+    8000.0,
+    30.3
+   ],
+   [
+    8250.0,
+    30.8
+   ],
+   [
+    8500.0,
+    30.8
+   ],
+   [
+    8750.0,
+    30.6
+   ],
+   [
+    9000.0,
+    31.0
+   ],
+   [
+    9250.0,
+    32.3
+   ],
+   [
+    9500.0,
+    33.6
+   ],
+   [
+    9750.0,
+    34.7
+   ],
+   [
+    10000.0,
+    36.0
+   ],
+   [
+    10250.0,
+    36.2
+   ],
+   [
+    10500.0,
+    35.9
+   ],
+   [
+    10750.0,
+    35.6
+   ]
+  ],
+  "afr_map": [
+   [
+    4000.0,
+    11.892
+   ],
+   [
+    4250.0,
+    11.069
+   ],
+   [
+    4500.0,
+    10.319
+   ],
+   [
+    4750.0,
+    10.143
+   ],
+   [
+    5000.0,
+    10.363
+   ],
+   [
+    5250.0,
+    10.246
+   ],
+   [
+    5500.0,
+    10.275
+   ],
+   [
+    5750.0,
+    11.26
+   ],
+   [
+    6000.0,
+    12.363
+   ],
+   [
+    6250.0,
+    13.392
+   ],
+   [
+    6500.0,
+    13.965
+   ],
+   [
+    6750.0,
+    14.171
+   ],
+   [
+    7000.0,
+    14.112
+   ],
+   [
+    7250.0,
+    14.568
+   ],
+   [
+    7500.0,
+    14.862
+   ],
+   [
+    7750.0,
+    13.612
+   ],
+   [
+    8000.0,
+    11.995
+   ],
+   [
+    8250.0,
+    11.187
+   ],
+   [
+    8500.0,
+    10.878
+   ],
+   [
+    8750.0,
+    11.157
+   ],
+   [
+    9000.0,
+    11.569
+   ],
+   [
+    9250.0,
+    12.23
+   ],
+   [
+    9500.0,
+    12.877
+   ],
+   [
+    9750.0,
+    12.686
+   ],
+   [
+    10000.0,
+    12.524
+   ],
+   [
+    10250.0,
+    12.892
+   ],
+   [
+    10500.0,
+    14.347
+   ],
+   [
+    10750.0,
+    14.641
+   ]
+  ],
+  "exhaust_junction_momentum": true,
+  "exhaust_gas_gamma": 1.3,
+  "exhaust_gas_r": 295.0,
+  "restrictor_diffuser_efficiency": 0.62,
+  "fmep_a": 0.3875,
+  "fmep_b": 0.07750000000000001
+ },
+ "description": "Finding 0036: the as-built SDM26 (0033 intake, 0034 exhaust) running the car's logged WOT tune (ignition + lambda at the WOT-measured sensor lag), with the momentum-mixing exhaust merge junctions and burned-gas gamma/R (0035), Tempe ambient (97.3 kPa, 305 K), venturi diffuser recovery 0.62 (matches the car's baro-MAP drop within 0.5 kPa) and realistic WOT exhaust wall temperatures (900/750/650 K). Only the level is calibrated to the team dyno: combustion efficiency 0.98 (physical ceiling; the fit wanted 1.00) and FMEP x0.775. No wave knob fitted. Team-dyno RMSE 2.18 kW (6-12.5k), 1.76 kW (7-11.5k); wheel = brake x 0.85.",
+ "_tune_note": "physics.spark_advance_map = WOT median 'Ignition Angle' (deg BTDC); physics.afr_map = WOT median 'Lambda 1' x 14.7, lambda shifted 270 ms (sensor transport lag, audit hunt/proxy.py filter: APS >= 85 %, no cuts, fuel pressure > 300). Logged pulls end at 10.75k; the maps hold the last value above. Heat release is O2-limited (0032), so rich lambda costs fuel, not the stoichiometric heat.",
+ "_calibration_note": "FMEP a/b/c = 0.775 x (0.5, 0.1, 0.00075) bar; afr_map = 14.7 x lambda(WOT lag, references/ecu/proxy_wotA.csv)."
+}

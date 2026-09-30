@@ -1022,6 +1022,7 @@ mod tests {
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_exhaust.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_realtune.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm26.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm25.json",
         ] {

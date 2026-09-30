@@ -403,6 +403,7 @@ mod tests {
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_exhaust.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_realtune.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json",
         ] {
             let p = fixture(rel);
             if !p.exists() {
