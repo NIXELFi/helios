@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.14.0] - 2026-09-30
+
 ### Added
 
 - **Add to Marketplace — publish a plugin from inside Helios.** Subteam
