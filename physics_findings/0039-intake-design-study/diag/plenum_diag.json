@@ -1,0 +1,222 @@
+[
+ {
+  "rpm": 9000,
+  "ve": 1.00388,
+  "bt": 50.7701,
+  "imep": 12.5415,
+  "spread": 0.0004,
+  "p_plenum_end": 85476,
+  "cycles": 20,
+  "case": "baseline",
+  "V": "1.44"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.80433,
+  "bt": 39.1433,
+  "imep": 10.6237,
+  "spread": 0.00011,
+  "p_plenum_end": 86805,
+  "cycles": 20,
+  "case": "baseline",
+  "V": "1.44"
+ },
+ {
+  "rpm": 9000,
+  "ve": 0.98736,
+  "bt": 48.8653,
+  "imep": 12.1422,
+  "spread": 0.00097,
+  "p_plenum_end": 85814,
+  "cycles": 20,
+  "case": "baseline",
+  "V": "3.50"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.77654,
+  "bt": 37.3479,
+  "imep": 10.2472,
+  "spread": 0.00085,
+  "p_plenum_end": 86112,
+  "cycles": 20,
+  "case": "baseline",
+  "V": "3.50"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.0128,
+  "bt": 51.5665,
+  "imep": 12.7085,
+  "spread": 0.00027,
+  "p_plenum_end": 85831,
+  "cycles": 20,
+  "case": "plenum 60 cells",
+  "V": "1.44"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.812,
+  "bt": 39.8871,
+  "imep": 10.7796,
+  "spread": 0.00021,
+  "p_plenum_end": 87440,
+  "cycles": 20,
+  "case": "plenum 60 cells",
+  "V": "1.44"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.01007,
+  "bt": 50.7357,
+  "imep": 12.5343,
+  "spread": 0.00042,
+  "p_plenum_end": 87739,
+  "cycles": 20,
+  "case": "plenum 60 cells",
+  "V": "3.50"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.80029,
+  "bt": 39.1612,
+  "imep": 10.6274,
+  "spread": 0.00016,
+  "p_plenum_end": 88099,
+  "cycles": 20,
+  "case": "plenum 60 cells",
+  "V": "3.50"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.01732,
+  "bt": 52.1518,
+  "imep": 12.8312,
+  "spread": 0.00017,
+  "p_plenum_end": 85091,
+  "cycles": 20,
+  "case": "no pipe heat transfer",
+  "V": "1.44"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.81196,
+  "bt": 39.3572,
+  "imep": 10.6685,
+  "spread": 0.00022,
+  "p_plenum_end": 86579,
+  "cycles": 20,
+  "case": "no pipe heat transfer",
+  "V": "1.44"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.00058,
+  "bt": 50.0392,
+  "imep": 12.3883,
+  "spread": 0.00115,
+  "p_plenum_end": 85796,
+  "cycles": 20,
+  "case": "no pipe heat transfer",
+  "V": "3.50"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.78424,
+  "bt": 37.4406,
+  "imep": 10.2666,
+  "spread": 0.00042,
+  "p_plenum_end": 85780,
+  "cycles": 20,
+  "case": "no pipe heat transfer",
+  "V": "3.50"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.00242,
+  "bt": 51.3569,
+  "imep": 12.6645,
+  "spread": 0.0005,
+  "p_plenum_end": 85318,
+  "cycles": 20,
+  "case": "no pipe friction",
+  "V": "1.44"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.80121,
+  "bt": 39.3026,
+  "imep": 10.6571,
+  "spread": 0.00022,
+  "p_plenum_end": 86740,
+  "cycles": 20,
+  "case": "no pipe friction",
+  "V": "1.44"
+ },
+ {
+  "rpm": 9000,
+  "ve": 0.98656,
+  "bt": 49.2949,
+  "imep": 12.2322,
+  "spread": 0.00111,
+  "p_plenum_end": 85771,
+  "cycles": 20,
+  "case": "no pipe friction",
+  "V": "3.50"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.77395,
+  "bt": 37.5211,
+  "imep": 10.2835,
+  "spread": 0.00075,
+  "p_plenum_end": 86191,
+  "cycles": 20,
+  "case": "no pipe friction",
+  "V": "3.50"
+ },
+ {
+  "rpm": 9000,
+  "ve": 1.00472,
+  "bt": 50.8247,
+  "imep": 12.553,
+  "spread": 0.00039,
+  "p_plenum_end": 85438,
+  "cycles": 20,
+  "case": "plenum wall 300 K",
+  "V": "1.44"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.80491,
+  "bt": 39.1955,
+  "imep": 10.6346,
+  "spread": 0.00027,
+  "p_plenum_end": 86784,
+  "cycles": 20,
+  "case": "plenum wall 300 K",
+  "V": "1.44"
+ },
+ {
+  "rpm": 9000,
+  "ve": 0.98751,
+  "bt": 48.895,
+  "imep": 12.1484,
+  "spread": 0.00092,
+  "p_plenum_end": 85862,
+  "cycles": 20,
+  "case": "plenum wall 300 K",
+  "V": "3.50"
+ },
+ {
+  "rpm": 12000,
+  "ve": 0.777,
+  "bt": 37.3779,
+  "imep": 10.2535,
+  "spread": 0.0005,
+  "p_plenum_end": 86087,
+  "cycles": 20,
+  "case": "plenum wall 300 K",
+  "V": "3.50"
+ }
+]

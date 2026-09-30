@@ -1,7 +1,7 @@
 import json, os, subprocess, study
 from concurrent.futures import ThreadPoolExecutor
 H = os.path.dirname(os.path.abspath(__file__)); EXE = os.path.join(H, "driver", "target", "release", "tipin.exe")
-OUT = os.path.join(H, "tipin.ndjson")
+OUT = os.path.join(H, "tipin_c160.ndjson")
 J = []
 for V in (0.5, 1.0, 1.44, 2.0, 2.75, 3.5):
     n, p = study.make_cfg(V=V * 1e-3)
@@ -17,7 +17,7 @@ if os.path.exists(OUT):
 J = [j for j in J if (j[0], j[2], j[3]) not in have]
 def run(j):
     n, p, e, r = j
-    o = subprocess.run([EXE, p, str(r), "40000", "14", f"runner_mouth_extension={e/1000:.4f}"], capture_output=True, text=True).stdout
+    o = subprocess.run([EXE, p, str(r), "40000", "14", f"plenum_n_cells={study.CELLS}", f"runner_mouth_extension={e/1000:.4f}"], capture_output=True, text=True).stdout
     rows = [json.loads(l) for l in o.strip().splitlines()]
     return json.dumps(dict(cfg=n, ext=e, rpm=r, rows=rows))
 print(len(J), "tip-in runs", flush=True)

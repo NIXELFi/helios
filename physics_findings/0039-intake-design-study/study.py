@@ -4,7 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 H = os.path.dirname(os.path.abspath(__file__))
 EXE = os.path.join(H, "driver", "target", "release", "intakepoint.exe")
 BASE = os.path.join(H, "..", "..", "apps", "desktop", "src-tauri", "resources", "cfd", "configs", "sdm26_asbuilt_cal.json")
-OUT = os.path.join(H, "results.ndjson"); CFGD = os.path.join(H, "cfg"); os.makedirs(CFGD, exist_ok=True)
+# Plenum mesh: 20 cells was far from grid-converged for the flared bell (diag/plenum_cells.py: the 3.5-vs-1.44 L
+# delta went -4.6 % -> -0.2 % at 12k from 20 -> 320 cells). 160 cells is within ~0.5 % of the limit.
+CELLS = 160
+OUT = os.path.join(H, "results_c160.ndjson"); CFGD = os.path.join(H, "cfg"); os.makedirs(CFGD, exist_ok=True)
 V0 = 0.00144
 def idelchik_phi(a):
     pts = [(5, .10), (10, .27), (15, .50), (20, .80), (30, 1.0)]
@@ -38,9 +41,9 @@ def make_cfg(V=V0, lenfac=1.0, dout=0.038, ang=3.2, cd=None):
     json.dump(d, open(path, "w"), indent=1); return name, path
 def jobs():
     J = []
-    rpm_f = list(range(4000, 12501, 250)); rpm_c = list(range(4000, 12501, 500))
+    rpm_c = list(range(4000, 12501, 500)); rpm_f = rpm_c   # 500 rpm steps: the 160-cell plenum costs ~5x per point
     ext_f = sorted(set(range(-190, 161, 25)) | {0}); ext_c = [-140, -40, 60, 160]
-    for V in (0.5, 0.75, 1.0, 1.44, 2.0, 2.75, 3.5):                       # G1 static grid
+    for V in (1.44, 3.5, 2.0, 2.75, 1.0, 0.75, 0.5):                       # G1 static grid (as-built + big plenums first)
         n, p = make_cfg(V=V * 1e-3)
         J += [("G1", n, p, e, r) for e in ext_f for r in rpm_f]
     for V in (0.75, 1.44, 2.75):                                            # G2 plenum geometry
@@ -51,6 +54,10 @@ def jobs():
         for ang in (3.2, 6.0, 8.0):
             n, p = make_cfg(dout=dout, ang=ang)
             J += [("G3", n, p, e, r) for e in (0, 100) for r in rpm_c]
+    for dout in (0.030, 0.038, 0.050):                                      # G3b restrictor x big plenum (Nick: "we can go bigger plenum")
+        for ang in (3.2, 8.0):
+            n, p = make_cfg(V=2.75e-3, dout=dout, ang=ang)
+            J += [("G3", n, p, 0, r) for r in rpm_c]
     for cd in (0.93, 0.97):
         n, p = make_cfg(cd=cd)
         J += [("G3", n, p, e, r) for e in (0, 100) for r in rpm_c]
@@ -66,7 +73,7 @@ def done():
     return s
 def run(j):
     g, n, p, e, r = j
-    out = subprocess.run([EXE, p, str(r), "20", f"runner_mouth_extension={e/1000:.4f}"], capture_output=True, text=True)
+    out = subprocess.run([EXE, p, str(r), "20", f"plenum_n_cells={CELLS}", f"runner_mouth_extension={e/1000:.4f}"], capture_output=True, text=True)
     try: x = json.loads(out.stdout.strip().splitlines()[-1])
     except Exception: x = {"rpm": r, "error": out.stderr[-300:]}
     x.update(grid=g, cfg=n, ext=e)

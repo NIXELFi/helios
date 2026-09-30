@@ -10,7 +10,7 @@ H = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(H, "..", ".."))
 DONE = os.path.join(H, "DONE")
 LOG = os.path.join(H, "runner.log")
-TRACK = ["results.ndjson", "tipin.ndjson", "charts", "cfg", "progress.txt"]
+TRACK = ["results_c160.ndjson", "tipin_c160.ndjson", "diag", "charts", "cfg", "progress.txt"]
 stop = threading.Event()
 
 
@@ -20,9 +20,9 @@ def log(msg):
 
 
 def progress():
-    n = sum(1 for _ in open(os.path.join(H, "results.ndjson"))) if os.path.exists(os.path.join(H, "results.ndjson")) else 0
-    t = sum(1 for _ in open(os.path.join(H, "tipin.ndjson"))) if os.path.exists(os.path.join(H, "tipin.ndjson")) else 0
-    s = f"{datetime.datetime.now():%Y-%m-%d %H:%M} grid rows {n} (of ~4540 + retries), tip-in rows {t}/92\n"
+    n = sum(1 for _ in open(os.path.join(H, "results_c160.ndjson"))) if os.path.exists(os.path.join(H, "results_c160.ndjson")) else 0
+    t = sum(1 for _ in open(os.path.join(H, "tipin_c160.ndjson"))) if os.path.exists(os.path.join(H, "tipin_c160.ndjson")) else 0
+    s = f"{datetime.datetime.now():%Y-%m-%d %H:%M} grid rows {n} (of 3168), tip-in rows {t}/92\n"
     open(os.path.join(H, "progress.txt"), "w").write(s)
     return s.strip()
 

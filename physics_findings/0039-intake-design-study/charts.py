@@ -236,8 +236,8 @@ fig.tight_layout(rect=(0, 0.02, 1, TOP(fig))); save(fig, "07_options_matrix.png"
 
 # ---------- 8. throttle response (1D tip-in) ----------
 TI = []
-if os.path.exists(os.path.join(core.H, "tipin.ndjson")):
-    for l in open(os.path.join(core.H, "tipin.ndjson")):
+if os.path.exists(os.path.join(core.H, "tipin_c160.ndjson")):
+    for l in open(os.path.join(core.H, "tipin_c160.ndjson")):
         x = json.loads(l); r0 = x["rows"][0]; rr = x["rows"][1:]
         if not rr: continue
         t = np.array([0] + [r["t"] for r in rr]); f = np.array([0] + [r["bt"] / r0["bt_ss"] for r in rr])

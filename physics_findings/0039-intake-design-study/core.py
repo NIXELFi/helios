@@ -8,7 +8,7 @@ BORE_A = 4 * math.pi / 4 * 0.040 ** 2 * 1e3 * 1e-3   # L per mm of 4 runners' 40
 BANDS = {"P1 6-12k": (6000, 12000), "driver 7-10.5k": (7000, 10500), "top 10.5-12.5k": (10500, 12500)}
 
 def load():
-    rows = [json.loads(l) for l in open(os.path.join(H, "results.ndjson"))]
+    rows = [json.loads(l) for l in open(os.path.join(H, "results_c160.ndjson"))]
     d = pd.DataFrame(rows); d = d[d.bt.notna()] if "bt" in d else d
     pr = d.cfg.str.extract(r"V([\d.]+)_L([\d.]+)_D(\d+)_A([\d.]+)(?:_cd([\d.]+))?")
     d["V"] = pr[0].astype(float); d["lf"] = pr[1].astype(float); d["dout"] = pr[2].astype(float)

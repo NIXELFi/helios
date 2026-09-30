@@ -54,12 +54,10 @@ def vrli_for(Venv, lo, stroke, weights):
 
 # packaging tiers. ext = runner length change vs as-built (mm above the head flange); V = plenum air volume (L).
 # The team says the runners can't get meaningfully longer, so tiers cap reach at +0 / +40 mm, and C3 caps the plenum envelope.
-TIERS = [
-    ("T1 static, same envelope (runner <= as-built, plenum <= 1.44 L)", dict(kind="static", ext_max=0, V_max=1.44)),
-    ("T2 static, +40 mm reach, plenum <= 2.0 L", dict(kind="static", ext_max=40, V_max=2.0)),
-    ("T3 VRLI in a 1.44 L box, reach <= as-built, stroke <= 100", dict(kind="vrli", ext_max=0, V_max=1.44, stroke_max=100)),
-    ("T4 VRLI in a 2.0 L box, reach <= +40 mm, stroke <= 150", dict(kind="vrli", ext_max=40, V_max=2.0, stroke_max=150)),
-]
+# Nick 2026-09-30: the plenum may grow, so plenum size is a swept cap (1.44 / 2.0 / 2.75 / 3.5 L); reach stays tight.
+TIERS = [(f"{kind} | reach <= {'as-built' if ext == 0 else f'+{ext} mm'} | plenum <= {V:g} L",
+          dict(kind=kind, ext_max=ext, V_max=V, stroke_max=150))
+         for kind in ("static", "vrli") for ext in (0, 40) for V in (1.44, 2.0, 2.75, 3.5)]
 W_P1 = np.where((R >= 6000) & (R <= 12000), 1.0, 0.15)
 rows = []
 for tname, t in TIERS:
