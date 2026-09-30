@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { makePlugin } from "./_fixtures";
 
+const subteamList = vi.hoisted(() => [] as { id: string; name: string }[]);
 const mocks = vi.hoisted(() => ({
   install: vi.fn(async () => {}),
   uninstall: vi.fn(async () => {}),
@@ -40,7 +41,7 @@ vi.mock("../../org/data/useOrgData", () => ({
     error: null,
     refetch: () => {},
   }),
-  useSubteams: () => ({ data: [], refetch: () => {} }),
+  useSubteams: () => ({ data: subteamList, refetch: () => {} }),
 }));
 
 // The running-add-on stage reads the member and mounts the sandbox iframe;
@@ -174,5 +175,14 @@ describe("MarketplaceModule — opening an installed add-on", () => {
     // The stage is up, and the tab bar is still in the DOM underneath it.
     await screen.findByTestId("plugin-host");
     expect(screen.getByRole("button", { name: /^browse$/i, hidden: true })).toBeTruthy();
+  });
+
+  it("shows the owning subteam by name, never as a raw id", () => {
+    mocks.state.plugins = [makePlugin({ id: "p", name: "Named", subteam: "s-1", installedVersion: null })];
+    subteamList.push({ id: "s-1", name: "Performance Analysis" });
+    render(<MarketplaceModule />);
+    expect(screen.getAllByText(/performance analysis/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText("s-1")).toBeNull();
+    subteamList.length = 0;
   });
 });

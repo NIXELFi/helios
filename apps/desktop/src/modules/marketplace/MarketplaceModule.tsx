@@ -41,7 +41,7 @@ import { InstallConsentModal } from "./components/InstallConsentModal";
 import { UninstallConfirmModal } from "./components/UninstallConfirmModal";
 import { hasHighTrust } from "./components/PermissionList";
 import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
-import { useMyCapabilities } from "../org/data/useOrgData";
+import { useMyCapabilities, useSubteams } from "../org/data/useOrgData";
 import { SubmitWizard } from "./publish/SubmitWizard";
 import { HelpDrawer, useHelpDrawer } from "./authoring/HelpDrawer";
 import { ReviewView } from "./review/ReviewView";
@@ -65,7 +65,21 @@ type Tab = "browse" | "installed" | "review" | "mine";
 const DEMO = isMarketplaceDemo();
 
 export function MarketplaceModule() {
-  const { plugins, loading, error, refetch: refetchAvailable } = useAvailablePlugins();
+  const { plugins: rawPlugins, loading, error, refetch: refetchAvailable } = useAvailablePlugins();
+  // The backend returns the owning subteam as an id; every view shows it as a
+  // label (card, detail, consent, filters, search). Resolve it once here. An id
+  // that is not in the list (a deleted subteam) is shown as "Unknown subteam"
+  // rather than as a raw UUID.
+  const { data: subteams } = useSubteams();
+  const subteamNames = useMemo(() => new Map(subteams.map((s) => [s.id, s.name])), [subteams]);
+  const withSubteamNames = useCallback(
+    (list: AvailablePlugin[]) =>
+      list.map((p) =>
+        p.subteam ? { ...p, subteam: subteamNames.get(p.subteam) ?? "Unknown subteam" } : p,
+      ),
+    [subteamNames],
+  );
+  const plugins = useMemo(() => withSubteamNames(rawPlugins), [withSubteamNames, rawPlugins]);
   const {
     rows: installRows,
     loading: installsLoading,
@@ -110,7 +124,10 @@ export function MarketplaceModule() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [builtIn, setBuiltIn] = useState<FirstPartyApp | null>(null);
 
-  const installed = useMemo(() => mergeInstalled(plugins, installRows), [plugins, installRows]);
+  const installed = useMemo(
+    () => withSubteamNames(mergeInstalled(rawPlugins, installRows)),
+    [withSubteamNames, rawPlugins, installRows],
+  );
   // Detail works from Installed too, including for a plugin no longer offered
   // (every version yanked), which is only in the install list. Previews have no
   // detail page: their card lives in Review.
