@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSupabaseClient } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
-import { preflight, reportsDisagree, type PreflightReport } from "../publish/preflight";
+import { manifestDrift, preflight, type PreflightReport } from "../publish/preflight";
 import { installBundle, signedBundleUrl, type InstallMetaRow } from "./installBundle";
 
 const SCHEMA = "marketplace";
@@ -162,17 +162,16 @@ export function useReviewVersion(): {
  *
  *  The `review_report` submitted alongside a version is author-supplied: a client
  *  can call the publish RPC directly with any report it likes. So the reviewer's
- *  copy is regenerated from the uploaded bundle, and `disagrees` flags the case
- *  where the two differ — not proof of anything by itself (an older client would
- *  also differ), but the first thing worth a second look. */
+ *  copy is regenerated from the uploaded bundle, and the bundle's own manifest is
+ *  checked against the one recorded with the version (see manifestDrift). */
 export function useReviewInspect(): {
   inspect: (item: ReviewItem) => Promise<void>;
-  reports: Record<string, { report: PreflightReport; disagrees: boolean }>;
+  reports: Record<string, { report: PreflightReport }>;
   inspecting: string | null;
   error: string | null;
 } {
   const client = useSupabaseClient();
-  const [reports, setReports] = useState<Record<string, { report: PreflightReport; disagrees: boolean }>>({});
+  const [reports, setReports] = useState<Record<string, { report: PreflightReport }>>({});
   const [inspecting, setInspecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -191,11 +190,12 @@ export function useReviewInspect(): {
 
         // Scan the bundle's OWN manifest, not the separately-submitted DB copy:
         // a drift between the two is exactly what this is here to catch.
-        const report = preflight(inspected.texts, inspected.manifest, inspected.unscanned ?? []);
-        setReports((r) => ({
-          ...r,
-          [key]: { report, disagrees: reportsDisagree(item.reviewReport, report) },
-        }));
+        const scanned = preflight(inspected.texts, inspected.manifest, inspected.unscanned ?? []);
+        const drift = manifestDrift(item.manifest, inspected.manifest);
+        const report: PreflightReport = drift.length
+          ? { ...scanned, ok: false, errors: [...drift, ...scanned.errors] }
+          : scanned;
+        setReports((r) => ({ ...r, [key]: { report } }));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {

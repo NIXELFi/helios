@@ -501,6 +501,13 @@ begin
           where pv.plugin_id = p_plugin_id and pv.review_status = 'approved'
           order by pv.published_at desc limit 1
         ),
+        -- The display name follows the newest APPROVED version (a pending
+        -- submission no longer renames the live plugin; see publish).
+        name = coalesce((
+          select pv.manifest->>'name' from marketplace.plugin_versions pv
+          where pv.plugin_id = p_plugin_id and pv.review_status = 'approved'
+          order by pv.published_at desc limit 1
+        ), p.name),
         updated_at = now()
     where p.id = p_plugin_id;
 
@@ -553,6 +560,26 @@ begin
     raise exception 'bundle_bytes out of range (1..25MiB): %', coalesce(p_bytes::text, '<null>');
   end if;
 
+  v_perms := array(select jsonb_array_elements_text(coalesce(p_manifest->'permissions', '[]'::jsonb)));
+
+  select subteam into v_subteam from marketplace.plugins where id = v_id;
+  if found then
+    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
+      raise exception 'insufficient privilege to publish to plugin % (subteam %)', v_id, v_subteam;
+    end if;
+    -- No rename here: the name every member sees changes only when a version
+    -- carrying it is APPROVED (review_plugin_version), never on submission.
+  else
+    v_subteam := p_subteam;
+    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
+      raise exception 'insufficient privilege to publish a new plugin to subteam %', coalesce(v_subteam::text, '<org>');
+    end if;
+    insert into marketplace.plugins (id, name, subteam, created_by)
+      values (v_id, v_name, v_subteam, v_uid);
+  end if;
+
+  -- After the capability checks, so a non-publisher cannot use this to probe
+  -- which bundles exist in the private bucket.
   -- The bytes must already be uploaded. Storage records the object size in
   -- metadata; when it is there it must match what the version will claim.
   select coalesce((o.metadata->>'size')::bigint, -1) into v_stored
@@ -564,25 +591,6 @@ begin
   end if;
   if v_stored <> -1 and v_stored <> p_bytes then
     raise exception 'bundle % in storage is % bytes, not %', lower(p_sha256), v_stored, p_bytes;
-  end if;
-
-  v_perms := array(select jsonb_array_elements_text(coalesce(p_manifest->'permissions', '[]'::jsonb)));
-
-  select subteam into v_subteam from marketplace.plugins where id = v_id;
-  if found then
-    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
-      raise exception 'insufficient privilege to publish to plugin % (subteam %)', v_id, v_subteam;
-    end if;
-    update marketplace.plugins
-      set name = v_name, updated_at = now()
-      where id = v_id;
-  else
-    v_subteam := p_subteam;
-    if not pm.has_capability(v_uid, 'marketplace.publish', v_subteam) then
-      raise exception 'insufficient privilege to publish a new plugin to subteam %', coalesce(v_subteam::text, '<org>');
-    end if;
-    insert into marketplace.plugins (id, name, subteam, created_by)
-      values (v_id, v_name, v_subteam, v_uid);
   end if;
 
   if exists (select 1 from marketplace.plugin_versions pv
@@ -684,7 +692,7 @@ begin
   -- trailing dot (Windows drops it, colliding with another plugin's folder) or a
   -- '/' in a pre-release tag must never get this far.
   if jsonb_typeof(p_manifest->'format') is distinct from 'number'
-     or (p_manifest->>'format') is distinct from '1' then
+     or (p_manifest->>'format')::numeric <> 1 then
     raise exception 'manifest.format must be the number 1';
   end if;
   if v_id is null or v_id !~ '^[a-z0-9]+([-.][a-z0-9]+)*$' or length(v_id) > 200 then
@@ -768,7 +776,7 @@ create policy "marketplace_plugins_insert" on storage.objects
 drop policy if exists "marketplace_plugins_read_own_upload" on storage.objects;
 create policy "marketplace_plugins_read_own_upload" on storage.objects
   for select to authenticated
-  using (bucket_id = 'plugins' and owner = auth.uid());
+  using (bucket_id = 'plugins' and (owner = auth.uid() or owner_id = auth.uid()::text));
 
 -- ---------------------------------------------------------------------------
 -- 15. Function privileges, schema-wide.

@@ -78,7 +78,13 @@ follow [semver](https://semver.org/).
 - Marketplace: packing a plugin no longer freezes Helios while it zips, and
   dotfiles such as `.env` are never packed.
 - Marketplace: a failed Approve or Reject stays on screen with its error instead
-  of the card silently reloading, and Refresh also reloads My plugins and Review.
+  of the card silently reloading, and Refresh also reloads My plugins and Review
+  without losing a scan, notes or a half-typed reason.
+- Marketplace: Approve now waits for the reviewer's own scan of the uploaded
+  bundle, and approving over blocking findings needs a written note. The scan
+  also blocks when the bundle's manifest differs from what was submitted.
+- Marketplace: a pending submission no longer renames the live plugin; the name
+  changes when that version is approved.
 
 ## [5.13.5] - 2026-09-29
 

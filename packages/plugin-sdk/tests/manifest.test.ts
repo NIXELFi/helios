@@ -127,3 +127,16 @@ describe("isSdkCompatible", () => {
     expect(isSdkCompatible("banana", "1.0.0")).toBe(false);
   });
 });
+
+describe("validateManifest — version is a safe cache directory name", () => {
+  const base = {
+    format: 1, id: "aero.x", name: "X", entry: "dist/index.html", sdk: "^1.0.0", permissions: [],
+  };
+  it("rejects a trailing dot in the pre-release (Windows drops it)", () => {
+    expect(validateManifest({ ...base, version: "1.0.0-rc." }).ok).toBe(false);
+  });
+  it("still accepts ordinary pre-releases", () => {
+    expect(validateManifest({ ...base, version: "1.0.0-rc.1" }).ok).toBe(true);
+    expect(validateManifest({ ...base, version: "1.0.0-beta-2" }).ok).toBe(true);
+  });
+});

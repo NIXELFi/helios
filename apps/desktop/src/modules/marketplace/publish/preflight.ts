@@ -283,16 +283,40 @@ export function preflight(
   };
 }
 
-/** Does a reviewer's independent re-scan disagree with what the author submitted?
- *  A mismatch is not proof of anything bad — an older client could have produced
- *  the stored report — but it is exactly what a reviewer should look at first. */
-export function reportsDisagree(stored: unknown, fresh: PreflightReport): boolean {
-  const storedScan = (stored as PreflightReport["raw"] | null)?.scan;
-  if (!Array.isArray(storedScan)) return false;
-  const key = (f: ComplianceFinding) => `${f.kind}:${f.permission ?? ""}:${f.path ?? ""}:${f.message}`;
-  const a = new Set(storedScan.map(key));
-  const b = new Set(fresh.raw.scan.map(key));
-  if (a.size !== b.size) return true;
-  for (const k of b) if (!a.has(k)) return true;
-  return false;
+/**
+ * Differences between the manifest recorded with a version (what the review
+ * card, the permission diff and install consent are all based on) and the
+ * manifest.json actually inside the uploaded bundle. The submit wizard always
+ * sends the bundle's own manifest, so any drift means the version was published
+ * some other way, and approving it would ship something nobody reviewed: installs
+ * refuse a bundle that grants itself more than was approved, and the launcher
+ * refuses one whose version is not the recorded one. Each difference is blocking.
+ */
+export function manifestDrift(recorded: unknown, bundle: unknown): PreflightFinding[] {
+  const r = (recorded ?? {}) as Record<string, unknown>;
+  const b = (bundle ?? {}) as Record<string, unknown>;
+  const perms = (m: Record<string, unknown>) =>
+    (Array.isArray(m.permissions) ? (m.permissions as unknown[]).map(String) : []).sort().join(", ") || "none";
+  const out: PreflightFinding[] = [];
+  for (const [field, a, c] of [
+    ["id", String(r.id ?? ""), String(b.id ?? "")],
+    ["version", String(r.version ?? ""), String(b.version ?? "")],
+    ["entry", String(r.entry ?? ""), String(b.entry ?? "")],
+    ["permissions", perms(r), perms(b)],
+  ] as const) {
+    if (a !== c) {
+      out.push({
+        level: "error",
+        code: "manifest-drift",
+        title: `The bundle's ${field} does not match what was submitted`,
+        detail:
+          `The version was submitted with ${field} "${a}", but manifest.json inside the uploaded bundle says ` +
+          `"${c}". Everything on this card describes the submitted value, so approving would ship something ` +
+          "that was not reviewed. Reject it and ask the author to resubmit from Add to Marketplace.",
+        path: "manifest.json",
+        helpTopic: "review",
+      });
+    }
+  }
+  return out;
 }

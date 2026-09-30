@@ -234,7 +234,14 @@ records itself in `plugin_installs` like any install, so it is auditable, but wi
 `is_preview = true`: without that flag, `list_available_plugins` would report the
 pending version as the reviewer's `installed_version` and Browse would show an
 unapproved build as installed. Browse ignores preview rows; the Review UI labels
-the running plugin as an unapproved preview, and approving or rejecting clears it.
+the running plugin as an unapproved preview. A decision does NOT clear it
+(revised 2026-09-30): deleting the row server-side would leave the unpacked build
+on the reviewer's disk with no UI to remove it. Instead Installed shows the row
+as "Preview · since approved / rejected / withdrawn", with Remove (which keeps
+the reviewer's saved data) and, once a release exists, Install vX to swap the
+preview for the approved build. A preview never silently replaces a real
+install: `install_plugin_for_review` refuses with PREVIEW_REPLACES_INSTALL until
+the reviewer confirms, and a normal install always clears `is_preview`.
 
 Decision: approve or reject with notes, through the existing
 `review_plugin_version`, passing the reviewer-generated report as `p_report`. The

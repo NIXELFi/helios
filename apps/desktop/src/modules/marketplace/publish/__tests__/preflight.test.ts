@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { preflight, reportsDisagree } from "../preflight";
+import { manifestDrift, preflight } from "../preflight";
 
 const manifest = {
   format: 1,
@@ -114,24 +114,24 @@ describe("preflight", () => {
   });
 });
 
-describe("reportsDisagree", () => {
-  it("is false when the stored report matches a fresh scan", () => {
-    const fresh = preflight(cleanBundle, manifest);
-
-    expect(reportsDisagree(fresh.raw, fresh)).toBe(false);
+describe("manifestDrift", () => {
+  it("is empty when the bundle carries the submitted manifest", () => {
+    expect(manifestDrift(manifest, { ...manifest, permissions: [] })).toEqual([]);
   });
 
-  it("is true when the fresh scan found something the stored report did not", () => {
-    const stored = preflight(cleanBundle, manifest);
-    const fresh = preflight({ ...cleanBundle, "dist/app.js": "fetch('/x')" }, manifest);
-
-    expect(reportsDisagree(stored.raw, fresh)).toBe(true);
+  it("ignores permission order", () => {
+    const a = { ...manifest, permissions: ["storage", "file.read"] };
+    const b = { ...manifest, permissions: ["file.read", "storage"] };
+    expect(manifestDrift(a, b)).toEqual([]);
   });
 
-  it("is false when there is no stored report to compare against", () => {
-    const fresh = preflight(cleanBundle, manifest);
-
-    expect(reportsDisagree(null, fresh)).toBe(false);
+  it("blocks on a different version or extra permissions inside the bundle", () => {
+    const d = manifestDrift(manifest, { ...manifest, version: "9.9.9", permissions: ["engine:matlab"] });
+    expect(d.map((f) => f.title)).toEqual([
+      "The bundle's version does not match what was submitted",
+      "The bundle's permissions does not match what was submitted",
+    ]);
+    expect(d.every((f) => f.level === "error" && f.code === "manifest-drift")).toBe(true);
   });
 });
 

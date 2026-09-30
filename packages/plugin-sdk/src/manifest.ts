@@ -40,7 +40,9 @@ export interface ValidationResult {
 
 // Lowercase letters/digits in dot- or dash-separated segments.
 const ID_RE = /^[a-z0-9]+(?:[-.][a-z0-9]+)*$/;
-const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+// No trailing dot: the version is a directory name in the install cache, and
+// Windows drops a trailing dot. Kept identical to marketplace.validate_manifest.
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]*[0-9A-Za-z-])?$/;
 
 /** Validate an untrusted manifest object. Never throws; returns a structured
  *  result so callers (loader, CLI, pipeline) can present errors uniformly. */

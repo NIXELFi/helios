@@ -138,4 +138,10 @@ describe("MyPluginsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /add to marketplace/i }));
     expect(onAdd).toHaveBeenCalled();
   });
+
+  it("keeps the list (and any half-typed yank reason) while reloading", () => {
+    state.loading = true;
+    render(<MyPluginsView onHelp={() => {}} onAdd={() => {}} />);
+    expect(screen.getByText("Aero Tool")).toBeInTheDocument();
+  });
 });

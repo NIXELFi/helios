@@ -60,7 +60,9 @@ export function ReviewView({
   }, [reloadToken, refetch]);
   const user = useUser();
 
-  if (loading) {
+  // Spinner only for the FIRST load. A reload (Refresh, a finished Test-drive,
+  // focus) keeps the cards mounted so a reviewer's scan, notes and prompts survive.
+  if (loading && queue.length === 0) {
     return (
       <div className="flex items-center gap-2 py-8 text-xs text-helios-dim">
         <IconLoader2 size={14} className="animate-spin" /> Loading the review queue…
@@ -175,6 +177,13 @@ function ReviewCard({
 
   const scan = reports[key];
   const busy = inspecting === key || previewing === key || reviewing;
+  // Approval is what ships code to members, so it waits for the reviewer's own
+  // scan of the uploaded bytes; over blocking findings it needs a written reason.
+  const approveBlockedReason = !scan
+    ? "Scan the uploaded bundle first"
+    : !scan.report.ok && notes.trim().length === 0
+      ? "The scan has blocking findings: write a note saying why you are approving anyway"
+      : null;
 
   async function decide(decision: "approved" | "rejected") {
     try {
@@ -271,15 +280,6 @@ function ReviewCard({
 
         {scan && (
           <div className="mt-2 space-y-2">
-            {scan.disagrees && (
-              <div className="flex items-start gap-2 rounded-sm border border-helios-warn/50 bg-helios-warn/10 p-2.5">
-                <IconAlertTriangle size={15} className="mt-0.5 shrink-0 text-helios-warn" />
-                <div className="text-[11px] leading-relaxed text-helios-text/90">
-                  This scan does not match the report submitted with the version. That can simply mean the
-                  author used an older client — but it is worth understanding before you approve.
-                </div>
-              </div>
-            )}
             {scan.report.ok ? (
               <div className="flex items-center gap-2 text-[11px] text-helios-success">
                 <IconCircleCheck size={14} /> No blocking findings in the uploaded bundle.
@@ -435,7 +435,8 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => void decide("approved")}
-                disabled={busy}
+                disabled={busy || approveBlockedReason !== null}
+                title={approveBlockedReason ?? undefined}
                 className="inline-flex items-center gap-1.5 rounded-sm bg-asu-gold px-3 py-1.5 text-[11px] font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
               >
                 {reviewing ? (
@@ -443,10 +444,13 @@ function ReviewCard({
                 ) : (
                   <IconThumbUp size={13} />
                 )}
-                Approve
+                {scan && !scan.report.ok ? "Approve anyway" : "Approve"}
               </button>
             </div>
           </>
+        )}
+        {!isOwnSubmission && approveBlockedReason && (
+          <p className="mt-1.5 text-right text-[10px] text-helios-dim">{approveBlockedReason}.</p>
         )}
         {reviewError && <p className="mt-1.5 text-[11px] text-helios-danger">{reviewError}</p>}
       </div>

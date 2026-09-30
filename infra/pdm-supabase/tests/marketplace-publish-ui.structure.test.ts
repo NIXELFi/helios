@@ -97,6 +97,22 @@ describe("marketplace publish-UI migration", () => {
     expect(body).toMatch(/is not in storage/);
   });
 
+  it("checks storage only after the publish capability (no probing the private bucket)", () => {
+    const body = bodyOf("publish_plugin_version");
+    expect(body.indexOf("from storage.objects o")).toBeGreaterThan(
+      body.indexOf("insufficient privilege to publish a new plugin"),
+    );
+  });
+
+  it("renames the plugin on approval, never on submission", () => {
+    expect(bodyOf("publish_plugin_version")).not.toMatch(/set name = v_name/);
+    expect(bodyOf("review_plugin_version")).toMatch(/name = coalesce\(/);
+  });
+
+  it("lets uploaders read their own objects by owner or owner_id", () => {
+    expect(SQL).toMatch(/owner = auth\.uid\(\) or owner_id = auth\.uid\(\)::text/);
+  });
+
   it("fails the apply when the applying role cannot bypass RLS", () => {
     expect(SQL).toMatch(/rolbypassrls or rolsuper/);
   });

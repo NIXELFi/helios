@@ -7,7 +7,7 @@ const state = {
   queue: [] as ReviewItem[],
   loading: false,
   error: null as string | null,
-  reports: {} as Record<string, { report: PreflightReport; disagrees: boolean }>,
+  reports: {} as Record<string, { report: PreflightReport }>,
   userId: "reviewer-1",
 };
 const fns = {
@@ -112,14 +112,6 @@ describe("ReviewView", () => {
     expect(fns.inspect).toHaveBeenCalledWith(ITEM);
   });
 
-  it("flags a re-scan that disagrees with the submitted report", () => {
-    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT, disagrees: true } };
-
-    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
-
-    expect(screen.getByText(/does not match the report submitted/i)).toBeInTheDocument();
-  });
-
   it("lets a reviewer test-drive the pending build and then open it", async () => {
     const onOpenPreview = vi.fn();
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} onOpenPreview={onOpenPreview} />);
@@ -158,6 +150,7 @@ describe("ReviewView", () => {
   });
 
   it("refreshes Browse and Installed after a decision", async () => {
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
     const onDecided = vi.fn();
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
@@ -166,6 +159,7 @@ describe("ReviewView", () => {
   });
 
   it("keeps the card (and so its error) on screen when a decision fails", async () => {
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
     const onDecided = vi.fn();
     fns.review.mockImplementationOnce(() => Promise.reject(new Error("only a pending version can be reviewed")));
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} onDecided={onDecided} />);
@@ -194,7 +188,7 @@ describe("ReviewView", () => {
   });
 
   it("attaches the reviewer's own scan to the decision, not the author's", async () => {
-    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT, disagrees: false } };
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
 
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
@@ -233,5 +227,36 @@ describe("ReviewView", () => {
         }),
       ),
     );
+  });
+
+  it("does not allow Approve until the uploaded bundle has been scanned", () => {
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    const approve = screen.getByRole("button", { name: /approve/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(/scan the uploaded bundle first/i)).toBeInTheDocument();
+  });
+
+  it("over blocking findings, requires a note and says Approve anyway", () => {
+    state.reports = {
+      "aero.test@1.2.0": {
+        report: {
+          ...CLEAN_REPORT,
+          ok: false,
+          errors: [{ level: "error", code: "manifest-drift", title: "drift", detail: "", helpTopic: "review" }],
+        },
+      },
+    };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    const approve = screen.getByRole("button", { name: /approve anyway/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/review notes/i), { target: { value: "False positive: vendored lib" } });
+    expect(approve.disabled).toBe(false);
+  });
+
+  it("keeps the cards mounted while the queue reloads", () => {
+    state.loading = true; // a reload with the previous queue still in hand
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
+    expect(screen.queryByText(/loading the review queue/i)).not.toBeInTheDocument();
   });
 });

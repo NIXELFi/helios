@@ -295,13 +295,16 @@ pub fn read_zip_texts(
         }
 
         let remaining = MAX_TOTAL_INPUT.saturating_sub(total);
+        let cap = remaining.min(MAX_TEXT_BYTES);
         let mut buf = Vec::new();
         entry
             .by_ref()
-            .take(remaining.min(MAX_TEXT_BYTES) + 1)
+            .take(cap + 1)
             .read_to_end(&mut buf)
             .map_err(|e| e.to_string())?;
-        if buf.len() as u64 > MAX_TEXT_BYTES {
+        // Over the per-file cap OR past the total budget: either way this file
+        // was not fully read, so it is unscanned, never scanned-but-truncated.
+        if buf.len() as u64 > cap {
             // Reported, not dropped: the reviewer must see that this file was
             // never scanned rather than a clean report that silently skipped it.
             unscanned.push(name);

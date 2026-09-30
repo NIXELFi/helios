@@ -61,7 +61,7 @@ export function MyPluginsView({
     return (id: string | null) => (id ? (m.get(id) ?? "Subteam") : "Whole org");
   }, [subteams]);
 
-  if (my.loading) {
+  if (my.loading && my.plugins.length === 0) {
     return (
       <div className="flex items-center gap-2 py-8 text-xs text-helios-dim">
         <IconLoader2 size={14} className="animate-spin" /> Loading your plugins…
