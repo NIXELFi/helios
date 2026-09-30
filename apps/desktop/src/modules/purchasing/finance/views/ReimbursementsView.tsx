@@ -1,0 +1,191 @@
+import { useMemo, useState } from "react";
+import { centsToInput, fmtCents, parseCents } from "../../lib/money";
+import { Button, Card, Empty } from "../../components/ui";
+import {
+  addReimbursement, decideReimbursement, payReimbursements, updateReimbursement, uploadReceipts,
+  type ReimbursementWithReceipts,
+} from "../api";
+import { today } from "../useFinance";
+import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
+import { ReceiptList, ReceiptPicker, confirmDeleteReceipt } from "./Receipts";
+
+/** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check. */
+export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }: FinanceProps) {
+  const where = whereLabel(pur);
+  const requests = fin.reimbursements.filter((r) => r.status === "requested");
+  const [showPaid, setShowPaid] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [pay, setPay] = useState({ date: today(), check: "", addCheck: true });
+  const [adding, setAdding] = useState(false);
+
+  const groups = useMemo(() => {
+    const m = new Map<string, ReimbursementWithReceipts[]>();
+    for (const r of fin.reimbursements) {
+      if (r.status === "requested" || r.status === "denied") continue;
+      const k = r.person_name.trim();
+      m.set(k, [...(m.get(k) ?? []), r]);
+    }
+    return [...m.entries()].map(([person, rows]) => ({
+      person, rows: rows.sort((a, b) => Number(a.status === "paid") - Number(b.status === "paid") || a.id - b.id),
+      owed: rows.filter((r) => r.status === "owed").reduce((s, r) => s + (r.amount_cents ?? 0), 0),
+      paid: rows.filter((r) => r.status === "paid").reduce((s, r) => s + (r.amount_cents ?? 0), 0),
+      unpaid: rows.filter((r) => r.status === "owed").length,
+    })).sort((a, b) => b.owed - a.owed || a.person.localeCompare(b.person));
+  }, [fin.reimbursements]);
+  const totalOwed = groups.reduce((s, g) => s + g.owed, 0) + requests.reduce((s, r) => s + (r.amount_cents ?? 0), 0);
+  const pickedRows = fin.reimbursements.filter((r) => picked.has(r.id));
+  const pickedPeople = new Set(pickedRows.map((r) => r.person_name.trim().toLowerCase()));
+
+  const toggle = (id: number, on: boolean) => setPicked((p) => { const n = new Set(p); if (on) n.add(id); else n.delete(id); return n; });
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm"><b className="text-lg tabular-nums">{fmtCents(totalOwed)}</b> <span className="text-helios-dim">owed to members{requests.length ? `, including ${requests.length} request${requests.length > 1 ? "s" : ""} to review` : ""}. It counts against Available until paid.</span></div>
+        <div className="ml-auto flex gap-2">
+          <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} />Show paid</label>
+          <Button kind="ghost" onClick={() => setAdding((a) => !a)}>+ Add for someone</Button>
+        </div>
+      </div>
+
+      {adding && <AddForm {...{ client, reload, flash }} done={() => setAdding(false)} />}
+
+      {requests.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-helios-dim">Waiting for review ({requests.length})</h2>
+          <div className="flex flex-col gap-2">
+            {requests.map((r) => <RequestCard key={r.id} r={r} {...{ client, reload, flash }} where={where(r.project_id, r.subteam_id)} />)}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-helios-dim">By person</h2>
+        {groups.filter((g) => showPaid || g.unpaid).length === 0 && <Empty>Nobody is owed anything.</Empty>}
+        <div className="flex flex-col gap-3">
+          {groups.filter((g) => showPaid || g.unpaid).map((g) => (
+            <Card key={g.person} className="p-0">
+              <div className="flex items-center justify-between border-b border-helios-line px-4 py-2">
+                <b>{g.person}</b>
+                <span className="text-sm">{g.owed ? <><b className="tabular-nums">{fmtCents(g.owed)}</b> owed ({g.unpaid})</> : <Badge tone="good">all paid</Badge>}
+                  {g.paid > 0 && <span className="text-helios-dim"> · {fmtCents(g.paid)} paid</span>}</span>
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {g.rows.filter((r) => showPaid || r.status !== "paid").map((r) => (
+                    <Row key={r.id} r={r} {...{ client, reload, flash, openTxn }} picked={picked.has(r.id)} toggle={toggle} where={where(r.project_id, r.subteam_id)} />
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {picked.size > 0 && (
+        <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-panel px-4 py-2 shadow-lg">
+          <b className="text-asu-gold">{picked.size} selected · {fmtCents(pickedRows.reduce((s, r) => s + (r.amount_cents ?? 0), 0))}</b>
+          <label className="flex items-center gap-1 text-sm">Paid on<input type="date" className={input} value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></label>
+          <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />
+          <label className="flex items-center gap-1 text-sm" title="Adds the check to the ledger as uncashed, so Available stays right until it clears">
+            <input type="checkbox" checked={pay.addCheck} disabled={pickedPeople.size !== 1} onChange={(e) => setPay({ ...pay, addCheck: e.target.checked })} />
+            Write the check into the ledger
+          </label>
+          <Button onClick={() => void attempt(flash, reload, `${picked.size} marked paid.`, async () => {
+            const txn = await payReimbursements(client, [...picked], pay.date || null, pay.check, pay.addCheck && pickedPeople.size === 1);
+            setPicked(new Set());
+            if (txn) openTxn(txn);
+          })}>Mark paid</Button>
+          <Button kind="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+          {pickedPeople.size > 1 && <span className="text-xs text-helios-dim">One check pays one person, so the ledger entry is off for several people.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "client" | "reload" | "flash"> & { r: ReimbursementWithReceipts; where: string }) {
+  const [note, setNote] = useState("");
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <b>{r.person_name}</b> <span className="text-helios-dim">asked {shortDate(r.created_at)}</span>
+          <div className="text-sm">{r.reason}{where && <span className="text-helios-dim"> · {where}</span>}{r.requested_date && <span className="text-helios-dim"> · paid {shortDate(r.requested_date)}</span>}</div>
+        </div>
+        <b className="text-lg tabular-nums">{fmtCents(r.amount_cents)}</b>
+      </div>
+      <div className="mt-2"><ReceiptList client={client} receipts={r.reimbursement_receipts} /></div>
+      {!r.reimbursement_receipts.length && <div className="mt-1 text-xs text-asu-gold">No receipt attached: ask for one before approving.</div>}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input className={`${input} min-w-[220px] flex-1`} placeholder="Note (optional, sent to them)" value={note} onChange={(e) => setNote(e.target.value)} />
+        <Button kind="good" onClick={() => void attempt(flash, reload, "Approved. It's now owed.", () => decideReimbursement(client, r.id, "approve", note))}>Approve</Button>
+        <Button kind="danger" onClick={() => void attempt(flash, reload, "Declined.", () => decideReimbursement(client, r.id, "deny", note))}>Decline</Button>
+      </div>
+    </Card>
+  );
+}
+
+function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<FinanceProps, "client" | "reload" | "flash" | "openTxn"> & {
+  r: ReimbursementWithReceipts; picked: boolean; toggle: (id: number, on: boolean) => void; where: string;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
+  const paid = r.status === "paid";
+  const saveField = (fields: Parameters<typeof updateReimbursement>[2]) => void attempt(flash, reload, "", () => updateReimbursement(client, r.id, fields));
+  return (
+    <tr className={`border-t border-helios-line align-top ${paid ? "opacity-60" : ""}`}>
+      <td className="w-8 p-2 text-center">{!paid && <input type="checkbox" checked={picked} onChange={(e) => toggle(r.id, e.target.checked)} aria-label="Select" />}</td>
+      <td className="w-28 p-2">
+        {paid ? <span className="tabular-nums">{fmtCents(r.amount_cents)}</span>
+          : <input className={`${input} w-24 text-right`} defaultValue={centsToInput(r.amount_cents)} placeholder="amount?"
+              onBlur={(e) => { const c = e.target.value.trim() ? parseCents(e.target.value) : null; if (c !== r.amount_cents) saveField({ amount_cents: c }); }} />}
+      </td>
+      <td className="p-2">
+        {paid ? r.reason : <input className={`${input} w-full`} defaultValue={r.reason} onBlur={(e) => { if (e.target.value !== r.reason) saveField({ reason: e.target.value }); }} />}
+        <div className="mt-1 text-xs text-helios-dim">{[where, r.requested_date && `dated ${shortDate(r.requested_date)}`, r.user_id && "asked in Helios"].filter(Boolean).join(" · ")}</div>
+      </td>
+      <td className="p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ReceiptList client={client} receipts={r.reimbursement_receipts}
+            onDelete={paid ? undefined : (x) => void attempt(flash, reload, "Receipt removed.", () => confirmDeleteReceipt(client, x))} />
+          {!paid && <ReceiptPicker compact files={files} setFiles={setFiles} />}
+        </div>
+        {files.length > 0 && <div className="mt-1"><Button onClick={() => void attempt(flash, reload, "Receipts added.", async () => { await uploadReceipts(client, r.id, files); setFiles([]); })}>Upload {files.length}</Button></div>}
+      </td>
+      <td className="w-40 p-2 text-xs">
+        {paid ? <>
+          <Badge tone="good">paid {shortDate(r.paid_date)}</Badge>
+          {r.check_number && <div className="mt-1">check #{r.check_number}</div>}
+          {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger →</button>}
+        </> : <Badge tone="warn">owed</Badge>}
+      </td>
+    </tr>
+  );
+}
+
+function AddForm({ client, reload, flash, done }: Pick<FinanceProps, "client" | "reload" | "flash"> & { done: () => void }) {
+  const [f, setF] = useState({ person: "", amount: "", reason: "", date: today() });
+  const [files, setFiles] = useState<File[]>([]);
+  async function add() {
+    if (!f.person.trim()) { flash("Who is owed?", true); return; }
+    const ok = await attempt(flash, reload, "Added.", async () => {
+      const id = await addReimbursement(client, { person_name: f.person.trim(), amount_cents: parseCents(f.amount), reason: f.reason, requested_date: f.date || null });
+      if (files.length) await uploadReceipts(client, id, files);
+    });
+    if (ok) done();
+  }
+  return (
+    <Card className="flex flex-col gap-2">
+      <b>Money owed to someone</b>
+      <p className="text-xs text-helios-dim">For people who paid for the team (e.g. a hotel on a competition trip). Members can also ask themselves from Purchasing → Get reimbursed.</p>
+      <div className="flex flex-wrap gap-2">
+        <input className={input} placeholder="Person" value={f.person} onChange={(e) => setF({ ...f, person: e.target.value })} />
+        <input className={`${input} w-28`} placeholder="Amount $" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <input className={`${input} min-w-[240px] flex-1`} placeholder="What for" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
+        <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} title="When they paid" />
+      </div>
+      <ReceiptPicker files={files} setFiles={setFiles} />
+      <div className="flex gap-2"><Button onClick={() => void add()}>Add</Button><Button kind="ghost" onClick={done}>Cancel</Button></div>
+    </Card>
+  );
+}

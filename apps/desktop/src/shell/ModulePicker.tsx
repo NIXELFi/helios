@@ -11,6 +11,7 @@ import {
   IconPuzzle,
   IconSettings,
   IconShieldLock,
+  IconShoppingCart,
   IconSteeringWheel,
   IconUserCircle,
   IconWind,
@@ -23,7 +24,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "sim" | "games" | "amethyst" | "marketplace" | "org";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "purchasing" | "sim" | "games" | "amethyst" | "marketplace" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -32,6 +33,7 @@ export const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   vault: IconArchive,
   cfd: IconWind,
   pm: IconClipboardList,
+  purchasing: IconShoppingCart,
   sim: IconSteeringWheel,
   games: IconDeviceGamepad2,
   amethyst: IconDiamond,
@@ -256,6 +258,17 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("pm")}
           disabled={pmDisabled}
           disabledTitle="Sign in to use PM"
+        />
+        {/* Purchasing: parts requests, approvals, orders, budgets. Same gate as
+            PM (RLS-protected purchasing.* tables). */}
+        <NavButton
+          label="Purchasing"
+          Icon={MODULE_ICON.purchasing}
+          collapsed={collapsed}
+          active={active === "purchasing"}
+          onClick={() => onSelect("purchasing")}
+          disabled={pmDisabled}
+          disabledTitle="Sign in to use Purchasing"
         />
         <NavButton
           label="Logs"

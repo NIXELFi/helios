@@ -331,6 +331,9 @@ function NotificationsTab() {
         <Row label="App updates" hint="When a new Helios version has downloaded and is ready to install.">
           <Switch label="App updates" checked={n.updates} disabled={off} onChange={(v) => update({ notifications: { updates: v } })} />
         </Row>
+        <Row label="Purchasing" hint="Requests waiting for approval, approvals, shipments and deliveries.">
+          <Switch label="Purchasing" checked={n.purchasing} disabled={off} onChange={(v) => update({ notifications: { purchasing: v } })} />
+        </Row>
       </Section>
       <Section title="Quiet hours" hint="Desktop notifications are held during this window (local time). Wraps midnight when the end is earlier than the start.">
         <Row label="Enable quiet hours">

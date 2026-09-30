@@ -1,0 +1,174 @@
+import type { SupabaseClient } from "@helios/auth";
+import type { NewRow } from "./paste";
+
+// Data layer for the Purchasing module. Reads come straight from the
+// `purchasing` schema (RLS returns only what the caller may see); every write
+// goes through a SECURITY DEFINER RPC that checks capabilities server-side
+// (infra/pdm-supabase/supabase/migrations/20260929000000_purchasing_schema.sql).
+
+export type Status =
+  | "PLANNED" | "READY" | "APPROVED" | "ORDERED" | "BACKORDERED" | "SHIPPED"
+  | "DELIVERED" | "RECEIVED" | "RECONCILED" | "DENIED" | "CANCELLED" | "HAVE";
+
+export const STATUSES: Status[] = [
+  "PLANNED", "READY", "APPROVED", "ORDERED", "BACKORDERED", "SHIPPED",
+  "DELIVERED", "RECEIVED", "RECONCILED", "DENIED", "CANCELLED", "HAVE",
+];
+
+export const STATUS_LABEL: Record<Status, string> = {
+  PLANNED: "Not ready to order", READY: "Ready to order", APPROVED: "Approved", ORDERED: "Ordered",
+  BACKORDERED: "Backordered", SHIPPED: "Shipped", DELIVERED: "Delivered", RECEIVED: "Received",
+  RECONCILED: "Reconciled", DENIED: "Denied", CANCELLED: "Cancelled", HAVE: "Already have",
+};
+
+/** What a requester (any member) may do to their subteam's items; execs may do anything. */
+export const REQUESTER_MOVES: Partial<Record<Status, Status[]>> = {
+  PLANNED: ["READY", "CANCELLED"],
+  READY: ["PLANNED", "CANCELLED"],
+  ORDERED: ["RECEIVED"],
+  SHIPPED: ["RECEIVED"],
+  DELIVERED: ["RECEIVED"],
+};
+
+export type Priority = "HIGH" | "Medium" | "Low";
+
+export interface Allocation { project_id: string; subteam_id: string; percent: number }
+
+export interface Item {
+  id: string;
+  code: string;
+  title: string;
+  status: Status;
+  priority: Priority;
+  requester_id: string | null;
+  requester_name: string;
+  justification: string;
+  needed_by: string | null;
+  vendor: string | null;
+  product_url: string;
+  part_number: string;
+  quantity: number | null;
+  unit_price_cents: number | null;
+  tax_shipping_cents: number | null;
+  total_estimate_cents: number | null;
+  notes: string;
+  ready_at: string | null;
+  vendor_order_id: string | null;
+  actual_total_cents: number | null;
+  payment_method: string;
+  ordered_at: string | null;
+  carrier: string;
+  tracking_number: string;
+  est_delivery: string | null;
+  created_at: string;
+  finance_txn_id?: number | null;   // the statement line that paid for it (finance)
+  match_method?: string;
+  item_allocations: Allocation[];
+}
+
+export interface Approval { item_id: string; user_id: string; decision: "approve" | "deny"; note: string; at: string }
+export interface Subteam { id: string; name: string; code: string; color: string | null; sort_order: number }
+export interface Project { id: string; name: string; car_code: string; status: string }
+export interface Notification { id: number; item_id: string | null; kind: string; message: string; created_at: string; read_at: string | null }
+export interface BudgetRow {
+  budget_line_id: string | null; project_id: string | null; project_code: string; name: string; subteam_ids: string[];
+  budget_cents: number; spent_cents: number; committed_cents: number; planned_cents: number;
+}
+
+/** Best known cost: charged, else estimate, else qty x unit + tax/ship. */
+export function itemCost(i: Item): number {
+  if (i.actual_total_cents !== null) return i.actual_total_cents;
+  if (i.total_estimate_cents !== null) return i.total_estimate_cents;
+  if (i.quantity !== null && i.unit_price_cents !== null) return Math.round(i.quantity * i.unit_price_cents) + (i.tax_shipping_cents ?? 0);
+  return 0;
+}
+
+function unwrap<T>(res: { data: T | null; error: { message: string } | null }): T {
+  if (res.error) throw new Error(res.error.message);
+  return res.data as T;
+}
+
+const P = (c: SupabaseClient) => c.schema("purchasing");
+
+export async function fetchItems(c: SupabaseClient): Promise<Item[]> {
+  return unwrap(await P(c).from("items").select("*, item_allocations(project_id, subteam_id, percent)").order("code"));
+}
+export async function fetchApprovals(c: SupabaseClient): Promise<Approval[]> {
+  return unwrap(await P(c).from("approvals").select("*"));
+}
+export async function fetchSubteams(c: SupabaseClient): Promise<Subteam[]> {
+  return unwrap(await c.schema("pm").from("subteams").select("id,name,code,color,sort_order").order("sort_order").order("name"));
+}
+export async function fetchProjects(c: SupabaseClient): Promise<Project[]> {
+  return unwrap(await c.schema("pm").from("projects").select("id,name,car_code,status").order("car_code"));
+}
+export async function fetchNotifications(c: SupabaseClient): Promise<Notification[]> {
+  return unwrap(await P(c).from("notifications").select("*").order("id", { ascending: false }).limit(200));
+}
+export async function fetchBudgets(c: SupabaseClient): Promise<BudgetRow[]> {
+  return unwrap(await P(c).rpc("budget_rows"));
+}
+
+/** The caller's capabilities: org-wide keys, and per-subteam keys. */
+export interface Caps { org: Set<string>; bySubteam: Map<string, Set<string>> }
+export async function fetchCaps(c: SupabaseClient): Promise<Caps> {
+  const rows = unwrap(await c.schema("pm").rpc("my_capabilities")) as Array<{ capability_key: string; subteam_id: string | null }>;
+  const caps: Caps = { org: new Set(), bySubteam: new Map() };
+  for (const r of rows ?? []) {
+    if (!r.subteam_id) caps.org.add(r.capability_key);
+    else {
+      if (!caps.bySubteam.has(r.subteam_id)) caps.bySubteam.set(r.subteam_id, new Set());
+      caps.bySubteam.get(r.subteam_id)!.add(r.capability_key);
+    }
+  }
+  return caps;
+}
+export const can = (caps: Caps | null, key: string, subteamId?: string) =>
+  !!caps && (caps.org.has(key) || (!!subteamId && !!caps.bySubteam.get(subteamId)?.has(key)));
+
+export async function addItems(c: SupabaseClient, projectId: string, subteamId: string, rows: NewRow[], ready: boolean): Promise<string[]> {
+  return unwrap(await P(c).rpc("add_items", { p_project: projectId, p_subteam: subteamId, p_rows: rows, p_ready: ready }));
+}
+export async function updateItem(c: SupabaseClient, id: string, patch: Record<string, unknown>): Promise<Item> {
+  return unwrap(await P(c).rpc("update_item", { p_id: id, p_patch: patch }));
+}
+export async function setStatus(c: SupabaseClient, ids: string[], status: Status, note = ""): Promise<void> {
+  unwrap(await P(c).rpc("set_status", { p_ids: ids, p_status: status, p_note: note }));
+}
+export async function decide(c: SupabaseClient, id: string, decision: "approve" | "deny", note = ""): Promise<string> {
+  return unwrap(await P(c).rpc("decide", { p_id: id, p_decision: decision, p_note: note }));
+}
+export async function recordOrder(c: SupabaseClient, ids: string[], orderId: string, payment: string, orderedOn: string | null, totalCents: number | null, paidBy: string): Promise<void> {
+  unwrap(await P(c).rpc("record_order", {
+    p_ids: ids, p_order_id: orderId, p_payment: payment, p_ordered_on: orderedOn, p_total_cents: totalCents, p_paid_by: paidBy,
+  }));
+}
+export async function addTracking(c: SupabaseClient, ids: string[], trackingNumber: string, carrier: string, eta: string | null): Promise<void> {
+  unwrap(await P(c).rpc("add_tracking", { p_ids: ids, p_number: trackingNumber, p_carrier: carrier, p_eta: eta }));
+}
+export async function markNotificationsRead(c: SupabaseClient): Promise<void> {
+  unwrap(await P(c).rpc("mark_notifications_read"));
+}
+
+/** Carrier from a tracking number's shape. */
+export function detectCarrier(n: string): string {
+  const s = n.replace(/[\s-]/g, "").toUpperCase();
+  if (/^1Z[0-9A-Z]{16}$/.test(s)) return "UPS";
+  if (/^(9[0-9]{15,21}|[A-Z]{2}[0-9]{9}US)$/.test(s)) return "USPS";
+  if (/^([0-9]{12}|[0-9]{15}|[0-9]{20}|[0-9]{22})$/.test(s)) return "FedEx";
+  if (/^TBA[0-9]{9,12}$/.test(s)) return "Amazon";
+  if (/^[0-9]{10}$/.test(s)) return "DHL";
+  return "";
+}
+export function trackingUrl(carrier: string, n: string): string {
+  const s = n.replace(/[\s-]/g, "").toUpperCase();
+  const c = carrier || detectCarrier(s);
+  const urls: Record<string, string> = {
+    UPS: `https://www.ups.com/track?tracknum=${s}`,
+    USPS: `https://tools.usps.com/go/TrackConfirmAction?tLabels=${s}`,
+    FedEx: `https://www.fedex.com/fedextrack/?trknbr=${s}`,
+    DHL: `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${s}`,
+    Amazon: `https://track.amazon.com/tracking/${s}`,
+  };
+  return s && urls[c] ? urls[c] : "";
+}
