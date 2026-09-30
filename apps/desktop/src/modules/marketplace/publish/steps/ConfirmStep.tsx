@@ -136,8 +136,9 @@ export function ConfirmStep({
       <div className="flex items-start gap-2 rounded-sm border border-helios-line bg-helios-base p-3">
         <IconShieldCheck size={14} className="mt-0.5 shrink-0 text-helios-dim" />
         <div className="text-[11px] leading-relaxed text-helios-text/90">
-          A marketplace reviewer — someone other than you — reviews it for {reviewerSubteam} before
-          anyone can install it. You cannot approve your own submission, even if you have review rights.{" "}
+          A marketplace reviewer reviews it for {reviewerSubteam} before
+          anyone can install it. You cannot approve your own submission unless you hold the owner-level
+          "approve own submissions" permission.{" "}
           <button
             type="button"
             onClick={() => onHelp("review")}

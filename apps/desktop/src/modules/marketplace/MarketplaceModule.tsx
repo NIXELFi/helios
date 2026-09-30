@@ -108,6 +108,7 @@ export function MarketplaceModule() {
   // someone to wonder why the feature seems not to exist.
   const canReview = canAnywhere("marketplace.review");
   const canPublish = canAnywhere("marketplace.publish");
+  const canApproveOwn = canAnywhere("marketplace.approve_own");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [consentFor, setConsentFor] = useState<AvailablePlugin | null>(null);
   const [uninstallFor, setUninstallFor] = useState<AvailablePlugin | null>(null);
@@ -471,6 +472,7 @@ export function MarketplaceModule() {
           <div hidden={detail !== null || tab !== "review"}>
             <ReviewView
               reloadToken={reloadToken}
+              canApproveOwn={canApproveOwn}
               available={plugins}
               installed={installed}
               onHelp={help.openHelp}

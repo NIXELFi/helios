@@ -264,7 +264,7 @@ export const HELP_ARTICLES: Record<HelpTopic, HelpArticle> = {
       {
         heading: "You cannot approve your own submission",
         body: [
-          "Even if you have review rights, you cannot approve a version you published. Approval is what lets your code run on everyone else's machine, so it takes a second person. This is not a configuration — it is enforced by the database.",
+          "Even if you have review rights, you cannot approve a version you published (the one exception is the “approve own submissions” permission, which only the owner role holds). Approval is what lets your code run on everyone else's machine, so it takes a second person. This is not a configuration — it is enforced by the database.",
         ],
       },
       {

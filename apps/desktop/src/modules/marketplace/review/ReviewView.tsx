@@ -33,6 +33,7 @@ import type { AvailablePlugin } from "../data/useMarketplace";
 
 export function ReviewView({
   reloadToken = 0,
+  canApproveOwn = false,
   available,
   installed = [],
   onHelp,
@@ -42,6 +43,9 @@ export function ReviewView({
 }: {
   /** Changes whenever the module refetches (Refresh, a publish): reload too. */
   reloadToken?: number;
+  /** The caller holds marketplace.approve_own (owners): they may approve their
+   *  own submissions. The server enforces the same rule. */
+  canApproveOwn?: boolean;
   /** Approved plugins, used to diff a submission against its last release. */
   available: AvailablePlugin[];
   /** The reviewer's installs, so a card can tell a test-drive is ready to open. */
@@ -107,7 +111,7 @@ export function ReviewView({
           key={`${item.pluginId}@${item.version}`}
           item={item}
           available={available}
-          isOwnSubmission={item.publishedBy === user?.id}
+          isOwnSubmission={item.publishedBy === user?.id && !canApproveOwn}
           previewReady={installed.some(
             (p) => p.id === item.pluginId && p.isPreview && p.installedVersion === item.version,
           )}

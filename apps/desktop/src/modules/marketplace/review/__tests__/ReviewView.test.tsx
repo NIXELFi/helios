@@ -303,4 +303,12 @@ describe("ReviewView", () => {
     expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
     expect(screen.getByText(/couldn’t refresh the review queue/i)).toBeInTheDocument();
   });
+
+  it("lets a holder of approve-own approve their own submission", () => {
+    state.userId = "author-1"; // published it
+    state.reports = { "aero.test@1.2.0": { report: CLEAN_REPORT } };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} canApproveOwn />);
+    expect(screen.queryByText(/you published this version/i)).not.toBeInTheDocument();
+    expect((screen.getByRole("button", { name: /^approve$/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

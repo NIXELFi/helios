@@ -191,7 +191,7 @@ describe("SubmitWizard", () => {
     expect(screen.getByText("Aerodynamics")).toBeInTheDocument();
   });
 
-  it("never implies you can approve your own submission", () => {
+  it("says you cannot approve your own submission, naming the owner-level exception", () => {
     Object.assign(publishState, {
       phase: "confirm",
       packed: PACKED,
@@ -204,8 +204,8 @@ describe("SubmitWizard", () => {
 
     render(<SubmitWizard onClose={() => {}} />);
 
-    expect(screen.getByText(/someone other than you/i)).toBeInTheDocument();
-    expect(screen.getByText(/cannot approve your own submission/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot approve your own submission unless/i)).toBeInTheDocument();
+    expect(screen.getByText(/approve own submissions/i)).toBeInTheDocument();
   });
 
   it("shouts about a newly requested high-trust permission", () => {
