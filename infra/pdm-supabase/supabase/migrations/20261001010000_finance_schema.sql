@@ -178,7 +178,7 @@ create table finance.reimbursements (
   project_id     uuid references pm.projects(id),
   subteam_id     uuid references pm.subteams(id),
   item_id        uuid references purchasing.items(id) on delete set null,
-  requested_date date default current_date,
+  requested_date date default purchasing.team_day(),
   status         text not null default 'owed' check (status in ('requested', 'owed', 'paid', 'denied')),
   decided_by     uuid,
   decided_at     timestamptz,
@@ -442,7 +442,7 @@ begin
   insert into finance.reimbursements (person_name, user_id, amount_cents, reason, project_id, subteam_id,
                                       item_id, requested_date, status)
   values (v_name, v_uid, p_amount_cents, left(btrim(p_reason), 500), p_project, p_subteam, p_item,
-          coalesce(p_date, current_date), 'requested')
+          coalesce(p_date, purchasing.team_day()), 'requested')
   returning id into v_id;
   perform purchasing.notify(
     array(select u from unnest(purchasing.users_with('finance.edit')) u where u <> v_uid), null, 'reimbursement',
@@ -496,7 +496,7 @@ create or replace function finance.pay_reimbursements(
 returns bigint language plpgsql security definer set search_path = '' as $$
 declare
   v_people int; v_person text; v_total bigint; v_txn bigint; v_checking bigint; v_reasons text;
-  v_date date := coalesce(p_paid_date, current_date); v_check text := nullif(btrim(coalesce(p_check_number, '')), '');
+  v_date date := coalesce(p_paid_date, purchasing.team_day()); v_check text := nullif(btrim(coalesce(p_check_number, '')), '');
 begin
   if not finance.can_edit() then raise exception 'only execs pay reimbursements' using errcode = '42501'; end if;
   if coalesce(array_length(p_ids, 1), 0) = 0 then raise exception 'pick at least one' using errcode = '22023'; end if;
@@ -651,7 +651,7 @@ language sql stable security definer set search_path = '' as $$
            else 'committed'
          end,
          round(purchasing.item_cost(i) * a.percent / 100.0)::bigint,
-         'part', i.code, coalesce(i.ordered_at, i.created_at::date), i.title, null::bigint, i.id
+         'part', i.code, coalesce(i.ordered_at, purchasing.team_day(i.created_at)), i.title, null::bigint, i.id
   from purchasing.items i
   join purchasing.item_allocations a on a.item_id = i.id
   where i.status not in ('DENIED', 'CANCELLED', 'HAVE')

@@ -268,7 +268,10 @@ pub fn run() {
             // silently undo a user who turned launch-on-login off in Settings.
             {
                 use tauri_plugin_autostart::ManagerExt;
-                if !autostart_preference_recorded(app.handle()) {
+                // Never from a debug build: the login item is shared by name
+                // ("Helios"), so a `pnpm dev` run would repoint the installed
+                // app's launch-on-login at target/debug.
+                if !cfg!(debug_assertions) && !autostart_preference_recorded(app.handle()) {
                     let _ = app.autolaunch().enable();
                     mark_autostart_preference_set(app.handle());
                 }

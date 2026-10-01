@@ -340,7 +340,10 @@ function HeliosShell() {
   const [deferUsedFor, setDeferUsedFor] = useState<string | null>(null);
   const autoArmedForRef = useRef<string | null>(null);
   const availableVersion = updater.state.kind === "available" ? updater.state.update.version : null;
-  const autoUpdateActive = prefs.autoUpdate && availableVersion !== null;
+  // Never auto-install into a `pnpm dev` build: the updater would replace the
+  // folder three levels above target/debug/helios-desktop with Helios.app.
+  // (Vitest runs in MODE "test", so the countdown stays covered by tests.)
+  const autoUpdateActive = prefs.autoUpdate && availableVersion !== null && import.meta.env.MODE !== "development";
   useEffect(() => {
     if (!autoUpdateActive || availableVersion === null) {
       setAutoInstallIn(null);

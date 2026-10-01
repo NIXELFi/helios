@@ -45,6 +45,13 @@ returns boolean language sql stable security definer set search_path = '' as $$
   select pm.has_capability((select auth.uid()), cap, stid);
 $$;
 
+-- The team's calendar day (Arizona, no daylight saving). The database runs in
+-- UTC, so after 5 pm local current_date is already tomorrow.
+create or replace function purchasing.team_day(t timestamptz default now())
+returns date language sql stable set search_path = '' as $$
+  select (t at time zone 'America/Phoenix')::date;
+$$;
+
 -- 2. Tables -----------------------------------------------------------------
 
 create table purchasing.seasons (
@@ -635,7 +642,7 @@ begin
     update purchasing.items set
       status = case when status in ('ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED') then status else 'ORDERED' end,
       vendor_order_id = nullif(p_order_id, ''), payment_method = coalesce(p_payment, ''),
-      paid_by = coalesce(p_paid_by, ''), ordered_at = coalesce(p_ordered_on, current_date),
+      paid_by = coalesce(p_paid_by, ''), ordered_at = coalesce(p_ordered_on, purchasing.team_day()),
       purchaser_id = v_uid, actual_total_cents = coalesce(v_share, actual_total_cents)
     where id = r.id;
   end loop;
@@ -755,7 +762,7 @@ end; $$;
 
 revoke all on all functions in schema purchasing from public, anon;
 grant execute on function
-  purchasing.can(text, uuid), purchasing.is_exec(), purchasing.is_member(), purchasing.can_see_item(uuid),
+  purchasing.can(text, uuid), purchasing.team_day(timestamptz), purchasing.is_exec(), purchasing.is_member(), purchasing.can_see_item(uuid),
   purchasing.item_cost(purchasing.items), purchasing.add_items(uuid, uuid, jsonb, boolean),
   purchasing.update_item(uuid, jsonb), purchasing.set_status(uuid[], text, text),
   purchasing.decide(uuid, text, text), purchasing.record_order(uuid[], text, text, date, bigint, text),

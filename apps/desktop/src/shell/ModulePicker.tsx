@@ -265,6 +265,7 @@ export function ModulePicker(props: Props) {
           label="Agora"
           Icon={MODULE_ICON.agora}
           collapsed={collapsed}
+          badge="BETA"
           active={active === "agora"}
           onClick={() => onSelect("agora")}
           disabled={pmDisabled}

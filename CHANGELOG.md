@@ -27,9 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-09-30
+
 ### Added
 
-- **Agora** (purchasing; a sidebar module next to PM, behind the same access gate). A shared parts list per
+- **Agora (beta)**: purchasing and finance, a new sidebar module next to PM, behind the same access gate. A shared parts list per
   car (SDM27 / SDM27e) and subteam that works like a spreadsheet: type in rows
   or paste a Mouser / Digikey cart straight in. Any member can request parts;
   every request names who entered it and needs two exec approvals before it is
@@ -56,6 +58,7 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 
+- Development builds (`pnpm dev`) no longer auto-install updates (which overwrote the build folder) or register themselves as the launch-on-login app in place of the installed Helios.
 - Linux: the AppImage no longer opens a blank window on Wayland distributions such as CachyOS/Arch. The release build now removes the bundled `libwayland-*` libraries so the app uses your system's Wayland and Mesa stack (#48).
 
 ## [5.14.0] - 2026-09-30

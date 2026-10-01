@@ -155,7 +155,9 @@ describe("marketplace — author-side management RPCs", () => {
       .schema("marketplace")
       .rpc("withdraw_plugin_version", { p_plugin_id: pluginId, p_version: "1.0.0" });
 
-    expect(error?.message).toMatch(/insufficient privilege/i);
+    // Refused either by the capability check or, since 5.14.0's owner-only
+    // review change, by the author/reviewer check that names the version.
+    expect(error?.message).toMatch(/insufficient privilege|only the author of .* can withdraw it/i);
     expect(await versionStatus(pluginId, "1.0.0")).toBe("pending");
   });
 
