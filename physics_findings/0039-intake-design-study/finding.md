@@ -252,3 +252,8 @@ About 0.5 % of each candidate's gain is throat area: the candidates assume a 20.
 - The plate and shaft (3D case) or the 1D fit itself must account for the rest; the pressure tap between throttle body and throat is still the direct test.
 
 **Throttle response cross-check.** A lumped fill model on the CFD restrictor curve gives the 2.75 L plenum +11.6 ms (6000 rpm) / +9.7 ms (8500 rpm) of lost time over 1.44 L, against +13 / +12 ms in the 1D tip-in runs. The volume penalty is confirmed.
+
+**Hypothesis: the throttle shaft is the upstream loss (not yet CFD).** The throttle-body CAD shows a full round 10 mm shaft across the 32 mm bore, so at WOT it blocks about 39 % of the bore (open area about 490 of 804 mm²; the restrictor throat is 312.5 mm²).
+- A sudden-expansion estimate behind the shaft gives K = 0.4-1.1 on the bore dynamic pressure. With the mouth and bore (0.19 from Fluent) the total is 0.6-1.3, against the 1.4 needed to reconcile clean-flow CFD with the car-fitted recovery.
+- If the 3D case confirms it, a slimmer or flattened shaft, a larger throttle body, or a different throttle type is worth more than anything left in the restrictor shape: up to about +3 % at the top end.
+- No physical test (flow bench, pressure tap) is planned for now.
