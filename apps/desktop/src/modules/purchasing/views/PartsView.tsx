@@ -4,6 +4,7 @@ import {
   REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, itemCost, recordOrder,
   setStatus, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
+import { today } from "../finance/useFinance";
 import { centsToInput, fmtCents, parseCents, requireCents } from "../lib/money";
 import { parseCsv, parseTsv, type NewRow, type PasteField } from "../lib/paste";
 import { normalizeVendor } from "../finance/importers";
@@ -196,7 +197,7 @@ export function PartsView({
   // ---- bulk actions
   const ids = [...selected].filter((id) => rows.some((r) => r.id === id));
   const [bulk, setBulk] = useState("");
-  const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: new Date().toISOString().slice(0, 10), paidBy: "" });
+  const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [track, setTrack] = useState({ number: "", carrier: "", eta: "" });
   async function applyBulk() {
     if (!ids.length || !bulk) return;

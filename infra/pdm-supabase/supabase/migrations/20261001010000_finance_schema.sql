@@ -573,6 +573,21 @@ create or replace function finance.link_item(p_item uuid, p_txn bigint)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
   if not finance.can_edit() then raise exception 'only execs edit the ledger' using errcode = '42501'; end if;
+  -- A charge with no split yet takes the item's car and subteam, so the
+  -- money doesn't drop out of every budget once the item stops counting as a part.
+  if p_txn is not null and not exists (select 1 from finance.txn_allocations where txn_id = p_txn)
+     and exists (select 1 from finance.transactions where id = p_txn and kind <> 'transfer') then
+    insert into finance.txn_allocations (txn_id, project_id, subteam_id, amount_cents)
+    select p_txn, a.project_id, a.subteam_id,
+           case when row_number() over w = count(*) over (partition by a.item_id)
+                then abs(t.amount_cents) - coalesce(sum(round(abs(t.amount_cents) * a.percent / 100.0)::bigint) over (w rows between unbounded preceding and 1 preceding), 0)
+                else round(abs(t.amount_cents) * a.percent / 100.0)::bigint end
+    from purchasing.item_allocations a cross join finance.transactions t
+    where a.item_id = p_item and t.id = p_txn
+    window w as (partition by a.item_id order by a.subteam_id, a.project_id);
+    update finance.transactions set allocation_basis = 'from part ' || (select code from purchasing.items where id = p_item)
+    where id = p_txn and exists (select 1 from finance.txn_allocations where txn_id = p_txn);
+  end if;
   update purchasing.items set
     finance_txn_id = p_txn,
     match_method = case when p_txn is null then 'rejected' else 'manual' end,
@@ -625,7 +640,8 @@ language sql stable security definer set search_path = '' as $$
          case when t.amount_cents > 0 then -al.amount_cents else al.amount_cents end,
          'ledger', coalesce(t.reference, ''), t.date,
          -- a check's memo can name the person paid back; show only "Check"
-         coalesce(nullif(t.vendor, ''), case when t.kind = 'check' then 'Check' else t.description end), t.id, null::uuid
+         -- (and a withdrawal's, e.g. a Zelle payee): members see only the kind
+         coalesce(nullif(t.vendor, ''), case when t.kind in ('check', 'withdrawal') then initcap(t.kind) else t.description end), t.id, null::uuid
   from finance.transactions t
   join finance.txn_allocations al on al.txn_id = t.id
   where t.status = 'posted' and t.kind in ('charge', 'check', 'withdrawal', 'fee', 'credit')

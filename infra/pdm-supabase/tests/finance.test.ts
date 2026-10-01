@@ -238,6 +238,23 @@ describe("finance", () => {
     expect((await cfo.f.rpc("withdraw_reimbursement", { p_id: own })).error).toBeNull();
   });
 
+  it("linking a part to an unsplit charge gives the charge the part's split, so the money stays in the budget", async () => {
+    const { card } = await accounts();
+    const cfo = await person("cfo", "cfo");
+    const { data: season } = await pur().from("seasons").insert({ name: "2026-27", is_current: true }).select("id").single();
+    await cfo.p.rpc("upsert_budget_line", { p_id: null, p_season: season!.id, p_project: ic, p_name: "Data AQ", p_amount_cents: 100000, p_subteams: [daq] });
+    // a second line can't also cover DAQ on the same car
+    expect((await cfo.p.rpc("upsert_budget_line", { p_id: null, p_season: season!.id, p_project: ic, p_name: "Other", p_amount_cents: 1, p_subteams: [daq, eng] })).error?.message)
+      .toMatch(/already on another budget line/);
+    const { data: ids } = await cfo.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Logger", total_estimate_cents: 5000 }] });
+    const t = (await fin().from("transactions").insert({ account_id: card, date: "2026-09-10", amount_cents: -5003, kind: "charge", vendor: "Mouser" }).select("id").single()).data!;
+    expect((await cfo.f.rpc("link_item", { p_item: ids[0], p_txn: t.id })).error).toBeNull();
+    const { data: split } = await fin().from("txn_allocations").select("project_id,subteam_id,amount_cents").eq("txn_id", t.id);
+    expect(split).toEqual([{ project_id: ic, subteam_id: daq, amount_cents: 5003 }]);
+    const rows = (await cfo.p.rpc("budget_rows")).data as any[];
+    expect(rows.find((r) => r.name === "Data AQ")).toMatchObject({ spent_cents: 5003 });
+  });
+
   it("a split's shares are positive", async () => {
     const { card } = await accounts();
     const cfo = await person("cfo", "cfo");

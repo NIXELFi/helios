@@ -735,6 +735,12 @@ returns uuid language plpgsql security definer set search_path = '' as $$
 declare v_id uuid := p_id;
 begin
   if not purchasing.is_exec() then raise exception 'only execs set budgets' using errcode = '42501'; end if;
+  -- a subteam's spending counts toward one line per car and season
+  if exists (select 1 from purchasing.budget_lines l join purchasing.budget_line_subteams ls on ls.budget_line_id = l.id
+             where l.season_id = p_season and l.project_id = p_project and l.id is distinct from v_id
+               and ls.subteam_id = any (coalesce(p_subteams, '{}'))) then
+    raise exception 'one of those subteams is already on another budget line for this car' using errcode = '23505';
+  end if;
   if v_id is null then
     insert into purchasing.budget_lines (season_id, project_id, name, amount_cents)
     values (p_season, p_project, btrim(p_name), p_amount_cents) returning id into v_id;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import { addTracking, detectCarrier, itemCost, recordOrder, setStatus, trackingUrl, type Item } from "../lib/api";
+import { today } from "../finance/useFinance";
 import { fmtCents, requireCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, StatusPill, SubteamChip } from "../components/ui";
@@ -23,7 +24,7 @@ export function OrdersView({
   }
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: new Date().toISOString().slice(0, 10), paidBy: "" });
+  const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [tracking, setTracking] = useState<Record<string, { number: string; carrier: string; eta: string }>>({});
   const [message, setMessage] = useState<string | null>(null);
 

@@ -47,8 +47,10 @@ export function isoDate(s: string | undefined): string | null {
     const y = m[3]!.length === 2 ? `20${m[3]}` : m[3]!;
     return `${y}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
   }
+  // "Sep 17, 2026": the local calendar day (toISOString would shift it by the timezone)
   const d = new Date(t);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  return Number.isNaN(d.getTime()) ? null
+    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** One line read from a bank or Square file, before deciding what it is. */
