@@ -28,7 +28,7 @@ baseline_fingerprint: feat/vrli-tool @ 7a8e40d6 (sdm26_asbuilt_cal, neutral tune
 
 \* worst over: 6-12k, 7-10.5k, the four duty cycles, and each duty cycle re-scored with the model's rpm axis shifted 4 % (0036: model features sit about 4 % late).
 
-4. **Restrictor: cut it roughly in half for free.** Wall friction included (Idelchik), a 5° half-angle (10° included) diffuser to a 36 mm outlet, about 121 mm total, matches the as-built 228 mm venturi. 38 mm/5° (133 mm) is +0.2 %. 34 mm/8° (80 mm) costs -0.9 % top end. Below about 70 mm the loss climbs fast (dump: -11 %).
+4. **Restrictor (SUPERSEDED by the Fluent addendum at the end: the short diffusers separate; a 120 mm restrictor costs about 0.8 % top end, not zero).** Original Idelchik-based estimate: cut it roughly in half for free. Wall friction included (Idelchik), a 5° half-angle (10° included) diffuser to a 36 mm outlet, about 121 mm total, matches the as-built 228 mm venturi. 38 mm/5° (133 mm) is +0.2 %. 34 mm/8° (80 mm) costs -0.9 % top end. Below about 70 mm the loss climbs fast (dump: -11 %).
 5. **Throat Cd matters as much as the diffuser:** each 0.01 of Cd is about 0.3 % top-end torque (0.95 -> 0.99: +1.1 %; 0.95 -> 0.85: -3.6 %). A well-radiused converging side is the cheapest gain available.
 6. **Bigger plenum costs throttle response:** time to 90 % torque after a snap from 40 kPa, 6000 rpm, as-built runner: 105 ms (1.44 L) -> 148 ms (2.75 L) -> 173 ms (3.5 L).
 
@@ -168,3 +168,25 @@ On-throttle torque gain vs today's intake (TPS >= 60 %, time-weighted):
 **Revised pick: keep today's 1.44 L plenum volume for the VRLI (198 -> 298 mm).** On the dyno bands the 2.75 L box is better (6-12k +5.9 vs +4.8 %, steady table), but on real driving the 1.44 L box nets 2-4x more time because it keeps today's throttle response. A faster actuator (400+ mm/s) is the next lever.
 
 Caveats: the time estimate is first-order and the lag model comes from constant-rpm snaps off a 40 kPa manifold. No log has working on-power upshifts.
+
+## Addendum (2026-10-01): Fluent restrictor results, and the retraction of "half the length for free"
+
+A second Claude session ran the restrictor in Fluent 2026 R1: 2D axisymmetric, SST k-omega, 60 um rough wall, 97.3 kPa / 305 K, mesh-converged (400x80 vs 800x120 differ by 0.001 % in Cd). It followed `FLUENT_BRIEF.md`; its curves are in `C:/Users/nick5/restrictor_opt/data/restrictor_maps/brief_<NAME>.csv`. `fluent_ingest.py` fits the 1D venturi boundary (Cd, R) to each curve, using static pressure at the diffuser exit plane as the plenum pressure, and reruns the engine.
+
+| geometry | length | Cd | R (curve fit) | fit rms | diffuser flow | top end vs A | 6-12k vs A |
+|---|---|---|---|---|---|---|---|
+| A: as-built, 38 mm / 3.2° | 228 mm | 0.974 | 0.724 | 0.08 % | attached, R flat at 0.72 | 0 | 0 |
+| B: 38 mm / 5.5°, short nozzle | 120 mm | 0.979 | 0.679 | 0.51 % | separated everywhere | -0.8 % | -0.6 % |
+| C: 36 mm / 5°, short nozzle | 117 mm | 0.979 | 0.683 | 0.35 % | attached only at light flow | -0.7 % | -0.5 % |
+| D: 38 mm / 6°, short nozzle | 112 mm | 0.979 | 0.662 | 0.67 % | separated everywhere | -1.2 % | -0.8 % |
+| E: 34 mm / 8°, short nozzle | 77 mm | 0.979 | 0.566 | 1.02 % | separated everywhere | -3.1 % | -2.1 % |
+
+Torque columns use the ratio transfer to the car-fitted level: R_1D = 0.572 x R_CFD / R_CFD(A), Cd_1D = 0.95 x Cd_CFD / Cd_CFD(A).
+
+- **Retraction.** The Idelchik-plus-friction estimate (B equal to A) was wrong: diffusers of 5° and steeper separate. The 120 mm restrictor costs about 0.8 % at the top end and 0.6 % on 6-12k. All of the loss is in the diffuser; the short 30° + 20 mm-blend nozzle has slightly better Cd than the long 8° cone.
+- **The 1D venturi form is sound.** Two parameters reproduce the CFD curve of the attached geometry to 0.08 % rms. Recovery is constant with load for attached flow and falls with load for separated diffusers (B: 0.688 at light load, 0.648 near choke).
+- **Open: the absolute gap.** Clean-flow CFD gives A a Cd of 0.974 and R of 0.724; the 1D model's car-fitted values are 0.95 and 0.572.
+  - With the CFD values taken at face value, the engine makes +4.4 % at the top end and +2.6 % on 6-12k, as much as the VRLI.
+  - Either the installation (throttle body, the plenum dump, pulsating flow) loses that, or the car fit absorbed another model error.
+  - Pending from Fluent: the 3D throttle body, a plenum-dump case and a pulsating outlet.
+- **Pending:** A's diffuser behind the short nozzle (about 191 mm), 4.0° and 4.5° diffusers (about 159 / 144 mm), smooth-wall variants, and a shape optimiser on the engine's operating range (p_exit/p0 0.85-0.95 at 10.5 / 11.5 / 12.5k).
