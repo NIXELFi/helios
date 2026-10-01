@@ -54,6 +54,10 @@ follow [semver](https://semver.org/).
 - **Budget breakdown**: click a budget line to see every part and charge in it.
 - **Guides**: "How it works" for everyone and an exec-only guide, each with a clickable process map.
 
+### Fixed
+
+- Linux: the AppImage no longer opens a blank window on Wayland distributions such as CachyOS/Arch. The release build now removes the bundled `libwayland-*` libraries so the app uses your system's Wayland and Mesa stack (#48).
+
 ## [5.14.0] - 2026-09-30
 
 ### Added
