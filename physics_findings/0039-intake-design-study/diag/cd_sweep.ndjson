@@ -86,3 +86,5 @@
 {"rpm": 10500, "ve": 0.90942, "bt": 45.3865, "imep": 11.6693, "spread": 0.00014, "p_plenum_end": 94620, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.990", "ext": 0, "cd": 0.99}
 {"rpm": 11000, "ve": 0.83598, "bt": 40.6365, "imep": 10.7604, "spread": 0.00011, "p_plenum_end": 93017, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.990", "ext": 0, "cd": 0.99}
 {"rpm": 11500, "ve": 0.81855, "bt": 40.3212, "imep": 10.7821, "spread": 0.00014, "p_plenum_end": 90363, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.990", "ext": 0, "cd": 0.99}
+{"rpm": 12000, "ve": 0.82368, "bt": 40.9773, "imep": 11.0082, "spread": 6e-05, "p_plenum_end": 88437, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.990", "ext": 0, "cd": 0.99}
+{"rpm": 12500, "ve": 0.83289, "bt": 41.2554, "imep": 11.1557, "spread": 6e-05, "p_plenum_end": 88257, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.990", "ext": 0, "cd": 0.99}
