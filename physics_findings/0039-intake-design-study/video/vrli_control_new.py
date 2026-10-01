@@ -8,13 +8,16 @@ acceleration-limited servo), but the torque comes from real engine runs of the r
 import json, math, os, numpy as np, pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-_rows = [json.loads(l) for l in open(os.path.join(HERE, "..", "newintake.ndjson"))]
-_N = pd.DataFrame([r for r in _rows if "bt" in r])
-RPMS = np.array(sorted(_N[_N.case == "base"].rpm.unique()), float)
-BASE_T = _N[_N.case == "base"].set_index("rpm").bt.reindex(RPMS).values
-_G = _N[_N.case == "new"].pivot_table(index="pos", columns="rpm", values="bt").reindex(columns=RPMS)
-POSG = _G.index.values.astype(float); TQ = _G.values
-R_LO, R_HI = RPMS[0], RPMS[-1]
+def load(path=os.path.join(HERE, "..", "newintake.ndjson")):
+    """(Re)load the direct-run torque grid; newintake.ndjson = 2.75 L box, newintake_box1.44.ndjson = today's 1.44 L box."""
+    global RPMS, BASE_T, POSG, TQ, R_LO, R_HI
+    rows = [json.loads(l) for l in open(path)]
+    N = pd.DataFrame([r for r in rows if "bt" in r])
+    RPMS = np.array(sorted(N[N.case == "base"].rpm.unique()), float)
+    BASE_T = N[N.case == "base"].groupby("rpm").bt.mean().reindex(RPMS).values
+    G = N[N.case == "new"].pivot_table(index="pos", columns="rpm", values="bt").reindex(columns=RPMS)
+    POSG = G.index.values.astype(float); TQ = G.values; R_LO, R_HI = RPMS[0], RPMS[-1]
+load()
 BASE = 0.0                      # positions are already absolute mm above the flange
 
 def base_torque(rpm): return float(np.interp(min(max(rpm, R_LO), R_HI), RPMS, BASE_T))

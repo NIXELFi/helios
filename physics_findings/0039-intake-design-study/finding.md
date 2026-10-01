@@ -141,3 +141,30 @@ What it needs: a plenum tall enough for the travel (stroke + about 40 mm, i.e. a
 | endurance, 2 laps, optimised line | 252.48 s | 251.63 s | -0.84 s (-0.75), i.e. ~-0.4 s/lap |
 
 That is about -4 s over a ~10-lap 22 km endurance. The endurance time-optimised line was inconsistent (+0.25 / -0.12 s), so the endurance number carries about +-0.3 s.
+
+## Addendum (2026-10-01): the new intake on real ECU logs, and the throttle-response trade-off
+
+`real_ecu.py` drives the 198 -> 298 mm VRLI (direct 1D torque grids, 200 mm/s servo model) with every usable real session: Josh AX 4-26 (4 G4X logs), 4-16 driver selection (20 MoTeC runs, single gear), 4-19 mock endurance (6 runs). `real_ecu_compare.py` compares the 2.75 L box against today's 1.44 L box (`newintake_sim.py --box 1.44`, 455 more direct runs). Charts in `charts/real_ecu/`.
+
+On-throttle torque gain vs today's intake (TPS >= 60 %, time-weighted):
+
+| event | on throttle | median rpm | 2.75 L box | 1.44 L box | instant actuator (2.75 / 1.44) | best fixed runner in the box |
+|---|---|---|---|---|---|---|
+| AX 4-16 | 387 s | 5.9k | +1.9 % | +2.1 % | +4.2 / +4.3 % | +0.3 / +0.8 % |
+| AX 4-26 | 60 s | 7.8k | +2.8 % | +2.7 % | +5.0 / +4.3 % | -0.1 / +0.3 % |
+| endurance 4-19 | 48 s | 8.8k | +3.6 % | +3.1 % | +5.1 / +4.1 % | +0.2 / +0.4 % |
+
+- **Real driving is harder on the actuator than the sim lap.** The 200 mm/s servo captures only about half of the instant-actuator gain. In the 2.75 L box, 400 mm/s gives +2.3 / +3.1 / +3.8 % and 800 mm/s gives +2.7 / +3.3 / +3.9 %.
+- **Throttle response decides the box.** The tip-in runs give the 2.75 L box +15.9 ms (6000 rpm) / +10.6 ms (8500 rpm) of lost full-torque time per closed-throttle snap vs today; the 1.44 L box gives +2.6 / -0.1 ms.
+  - Real logs contain about 50-80 snap-equivalents per on-throttle minute, with each re-application weighted by lift depth and by duration against a 0.18 s plenum drain time.
+  - First-order time estimate, in seconds per on-throttle minute, with the extra speed discarded at every lift, 1st gear excluded and 300 kg effective mass:
+
+| event | 2.75 L: torque gain / lag / **net** | 1.44 L: torque gain / lag / **net** |
+|---|---|---|
+| AX 4-16 | 0.51 / 0.36 / **+0.15** | 0.64 / 0.05 / **+0.59** |
+| AX 4-26 | 0.29 / 0.19 / **+0.10** | 0.30 / 0.02 / **+0.28** |
+| endurance 4-19 | 0.52 / 0.28 / **+0.23** | 0.46 / 0.02 / **+0.44** |
+
+**Revised pick: keep today's 1.44 L plenum volume for the VRLI (198 -> 298 mm).** On the dyno bands the 2.75 L box is better (6-12k +5.9 vs +4.8 %, steady table), but on real driving the 1.44 L box nets 2-4x more time because it keeps today's throttle response. A faster actuator (400+ mm/s) is the next lever.
+
+Caveats: the time estimate is first-order and the lag model comes from constant-rpm snaps off a 40 kPa manifold. No log has working on-power upshifts.

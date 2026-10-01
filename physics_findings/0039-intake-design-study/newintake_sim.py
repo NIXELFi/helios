@@ -12,14 +12,15 @@ import study
 from nothrottle import unthrottle
 
 H = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(H, "newintake.ndjson")
+BOX = float(sys.argv[sys.argv.index("--box") + 1]) if "--box" in sys.argv else 2.75   # plenum box (L); 2.75 = recommended
+OUT = os.path.join(H, "newintake.ndjson" if BOX == 2.75 else f"newintake_box{BOX:g}.ndjson")
 RPM = list(range(4000, 12501, 250))
 LO, HI = 198.1, 298.1                      # mm above the head flange
 POS = [round(LO + 10 * k, 1) for k in range(11)]
 R_NEW = 0.5746
 BASE_N, BASE_P = study.make_cfg()                                   # as-built (1.44 L, 38 mm / 3.2 deg, Cd 0.95)
-NEW_N, NEW_P = study.make_cfg(V=2.75e-3, R=R_NEW)
-CD_N, CD_P = study.make_cfg(V=2.75e-3, R=R_NEW, cd=0.98)
+NEW_N, NEW_P = study.make_cfg(V=BOX * 1e-3, R=R_NEW)
+CD_N, CD_P = study.make_cfg(V=BOX * 1e-3, R=R_NEW, cd=0.98)
 OUTSIDE0 = 248.1
 
 def run(job):
