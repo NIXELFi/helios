@@ -1,0 +1,4 @@
+case,ax_opt,ax_topt,en_opt,en_topt
+today,42.447,39.956,252.476,223.166
+new intake,42.314,39.735,251.633,223.418
+new intake (rpm-offset corrected),42.332,39.713,251.728,223.044

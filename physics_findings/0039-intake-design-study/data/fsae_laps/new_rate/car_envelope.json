@@ -1,0 +1,802 @@
+{
+  "producer": "sim/tools/car_envelope.mjs",
+  "generatedAt": "2026-10-01T09:03:54.767Z",
+  "car": "SDM26",
+  "method": {
+    "substepS": 0.002,
+    "note": "every number below is measured by stepping BicycleModel + Powertrain; none is read off a parameter",
+    "setupSnapshot": {
+      "massKg": 267,
+      "muLat": 1.89,
+      "frontGripFactor": 0.8,
+      "muLong": 1.5,
+      "brakeBiasFront": 0.65,
+      "brakeTorqueMaxNm": 1235,
+      "rsdFront": 0.48,
+      "aeroFrontFrac": 0.524,
+      "maxSteerDeg": 46,
+      "claM2": 3.132,
+      "cdaM2": 1.267
+    },
+    "carBox": {
+      "front": 1.41995,
+      "rear": 1.16005,
+      "halfWidth": 0.6985
+    }
+  },
+  "lateral": [
+    {
+      "speedMps": 8,
+      "speedKph": 28.8,
+      "gear": 1,
+      "maxLatG": 1.415,
+      "atSteerDeg": 22,
+      "radiusM": 4.61,
+      "utilF": 1.008,
+      "utilR": 2.512,
+      "balance": -0.13,
+      "limitingAxle": "front",
+      "throttleToHold": 0.265,
+      "bodySlipDeg": 5.08,
+      "firstSaturated": {
+        "steerDeg": 19,
+        "axle": "rear",
+        "utilF": 0.652,
+        "utilR": 2.165
+      },
+      "departedAboveDeg": null
+    },
+    {
+      "speedMps": 15,
+      "speedKph": 54,
+      "gear": 6,
+      "maxLatG": 1.587,
+      "atSteerDeg": 10,
+      "radiusM": 14.51,
+      "utilF": 1.046,
+      "utilR": 0.985,
+      "balance": -0.457,
+      "limitingAxle": "front",
+      "throttleToHold": 0.435,
+      "bodySlipDeg": 0.74,
+      "firstSaturated": {
+        "steerDeg": 10,
+        "axle": "front",
+        "utilF": 1.046,
+        "utilR": 0.985
+      },
+      "departedAboveDeg": null
+    },
+    {
+      "speedMps": 22,
+      "speedKph": 79.2,
+      "gear": 6,
+      "maxLatG": 1.868,
+      "atSteerDeg": 5.25,
+      "radiusM": 26.49,
+      "utilF": 0.887,
+      "utilR": 0.872,
+      "balance": -0.201,
+      "limitingAxle": "front",
+      "throttleToHold": 0.54,
+      "bodySlipDeg": 2.93,
+      "firstSaturated": {
+        "steerDeg": 6,
+        "axle": "rear",
+        "utilF": 2.618,
+        "utilR": 3
+      },
+      "departedAboveDeg": 6
+    },
+    {
+      "speedMps": 28,
+      "speedKph": 100.8,
+      "gear": 6,
+      "maxLatG": 1.775,
+      "atSteerDeg": 2.5,
+      "radiusM": 45.08,
+      "utilF": 0.461,
+      "utilR": 0.537,
+      "balance": -0.026,
+      "limitingAxle": "front",
+      "throttleToHold": 0.662,
+      "bodySlipDeg": 1.88,
+      "firstSaturated": {
+        "steerDeg": 3,
+        "axle": "rear",
+        "utilF": 2.593,
+        "utilR": 3
+      },
+      "departedAboveDeg": 3
+    }
+  ],
+  "transient": [
+    {
+      "speedMps": 8,
+      "speedKph": 28.8,
+      "peakLatG": 1.434,
+      "atSteerDeg": 23,
+      "bodySlipAtPeakDeg": 4.85
+    },
+    {
+      "speedMps": 15,
+      "speedKph": 54,
+      "peakLatG": 1.664,
+      "atSteerDeg": 11,
+      "bodySlipAtPeakDeg": 0.78
+    },
+    {
+      "speedMps": 22,
+      "speedKph": 79.2,
+      "peakLatG": 1.912,
+      "atSteerDeg": 8,
+      "bodySlipAtPeakDeg": 3.56
+    },
+    {
+      "speedMps": 28,
+      "speedKph": 100.8,
+      "peakLatG": 2.151,
+      "atSteerDeg": 6,
+      "bodySlipAtPeakDeg": 4.51
+    }
+  ],
+  "braking": [
+    {
+      "speedMps": 15,
+      "speedKph": 54,
+      "bestPedal": 0.62,
+      "maxBrakeG": 1.432,
+      "lockThresholdPedal": 0.64,
+      "locksFirst": "rear",
+      "fullPedalG": 1.517,
+      "fullPedalLocked": true,
+      "bestIgnoringLock": 1.613,
+      "brakeBiasFront": 0.65
+    },
+    {
+      "speedMps": 25,
+      "speedKph": 90,
+      "bestPedal": 0.82,
+      "maxBrakeG": 1.874,
+      "lockThresholdPedal": 0.84,
+      "locksFirst": "rear",
+      "fullPedalG": 1.991,
+      "fullPedalLocked": true,
+      "bestIgnoringLock": 2.023,
+      "brakeBiasFront": 0.65
+    }
+  ],
+  "accel": [
+    {
+      "speedMps": 5,
+      "speedKph": 18,
+      "maxAccelG": 0.935,
+      "inGear": 1,
+      "limit": "traction",
+      "perGear": [
+        {
+          "gear": 1,
+          "rpm": 7898,
+          "axG": 0.935,
+          "kappaRear": 0.148
+        },
+        {
+          "gear": 2,
+          "rpm": 4470,
+          "axG": 0.577,
+          "kappaRear": 0.04
+        },
+        {
+          "gear": 3,
+          "rpm": 3383,
+          "axG": 0.412,
+          "kappaRear": 0.03
+        },
+        {
+          "gear": 4,
+          "rpm": 2745,
+          "axG": 0.309,
+          "kappaRear": 0.022
+        },
+        {
+          "gear": 5,
+          "rpm": 2386,
+          "axG": 0.252,
+          "kappaRear": 0.018
+        },
+        {
+          "gear": 6,
+          "rpm": 2169,
+          "axG": 0.217,
+          "kappaRear": 0.016
+        }
+      ]
+    },
+    {
+      "speedMps": 15,
+      "speedKph": 54,
+      "maxAccelG": 0.75,
+      "inGear": 3,
+      "limit": "power",
+      "perGear": [
+        {
+          "gear": 1,
+          "rpm": 14471,
+          "axG": 0.502,
+          "kappaRear": 0.043
+        },
+        {
+          "gear": 2,
+          "rpm": 11319,
+          "axG": 0.74,
+          "kappaRear": 0.055
+        },
+        {
+          "gear": 3,
+          "rpm": 9430,
+          "axG": 0.75,
+          "kappaRear": 0.058
+        },
+        {
+          "gear": 4,
+          "rpm": 7807,
+          "axG": 0.573,
+          "kappaRear": 0.042
+        },
+        {
+          "gear": 5,
+          "rpm": 6957,
+          "axG": 0.519,
+          "kappaRear": 0.037
+        },
+        {
+          "gear": 6,
+          "rpm": 6450,
+          "axG": 0.545,
+          "kappaRear": 0.04
+        }
+      ]
+    },
+    {
+      "speedMps": 25,
+      "speedKph": 90,
+      "maxAccelG": 0.397,
+      "inGear": 6,
+      "limit": "power",
+      "perGear": [
+        {
+          "gear": 1,
+          "rpm": 20789,
+          "axG": null,
+          "note": "over the limiter"
+        },
+        {
+          "gear": 2,
+          "rpm": 15119,
+          "axG": null,
+          "note": "over the limiter"
+        },
+        {
+          "gear": 3,
+          "rpm": 13588,
+          "axG": 0.337,
+          "kappaRear": 0.028
+        },
+        {
+          "gear": 4,
+          "rpm": 11882,
+          "axG": 0.382,
+          "kappaRear": 0.031
+        },
+        {
+          "gear": 5,
+          "rpm": 10759,
+          "axG": 0.393,
+          "kappaRear": 0.031
+        },
+        {
+          "gear": 6,
+          "rpm": 9971,
+          "axG": 0.397,
+          "kappaRear": 0.031
+        }
+      ]
+    }
+  ],
+  "accelPeak": [
+    {
+      "speedMps": 0,
+      "speedKph": 0,
+      "peakAccelG": 0.808
+    },
+    {
+      "speedMps": 1,
+      "speedKph": 3.6,
+      "peakAccelG": 0.805
+    },
+    {
+      "speedMps": 2,
+      "speedKph": 7.2,
+      "peakAccelG": 0.834
+    },
+    {
+      "speedMps": 3,
+      "speedKph": 10.8,
+      "peakAccelG": 0.948
+    },
+    {
+      "speedMps": 4,
+      "speedKph": 14.4,
+      "peakAccelG": 0.895
+    },
+    {
+      "speedMps": 5,
+      "speedKph": 18,
+      "peakAccelG": 0.95
+    },
+    {
+      "speedMps": 6,
+      "speedKph": 21.6,
+      "peakAccelG": 0.947
+    },
+    {
+      "speedMps": 7,
+      "speedKph": 25.2,
+      "peakAccelG": 0.952
+    },
+    {
+      "speedMps": 8,
+      "speedKph": 28.8,
+      "peakAccelG": 0.948
+    },
+    {
+      "speedMps": 9,
+      "speedKph": 32.4,
+      "peakAccelG": 0.957
+    },
+    {
+      "speedMps": 10,
+      "speedKph": 36,
+      "peakAccelG": 0.938
+    },
+    {
+      "speedMps": 11,
+      "speedKph": 39.6,
+      "peakAccelG": 0.92
+    },
+    {
+      "speedMps": 12,
+      "speedKph": 43.2,
+      "peakAccelG": 0.953
+    },
+    {
+      "speedMps": 13,
+      "speedKph": 46.8,
+      "peakAccelG": 0.967
+    },
+    {
+      "speedMps": 14,
+      "speedKph": 50.4,
+      "peakAccelG": 0.963
+    },
+    {
+      "speedMps": 15,
+      "speedKph": 54,
+      "peakAccelG": 0.973
+    },
+    {
+      "speedMps": 16,
+      "speedKph": 57.6,
+      "peakAccelG": 0.973
+    },
+    {
+      "speedMps": 17,
+      "speedKph": 61.2,
+      "peakAccelG": 0.782
+    },
+    {
+      "speedMps": 18,
+      "speedKph": 64.8,
+      "peakAccelG": 0.914
+    },
+    {
+      "speedMps": 19,
+      "speedKph": 68.4,
+      "peakAccelG": 0.68
+    },
+    {
+      "speedMps": 20,
+      "speedKph": 72,
+      "peakAccelG": 0.638
+    },
+    {
+      "speedMps": 21,
+      "speedKph": 75.6,
+      "peakAccelG": 0.606
+    },
+    {
+      "speedMps": 22,
+      "speedKph": 79.2,
+      "peakAccelG": 0.794
+    },
+    {
+      "speedMps": 23,
+      "speedKph": 82.8,
+      "peakAccelG": 0.528
+    },
+    {
+      "speedMps": 24,
+      "speedKph": 86.4,
+      "peakAccelG": 0.487
+    },
+    {
+      "speedMps": 25,
+      "speedKph": 90,
+      "peakAccelG": 0.482
+    },
+    {
+      "speedMps": 26,
+      "speedKph": 93.6,
+      "peakAccelG": 0.418
+    },
+    {
+      "speedMps": 27,
+      "speedKph": 97.2,
+      "peakAccelG": 0.394
+    },
+    {
+      "speedMps": 28,
+      "speedKph": 100.8,
+      "peakAccelG": 0.374
+    },
+    {
+      "speedMps": 29,
+      "speedKph": 104.4,
+      "peakAccelG": 0.322
+    },
+    {
+      "speedMps": 30,
+      "speedKph": 108,
+      "peakAccelG": 0.315
+    },
+    {
+      "speedMps": 31,
+      "speedKph": 111.6,
+      "peakAccelG": 0.262
+    },
+    {
+      "speedMps": 32,
+      "speedKph": 115.2,
+      "peakAccelG": 0.205
+    },
+    {
+      "speedMps": 33,
+      "speedKph": 118.8,
+      "peakAccelG": 0.16
+    },
+    {
+      "speedMps": 34,
+      "speedKph": 122.4,
+      "peakAccelG": 0.137
+    }
+  ],
+  "launches": [
+    {
+      "launch": false,
+      "launchHoldS": 0,
+      "to30KphS": 1.07,
+      "to60KphS": 2.1,
+      "to100KphS": 4.714,
+      "accel75mS": 4.654,
+      "kphAt75m": 99.25,
+      "accel90mS": 5.18,
+      "peakAccelG": 0.971,
+      "shifts": [
+        {
+          "to": 2,
+          "atS": 1.508,
+          "atKph": 41.44,
+          "rpm": 10997
+        },
+        {
+          "to": 3,
+          "atS": 2.43,
+          "atKph": 65.88,
+          "rpm": 10687
+        },
+        {
+          "to": 4,
+          "atS": 3.204,
+          "atKph": 79.81,
+          "rpm": 10707
+        },
+        {
+          "to": 5,
+          "atS": 4.144,
+          "atKph": 93.02,
+          "rpm": 10193
+        }
+      ]
+    },
+    {
+      "launch": true,
+      "launchHoldS": 1.2,
+      "to30KphS": 1.104,
+      "to60KphS": 2.128,
+      "to100KphS": 4.626,
+      "accel75mS": 4.634,
+      "kphAt75m": 100.1,
+      "accel90mS": 5.158,
+      "peakAccelG": 0.973,
+      "shifts": [
+        {
+          "to": 2,
+          "atS": 0.454,
+          "atKph": 11.31,
+          "rpm": 10745
+        },
+        {
+          "to": 3,
+          "atS": 1.254,
+          "atKph": 32.68,
+          "rpm": 10954
+        },
+        {
+          "to": 4,
+          "atS": 3.118,
+          "atKph": 79.82,
+          "rpm": 10708
+        },
+        {
+          "to": 5,
+          "atS": 4.056,
+          "atKph": 93,
+          "rpm": 10190
+        }
+      ]
+    }
+  ],
+  "combined": [
+    {
+      "speedMps": 15,
+      "latFrac": 0.5,
+      "latTargetG": 0.794,
+      "accel": {
+        "steerDeg": 3.67,
+        "pedal": 1,
+        "axG": 0.525,
+        "ayG": 0.894
+      },
+      "brake": {
+        "steerDeg": 3.67,
+        "pedal": 0.65,
+        "axG": -1.359,
+        "ayG": 0.759
+      }
+    },
+    {
+      "speedMps": 15,
+      "latFrac": 0.8,
+      "latTargetG": 1.27,
+      "accel": {
+        "steerDeg": 6.17,
+        "pedal": 1,
+        "axG": 0.449,
+        "ayG": 1.449
+      },
+      "brake": {
+        "steerDeg": 6.17,
+        "pedal": 0.55,
+        "axG": -1.173,
+        "ayG": 1.098
+      }
+    }
+  ],
+  "ellipse": {
+    "exponent": 2.18,
+    "rms": 0.161,
+    "samples": 4,
+    "points": [
+      {
+        "nx": 0.7,
+        "ny": 0.563,
+        "mode": "accel",
+        "speedMps": 15
+      },
+      {
+        "nx": 0.949,
+        "ny": 0.478,
+        "mode": "brake",
+        "speedMps": 15
+      },
+      {
+        "nx": 0.599,
+        "ny": 0.913,
+        "mode": "accel",
+        "speedMps": 15
+      },
+      {
+        "nx": 0.819,
+        "ny": 0.692,
+        "mode": "brake",
+        "speedMps": 15
+      }
+    ]
+  },
+  "validation": [
+    {
+      "course": "autocross",
+      "archivedLaps": 86,
+      "fastestArchived": {
+        "runId": "20260928-165650-autocross-q6hx",
+        "driver": "Edgar Petitt",
+        "rawS": 37.726,
+        "cones": 0,
+        "physics": null
+      },
+      "lowestFloorS": 39.735,
+      "lowestFloorLine": "timeOptimised",
+      "marginS": -2.009,
+      "verdict": "FLOOR VIOLATED by a real lap -- the envelope or the line search is wrong"
+    },
+    {
+      "course": "endurance",
+      "archivedLaps": 4,
+      "fastestArchived": {
+        "runId": "20260921-145628-endurance-zxxt",
+        "driver": "Nick Murray",
+        "rawS": 116.233,
+        "cones": 2,
+        "physics": "native-1khz"
+      },
+      "lowestFloorS": 111.367,
+      "lowestFloorLine": "timeOptimised",
+      "marginS": 4.866,
+      "verdict": "floor holds"
+    }
+  ],
+  "lapTimeBound": {
+    "note": "quasi-static forward/backward pass on the measured envelope; a LOWER BOUND -- no tyre relaxation lag, no yaw inertia, no steering servo, no shift cuts in corners, on the friction limit at every metre",
+    "ellipseExponent": 2.18,
+    "courses": {
+      "autocross": {
+        "trackName": "Autocross 2026",
+        "courseLengthM": 684.91,
+        "closed": false,
+        "offCourseHalfWidthM": 2.449,
+        "coneHalfWidthM": 0.896,
+        "lines": {
+          "centreline": {
+            "pathLengthM": 691.44,
+            "gateConstraints": 9,
+            "conePinches": 192,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 1,
+            "oneLapFromRestS": 50.764,
+            "peakSpeedKph": 110.25,
+            "oneLapFromRestSteadyS": 52.725,
+            "maxLateralOffsetM": 0.95
+          },
+          "optimised": {
+            "pathLengthM": 674.51,
+            "gateConstraints": 9,
+            "conePinches": 192,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 1,
+            "oneLapFromRestS": 42.314,
+            "peakSpeedKph": 129.17,
+            "oneLapFromRestSteadyS": 43.974,
+            "maxLateralOffsetM": 1.42
+          },
+          "timeOptimised": {
+            "pathLengthM": 676.96,
+            "gateConstraints": 9,
+            "conePinches": 192,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 2,
+            "oneLapFromRestS": 39.735,
+            "peakSpeedKph": 130.02,
+            "oneLapFromRestSteadyS": 41.439,
+            "maxLateralOffsetM": 1.5
+          }
+        }
+      },
+      "endurance": {
+        "trackName": "Endurance 2026",
+        "courseLengthM": 2122.42,
+        "closed": true,
+        "offCourseHalfWidthM": 2.949,
+        "coneHalfWidthM": 1.396,
+        "lines": {
+          "centreline": {
+            "pathLengthM": 2135.11,
+            "gateConstraints": 18,
+            "conePinches": 586,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 1,
+            "twoLapsFromRestS": 299.249,
+            "lapSplitsS": [
+              150.167,
+              149.082
+            ],
+            "flyingLapS": 149.119,
+            "peakSpeedKph": 130.85,
+            "twoLapsFromRestSteadyS": 310.98,
+            "lapSplitsSteadyS": [
+              156.035,
+              154.945
+            ],
+            "flyingLapSteadyS": 154.982,
+            "maxLateralOffsetM": 0.94
+          },
+          "optimised": {
+            "pathLengthM": 2071.16,
+            "gateConstraints": 18,
+            "conePinches": 586,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 1,
+            "twoLapsFromRestS": 251.633,
+            "lapSplitsS": [
+              126.115,
+              125.518
+            ],
+            "flyingLapS": 125.519,
+            "peakSpeedKph": 136.57,
+            "twoLapsFromRestSteadyS": 264.43,
+            "lapSplitsSteadyS": [
+              132.514,
+              131.915
+            ],
+            "flyingLapSteadyS": 131.916,
+            "maxLateralOffsetM": 1.5
+          },
+          "timeOptimised": {
+            "pathLengthM": 2084.21,
+            "gateConstraints": 18,
+            "conePinches": 586,
+            "legal": {
+              "conesStruck": 0,
+              "missedGates": 0,
+              "offCourseSamples": 0
+            },
+            "repairRounds": 3,
+            "twoLapsFromRestS": 223.418,
+            "lapSplitsS": [
+              112.051,
+              111.367
+            ],
+            "flyingLapS": 111.367,
+            "peakSpeedKph": 141.89,
+            "twoLapsFromRestSteadyS": 232.679,
+            "lapSplitsSteadyS": [
+              116.685,
+              115.995
+            ],
+            "flyingLapSteadyS": 115.995,
+            "maxLateralOffsetM": 2.21
+          }
+        }
+      }
+    }
+  }
+}

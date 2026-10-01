@@ -111,3 +111,33 @@ What it needs: a plenum tall enough for the travel (stroke + about 40 mm, i.e. a
 **Pick:** VRLI, 2.75 L box, runner 198 -> 298 mm (100 mm stroke), a 38 mm-outlet / 5.5° venturi of about 123 mm, and a well-radiused converging side (Cd about 0.98). That gives +3.7 % worst case and +5.4 % on 6-12k, so P1 is met on the dyno metric.
 - **Fallbacks:** the 80 mm version (213 -> 293) if the plenum must stay 120 mm tall (-0.3 pt), or 1.44 L if throttle response outranks torque (-0.7 pt, t90 105 vs 149 ms).
 - **Actuator:** do not go below 200 mm/s; at 100 mm/s about 1 pt is lost.
+
+## Addendum (2026-10-01): direct simulation of the recommended intake, and lap time
+
+**Setup** (`newintake_sim.py`, `newintake_report.py`, `charts/newintake/`). The recommended package was simulated directly, with no design-grid interpolation:
+- 2.75 L box, VRLI 198 -> 298 mm above the flange, and the 40 mm-bore trumpets displacing plenum air in the engine (`vrli_trumpet_od` / `vrli_displacement_ref`).
+- Venturi recovery 0.5746, i.e. the ~123 mm 38 mm / 5.5° venturi with wall friction included.
+- Every trumpet position in 10 mm steps at every rpm, 4000-12500 rpm in 250 rpm steps, 160-cell plenum: 455 runs.
+
+**Results** (gain vs today's intake):
+
+| case | worst | 6-12k | 4-6k | 7-10.5k | 10.5-12.5k |
+|---|---|---|---|---|---|
+| 1st/2nd-gear sweep (200 mm/s actuator) | +3.5 % | +5.5 % | +3.3 % | +4.0 % | +8.3 % |
+| slow sweep (steady ECU table) | +4.4 % | +5.9 % | +5.5 % | +4.4 % | +10.0 % |
+| + Cd 0.98 nozzle (table) | +5.0 % | +6.6 % | +5.6 % | +5.0 % | +11.2 % |
+| design-grid prediction (rate-limited) | +3.4 % | +4.9 % | +2.9 % | +3.7 % | +7.8 % |
+
+- **The grid was right.** The design grid was accurate to 0.1 pt in the worst case and slightly conservative elsewhere. Individual rpm points differ by up to ~2.5 % between grid and direct runs.
+- **Peak wheel power:** 63.0 -> 64.7 hp (65.4 with Cd 0.98).
+- **The ECU table** retracts steadily from 298 mm (7.5-9k) to 198 mm (11-11.9k). It then jumps back to long above 12k, and that jump costs up to 8 % in fast sweeps. Cap the table short above ~11.5k.
+
+**Lap time** (fsae-sim vehicle model, quasi-static lap bound from `car_envelope_curve.mjs --curve`; engine = team chassis-dyno curve x the direct-sim torque ratio):
+
+| course | today | new intake | change |
+|---|---|---|---|
+| autocross, optimised line | 42.447 s | 42.314 s | -0.13 s (-0.12 rpm-offset corrected) |
+| autocross, time-optimised line | 39.956 s | 39.735 s | -0.22 s (-0.24) |
+| endurance, 2 laps, optimised line | 252.48 s | 251.63 s | -0.84 s (-0.75), i.e. ~-0.4 s/lap |
+
+That is about -4 s over a ~10-lap 22 km endurance. The endurance time-optimised line was inconsistent (+0.25 / -0.12 s), so the endurance number carries about +-0.3 s.

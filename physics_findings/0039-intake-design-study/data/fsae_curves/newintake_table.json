@@ -1,0 +1,192 @@
+{
+ "name": "SDM26 dyno x newintake_table",
+ "source": "Downloads/SDM.CSV -- rolling-road pull, 4500-13500 rpm in 25 rpm steps, torque referred to the crank from wheel power",
+ "note": "finding 0039: team dyno x (new intake, steady ECU table) / baseline",
+ "displacementM3": 0.000599,
+ "points": [
+  {
+   "rpm": 4000,
+   "torqueNm": 37.678,
+   "powerKW": 15.783,
+   "bmepBar": 7.439,
+   "fmepBar": 1.163,
+   "veAtm": 0.9369
+  },
+  {
+   "rpm": 4500,
+   "torqueNm": 37.054,
+   "powerKW": 17.461,
+   "bmepBar": 7.481,
+   "fmepBar": 1.2594,
+   "veAtm": 0.9418
+  },
+  {
+   "rpm": 5000,
+   "torqueNm": 41.334,
+   "powerKW": 21.642,
+   "bmepBar": 8.197,
+   "fmepBar": 1.3589,
+   "veAtm": 0.9147
+  },
+  {
+   "rpm": 5500,
+   "torqueNm": 51.228,
+   "powerKW": 29.505,
+   "bmepBar": 10.196,
+   "fmepBar": 1.4613,
+   "veAtm": 0.8657
+  },
+  {
+   "rpm": 6000,
+   "torqueNm": 60.928,
+   "powerKW": 38.282,
+   "bmepBar": 11.551,
+   "fmepBar": 1.5668,
+   "veAtm": 0.8571
+  },
+  {
+   "rpm": 6500,
+   "torqueNm": 51.51,
+   "powerKW": 35.062,
+   "bmepBar": 10.707,
+   "fmepBar": 1.6752,
+   "veAtm": 0.7829
+  },
+  {
+   "rpm": 7000,
+   "torqueNm": 51.379,
+   "powerKW": 37.663,
+   "bmepBar": 10.393,
+   "fmepBar": 1.7867,
+   "veAtm": 0.9187
+  },
+  {
+   "rpm": 7500,
+   "torqueNm": 51.05,
+   "powerKW": 40.094,
+   "bmepBar": 10.372,
+   "fmepBar": 1.9012,
+   "veAtm": 0.8954
+  },
+  {
+   "rpm": 8000,
+   "torqueNm": 57.756,
+   "powerKW": 48.386,
+   "bmepBar": 11.13,
+   "fmepBar": 2.0187,
+   "veAtm": 1.0136
+  },
+  {
+   "rpm": 8500,
+   "torqueNm": 61.162,
+   "powerKW": 54.442,
+   "bmepBar": 12.13,
+   "fmepBar": 2.1392,
+   "veAtm": 0.9207
+  },
+  {
+   "rpm": 9000,
+   "torqueNm": 56.881,
+   "powerKW": 53.609,
+   "bmepBar": 11.681,
+   "fmepBar": 2.2627,
+   "veAtm": 0.9093
+  },
+  {
+   "rpm": 9500,
+   "torqueNm": 54.809,
+   "powerKW": 54.526,
+   "bmepBar": 11.232,
+   "fmepBar": 2.3892,
+   "veAtm": 0.8356
+  },
+  {
+   "rpm": 10000,
+   "torqueNm": 51.875,
+   "powerKW": 54.323,
+   "bmepBar": 10.565,
+   "fmepBar": 2.5188,
+   "veAtm": 0.8014
+  },
+  {
+   "rpm": 10500,
+   "torqueNm": 48.797,
+   "powerKW": 53.655,
+   "bmepBar": 9.563,
+   "fmepBar": 2.6513,
+   "veAtm": 0.7801
+  },
+  {
+   "rpm": 11000,
+   "torqueNm": 50.656,
+   "powerKW": 58.351,
+   "bmepBar": 9.095,
+   "fmepBar": 2.7869,
+   "veAtm": 0.8695
+  },
+  {
+   "rpm": 11500,
+   "torqueNm": 45.889,
+   "powerKW": 55.262,
+   "bmepBar": 8.462,
+   "fmepBar": 2.9254,
+   "veAtm": 0.8801
+  },
+  {
+   "rpm": 12000,
+   "torqueNm": 41.367,
+   "powerKW": 51.984,
+   "bmepBar": 8.286,
+   "fmepBar": 3.067,
+   "veAtm": 0.8438
+  },
+  {
+   "rpm": 12500,
+   "torqueNm": 41.132,
+   "powerKW": 53.841,
+   "bmepBar": 8.524,
+   "fmepBar": 3.2116,
+   "veAtm": 0.7603
+  },
+  {
+   "rpm": 13000,
+   "torqueNm": 39.277,
+   "powerKW": 53.469,
+   "bmepBar": 8.14,
+   "fmepBar": 3.3592,
+   "veAtm": 0.67
+  },
+  {
+   "rpm": 13500,
+   "torqueNm": 35.717,
+   "powerKW": 50.493,
+   "bmepBar": 7.402,
+   "fmepBar": 3.5098,
+   "veAtm": 0.5723
+  },
+  {
+   "rpm": 14000,
+   "torqueNm": 33.01,
+   "powerKW": 48.395,
+   "bmepBar": 6.841,
+   "fmepBar": 3.6634,
+   "veAtm": 0.5047
+  },
+  {
+   "rpm": 14500,
+   "torqueNm": 30.303,
+   "powerKW": 46.012,
+   "bmepBar": 6.28,
+   "fmepBar": 3.82,
+   "veAtm": 0.5481
+  },
+  {
+   "rpm": 15000,
+   "torqueNm": 27.595,
+   "powerKW": 43.347,
+   "bmepBar": 5.719,
+   "fmepBar": 3.9797,
+   "veAtm": 0.5851
+  }
+ ]
+}
