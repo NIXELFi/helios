@@ -7,6 +7,7 @@ BASE = os.path.join(H, "..", "..", "apps", "desktop", "src-tauri", "resources", 
 # Plenum mesh: 20 cells was far from grid-converged for the flared bell (diag/plenum_cells.py: the 3.5-vs-1.44 L
 # delta went -4.6 % -> -0.2 % at 12k from 20 -> 320 cells). 160 cells is within ~0.5 % of the limit.
 CELLS = 160
+THREADS = int(os.environ.get('INTAKE_THREADS', '15'))   # set INTAKE_THREADS=6 while Fluent shares the machine
 OUT = os.path.join(H, "results_c160.ndjson"); CFGD = os.path.join(H, "cfg"); os.makedirs(CFGD, exist_ok=True)
 V0 = 0.00144
 def idelchik_phi(a):
@@ -88,7 +89,7 @@ def run(j):
 if __name__ == "__main__":
     J = jobs(); d = done(); todo = [j for j in J if (j[1], j[3], j[4]) not in d]
     print(len(J), "jobs,", len(todo), "to run; ETA_REL", round(ETA_REL, 4), flush=True)
-    with open(OUT, "a") as f, ThreadPoolExecutor(15) as ex:
+    with open(OUT, "a") as f, ThreadPoolExecutor(THREADS) as ex:
         for i, line in enumerate(ex.map(run, todo)):
             f.write(line + "\n"); f.flush()
             if i % 250 == 0: print(i, "/", len(todo), flush=True)

@@ -1,0 +1,11 @@
+mode,geometry,top_10p5_12p5k,p1_6_12k,low_4_6k
+ratio,A,0.0,0.0,0.0
+ratio,B,-0.83,-0.56,-0.2
+ratio,C,-0.7,-0.47,-0.17
+ratio,D,-1.23,-0.83,-0.3
+ratio,E,-3.14,-2.14,-0.73
+absolute,A,4.36,2.62,1.2
+absolute,B,3.22,2.0,0.83
+absolute,C,3.38,2.1,0.87
+absolute,D,2.75,1.79,0.71
+absolute,E,0.26,0.17,0.04

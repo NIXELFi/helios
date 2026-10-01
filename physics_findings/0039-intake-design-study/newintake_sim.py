@@ -48,7 +48,7 @@ if __name__ == "__main__":
     jobs = [("base", BASE_P, r, OUTSIDE0) for r in RPM] + [("new", NEW_P, r, p) for r in RPM for p in POS]
     d = done(); todo = [j for j in jobs if (j[0], j[2], j[3]) not in d]
     print(len(jobs), "jobs,", len(todo), "to run", flush=True)
-    with open(OUT, "a") as f, ThreadPoolExecutor(15) as ex:
+    with open(OUT, "a") as f, ThreadPoolExecutor(study.THREADS) as ex:
         for i, line in enumerate(ex.map(run, todo)):
             f.write(line + "\n"); f.flush()
             if i % 50 == 0: print(i, "/", len(todo), flush=True)
@@ -58,6 +58,6 @@ if __name__ == "__main__":
         x = json.loads(l)
         if x.get("case") == "new" and "bt" in x and x["bt"] > best.get(x["rpm"], (0, -1))[1]: best[x["rpm"]] = (x["pos"], x["bt"])
     d = done(); todo = [("cd98", CD_P, r, best[r][0]) for r in RPM if ("cd98", r, best[r][0]) not in d]
-    with open(OUT, "a") as f, ThreadPoolExecutor(15) as ex:
+    with open(OUT, "a") as f, ThreadPoolExecutor(study.THREADS) as ex:
         for line in ex.map(run, todo): f.write(line + "\n"); f.flush()
     print("done", flush=True)

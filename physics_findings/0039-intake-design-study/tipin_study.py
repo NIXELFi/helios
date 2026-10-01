@@ -21,6 +21,6 @@ def run(j):
     rows = [json.loads(l) for l in o.strip().splitlines()]
     return json.dumps(dict(cfg=n, ext=e, rpm=r, rows=rows))
 print(len(J), "tip-in runs", flush=True)
-with open(OUT, "a") as f, ThreadPoolExecutor(15) as ex:
+with open(OUT, "a") as f, ThreadPoolExecutor(study.THREADS) as ex:
     for line in ex.map(run, J): f.write(line + "\n"); f.flush()
 print("done", flush=True)

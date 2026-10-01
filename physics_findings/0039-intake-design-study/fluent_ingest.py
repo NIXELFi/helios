@@ -31,15 +31,18 @@ def load(f):
     x = pd.read_csv(f, comment="#")
     if "converged" in x: x["ok"] = x.converged.astype(str).str.lower().isin(["y", "true", "1", "yes"])
     else: x["ok"] = True
-    return x.sort_values("p_out_over_p0")
+    # The 1D model's p_plenum is static pressure at the DIFFUSER EXIT PLANE. The CFD tailpipe (p_out) mixes out the exit
+    # profile and gains static pressure a plenum never sees, most of all behind short, separated diffusers.
+    x["pr"] = x["p_exit_plane_over_p0"] if "p_exit_plane_over_p0" in x else x["p_out_over_p0"]
+    return x.sort_values("pr")
 
 def fit(x):
     choked = x.mdot_kg_s.max(); cd0 = choked / IDEAL
-    w = np.where(x.p_out_over_p0 >= 0.80, 1.0, 0.3)                # the engine lives at 0.85-0.97
-    res = least_squares(lambda p: (venturi_mdot(x.p_out_over_p0.values, p[0], p[1]) - x.mdot_kg_s.values) / choked * w, [cd0, 0.7], bounds=([0.5, 0.0], [1.05, 0.99]))
-    cd, R = res.x; err = (venturi_mdot(x.p_out_over_p0.values, cd, R) - x.mdot_kg_s.values) / choked * 100
-    onset = x[x.mdot_kg_s >= 0.995 * choked].p_out_over_p0.max()
-    sep = x[x.get("separated", pd.Series(["n"] * len(x))).astype(str).str.lower().isin(["y", "true", "1", "yes"])].p_out_over_p0
+    w = np.where(x.pr >= 0.80, 1.0, 0.3)                # the engine lives at 0.85-0.97
+    res = least_squares(lambda p: (venturi_mdot(x.pr.values, p[0], p[1]) - x.mdot_kg_s.values) / choked * w, [cd0, 0.7], bounds=([0.5, 0.0], [1.05, 0.99]))
+    cd, R = res.x; err = (venturi_mdot(x.pr.values, cd, R) - x.mdot_kg_s.values) / choked * 100
+    onset = x[x.mdot_kg_s >= 0.995 * choked].pr.max()
+    sep = x[x.get("separated", pd.Series(["n"] * len(x))).astype(str).str.lower().isin(["y", "true", "1", "yes"])].pr
     return dict(Cd_choked=cd0, Cd_fit=cd, R_fit=R, R_onset=(onset - PRS) / (1 - PRS), choke_onset=onset, fit_rms_pct=float(np.sqrt(np.mean(err ** 2))), fit_max_pct=float(np.abs(err).max()),
                 attached_down_to=float(sep.max()) if len(sep) else float("nan"))
 
@@ -68,7 +71,7 @@ def main():
         for mode, col_r, col_cd in [("ratio", "R_1D", "Cd_1D"), ("absolute", "R_fit", "Cd_fit")]:
             for g in T.index:
                 _, cfgp = study.make_cfg(R=round(float(T[col_r][g]), 4), cd=round(float(min(T[col_cd][g], 0.99)), 3))
-                with ThreadPoolExecutor(15) as ex: res[(mode, g)] = np.array(list(ex.map(run, [(cfgp, r, 0) for r in rpms])))
+                with ThreadPoolExecutor(study.THREADS) as ex: res[(mode, g)] = np.array(list(ex.map(run, [(cfgp, r, 0) for r in rpms])))
         R_ = np.array(rpms, float); base = res[("ratio", "A")]
         band = lambda Tq, lo, hi: (np.trapezoid(Tq[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) / np.trapezoid(base[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) - 1) * 100
         E = pd.DataFrame([dict(mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])
