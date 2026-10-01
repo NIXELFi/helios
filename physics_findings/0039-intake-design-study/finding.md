@@ -216,3 +216,12 @@ A 154 mm restrictor (4.0° half-angle to 38 mm, short nozzle) matches today's at
 A licence outage on 2026-10-01 truncated the A_SHARP and N_12_20 sweeps (their header Cd values were invalid; both files were deleted). `fluent_ingest.py` now skips any sweep without a choked plateau.
 
 **Intermediate roughness (Fluent A_KS20 / B_KS20, 20 um sand grain).** Going from 60 um to 20 um recovers about 60 % of the smooth-wall gain in R and about 70 % of the gain in Cd; the short restrictor B at 20 um matches today's A at 60 um. Engine numbers are in `charts/fluent/fluent_engine.csv`.
+
+**Plenum dump (Fluent dump_A / dump_B) and the leading hypothesis for the gap.** Dumping the diffuser straight into a 167 mm bore does not change the restrictor's recovery (A: 0.717-0.722 at the exit plane, +0.01 referenced to plenum pressure). So the steady dump does not explain the car-fitted 0.572.
+
+Leading candidate: **losses upstream of the restrictor**, which the 1D model does not have (it feeds the venturi ambient total pressure) and which a fit to plenum pressure books as poor diffuser recovery.
+- For Fluent's clean A (Cd 0.974, R 0.724) to give the same plenum pressure as the car-fitted model at the same mass flow, the restrictor inlet must sit 2.5-3.3 kPa below ambient at 9-12.5k. That is a loss coefficient of about 1.4 on the 32 mm throttle-bore dynamic pressure.
+- An air filter plus a WOT butterfly plausibly supplies much of that.
+- **Test:** tap a pressure sensor between the throttle body and the restrictor throat and log it at WOT above 9k.
+- If confirmed, the loss is recoverable (filter, throttle path) and worth up to about +4 % at the top end.
+- Remaining candidates: pulsating flow and a bore rougher than 60 um.
