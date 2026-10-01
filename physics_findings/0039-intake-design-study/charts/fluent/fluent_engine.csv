@@ -1,9 +1,13 @@
 mode,geometry,top_10p5_12p5k,p1_6_12k,low_4_6k
 ratio,A,0.0,0.0,0.0
+ratio,A_NOZ,0.53,0.35,0.12
 ratio,A_SMOOTH,1.55,1.02,0.38
 ratio,B,-0.83,-0.56,-0.2
 ratio,B_SMOOTH,1.02,0.68,0.23
+ratio,F,0.16,0.11,0.03
 absolute,A,4.36,2.62,1.2
+absolute,A_NOZ,4.98,3.0,1.4
 absolute,A_SMOOTH,6.16,3.68,1.86
 absolute,B,3.22,2.0,0.83
 absolute,B_SMOOTH,5.47,3.31,1.57
+absolute,F,4.5,2.71,1.23
