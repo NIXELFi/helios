@@ -5,3 +5,5 @@ runner.pid
 data/josh_raw/
 data/ld_raw/
 data/ld_traces/
+video/*.mp4
+video/*.png
