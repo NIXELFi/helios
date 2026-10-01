@@ -76,6 +76,8 @@ const PART_STEPS: Step[] = [
     page: ["parts", "Open the parts list"] },
   { id: "ready", title: "Ready to order", tone: "ready", who: "You",
     what: <><p>When the design is settled and the part is priced, change its status to <b>Ready to order</b>. That sends it to the execs and they get a notification with your name on it.</p>
+      <p>Add a <b>shipping estimate</b> in Tax/ship if you can. You don't need to work out sales tax: the execs see a rough figure with tax added.</p>
+      <p>Several parts in one cart? Tick them, choose <b>Split one cart's shipping & tax over these</b>, and paste the cart page or order email (or type the shipping). Each part gets its share by price.</p>
       <p>Changed your mind? Move it back to Not ready, or Cancel it. You can edit it until it's approved.</p></>,
     page: ["parts", "Open the parts list"] },
   { id: "approval", title: "Two execs approve", tone: "exec", who: "Execs",
@@ -103,8 +105,8 @@ const REIMB_STEPS: Step[] = [
     page: ["myreimb", "Open Get reimbursed"] },
   { id: "check", title: "An exec checks it", tone: "exec", who: "Execs",
     what: <p>They look at the receipt and approve it or decline it with a reason. Until then you can add more receipts or withdraw it.</p> },
-  { id: "paid", title: "Paid by check", tone: "done", who: "Execs",
-    what: <p>You get a check. The request shows <b>Paid</b> with the check number, and you get a notification.</p>, page: ["myreimb", "See your requests"] },
+  { id: "paid", title: "Paid back", tone: "done", who: "Execs",
+    what: <p>You're paid by check or in cash. The request shows <b>Paid</b> (with the check number for a check), and you get a notification.</p>, page: ["myreimb", "See your requests"] },
 ];
 
 export function MemberGuide({ go }: { go: Go }) {
@@ -182,7 +184,9 @@ const WEEK_STEPS: Step[] = [
     what: <><p>Discrepancies lists anything that doesn't add up: a charge with no invoice, an invoice with no charge, a possible duplicate, an amount that differs, a balance that doesn't tie out. Fix it, or mark it resolved with a note (e.g. "two hotel rooms").</p></>,
     page: ["discrepancies", "Open Discrepancies"] },
   { id: "reimburse", title: "Reimbursements", tone: "money", who: "CFO",
-    what: <><p>Review new requests (look at the receipt), approve or decline. To pay: tick one person's rows, enter the check number, keep <b>Write the check into the ledger</b> on. The check then counts against Available until it clears.</p></>,
+    what: <><p>Review new requests (look at the receipt), approve or decline. To pay: tick the rows, then choose how it was paid.</p>
+      <p><b>By check</b> (one person at a time): enter the check number and keep <b>Write the check into the ledger</b> on. The check counts against Available until it clears.</p>
+      <p><b>Cash from the cash box</b>: the cash comes out of the Cash Box account in the ledger. <b>Cash withdrawn at Chase</b>: the withdrawal goes into the ledger now; when the statement comes in, its withdrawal line is matched to it, not counted twice.</p></>,
     page: ["reimbursements", "Open Reimbursements"] },
   { id: "meeting", title: "Read the Overview", tone: "done", who: "All execs",
     what: <><p>For the meeting: <b>Available to spend</b> (the real number, not the bank balance), <b>card credit used</b> this cycle, and Needs attention.</p></>,
@@ -194,7 +198,8 @@ const BUY_STEPS: Step[] = [
     what: <p>Approvals shows each request with the requester's name and what it does to the subteam's budget. Two different execs must approve; the requester's own approval doesn't count.</p>,
     page: ["approvals", "Open Approvals"] },
   { id: "order", title: "Buy it", tone: "exec", who: "CFO / President",
-    what: <p>Orders & tracking: tick the parts bought together, enter the order number, the total actually charged and how it was paid. If a member paid, put their name in "Member who paid" and add a reimbursement.</p>,
+    what: <><p>Orders & tracking: tick the parts bought together and press <b>From the order confirmation</b>. Paste the order email or page (or drop its PDF): the subtotal, shipping, tax and total are read off it and each part gets its share by price, so every part shows what it really cost.</p>
+      <p>Or just type the order number and total. If a member paid, put their name in "Member who paid" and add a reimbursement.</p></>,
     page: ["orders", "Open Orders"] },
   { id: "track", title: "Add tracking", tone: "move", who: "CFO",
     what: <p>Paste the tracking number (the carrier is detected). The delivery person and the requester are notified. Mark Delivered when it lands; the delivery person is told again.</p>, page: ["orders", "Open Orders"] },
@@ -220,12 +225,21 @@ export function ExecGuide({ go }: { go: Go }) {
       </Card>
       <div className="flex flex-col gap-3">{BUY_STEPS.map((s, i) => <StepCard key={s.id} s={s} n={i + 1} prefix={p} go={go} />)}</div>
 
+      <Extra id="budgets" prefix={p} title="Setting budgets">
+        <p>Budgets &gt; <b>Set up budgets</b>. Create the season (it starts after competition and design freeze; it becomes the current one), then add a line per car: its name, amount, and the subteams whose spending counts toward it. One line can cover several subteams; a subteam counts toward one line per car.</p>
+        <button className="text-asu-gold hover:underline" onClick={() => go("budgets")}>Open Budgets</button>
+      </Extra>
+      <Extra id="bring-in" prefix={p} title="Bringing in old data">
+        <p>Finance &gt; <b>Bring in data</b>. <b>Restore from the old ledger</b> loads the standalone ledger's export (helios-export.json) in one go: accounts, statements, every line and split, invoices, balances, reimbursements, budgets and the parts list. It only works while Agora is empty.</p>
+        <p><b>Airtable parts lists</b>: pick the CSV exports or a whole folder. Car and subteam come from the folder and file names; statuses carry over, and parts already on a tab are skipped, so uploading a file again is safe.</p>
+        <button className="text-asu-gold hover:underline" onClick={() => go("bring")}>Open Bring in data</button>
+      </Extra>
       <Extra id="rules" prefix={p} title="How the money is counted">
         <p><b>Money counts once, on the statement line where it moved.</b> A card purchase counts on the card. The monthly card payment from Chase is a <i>transfer</i> (it pays for things already counted), never spending. Square payouts into Chase are transfers too: the dues were counted when they were paid into Square.</p>
         <p>Invoices, parts and emails never add money. They're evidence attached to a statement line.</p>
         <p><b>Available to spend</b> = Chase balance - card owed - pending card charges - checks written but not cashed - reimbursements owed. The bank balance alone overstates it.</p>
         <p><b>The card limit</b> is per billing cycle and resets when a statement closes, even though Chase pays the bill about 28 days later.</p>
-        <p>A <b>check</b> counts when it's written and clears when it hits the bank.</p>
+        <p>A <b>check</b> counts when it's written and clears when it hits the bank. <b>Cash</b> from the cash box counts on the Cash Box account; cash withdrawn at Chase counts on checking the day it came out.</p>
       </Extra>
       <Extra id="who" prefix={p} title="Who sees what">
         <p>Only the six execs see Finance (this section), all budgets, and all reimbursements.</p>

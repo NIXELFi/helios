@@ -5,6 +5,7 @@ import { today } from "../finance/useFinance";
 import { fmtCents, requireCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, StatusPill, SubteamChip } from "../components/ui";
+import { OrderDialog } from "../components/OrderDialog";
 
 export function OrdersView({
   client, data, reload, flash,
@@ -27,6 +28,8 @@ export function OrdersView({
   const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [tracking, setTracking] = useState<Record<string, { number: string; carrier: string; eta: string }>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [cart, setCart] = useState<Item[] | null>(null);
+  const vendorNames = data.vendors.map((v) => v.name);
 
   async function run(label: string, fn: () => Promise<unknown>) {
     try { await fn(); await reload(); flash(label); } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
@@ -44,6 +47,11 @@ export function OrdersView({
           </div>
           <textarea readOnly className="mt-2 w-full rounded-md border border-helios-line bg-helios-strip p-2 text-sm" value={message} />
         </Card>
+      )}
+
+      {cart && (
+        <OrderDialog client={client} items={cart} canOrder vendorNames={vendorNames} reload={reload} flash={flash}
+          onClose={() => { setCart(null); setPicked(new Set()); }} />
       )}
 
       <section>
@@ -75,6 +83,8 @@ export function OrdersView({
         {picked.size > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-strip px-4 py-2">
             <b className="text-asu-gold">{picked.size} bought together</b>
+            <Button onClick={() => setCart(toOrder.filter((i) => picked.has(i.id)))}>From the order confirmation...</Button>
+            <span className="text-xs text-helios-dim">or type it:</span>
             <input className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Vendor order #" value={order.id} onChange={(e) => setOrder({ ...order, id: e.target.value })} />
             <input className="w-40 rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Paid with" value={order.payment} onChange={(e) => setOrder({ ...order, payment: e.target.value })} />
             <input className="w-28 rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Order total $" value={order.total} onChange={(e) => setOrder({ ...order, total: e.target.value })} />
@@ -131,6 +141,7 @@ export function OrdersView({
                 })}>Add tracking</Button>
                 <Button kind="ghost" onClick={() => void run("Marked delivered. The delivery person was told.", () => setStatus(client, ids, "DELIVERED"))}>Delivered</Button>
                 <Button kind="ghost" onClick={() => void run("Marked received.", () => setStatus(client, ids, "RECEIVED"))}>Received</Button>
+                <Button kind="ghost" onClick={() => setCart(group)}>Costs from the invoice...</Button>
               </div>
             </Card>
           );

@@ -2,20 +2,21 @@ import { useMemo, useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
 import { Button, Card, Empty, useConfirm } from "../../components/ui";
 import {
-  addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, payReimbursements, updateReimbursement, uploadReceipts,
+  addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, recordReimbursementPayment, updateReimbursement, uploadReceipts,
   type ReimbursementWithReceipts,
 } from "../api";
 import { today } from "../useFinance";
+import { PAID_WITH_LABEL, type PaidWith } from "../ledger";
 import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 
-/** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check. */
+/** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check or in cash. */
 export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }: FinanceProps) {
   const where = whereLabel(pur);
   const requests = fin.reimbursements.filter((r) => r.status === "requested");
   const [showPaid, setShowPaid] = useState(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
-  const [pay, setPay] = useState({ date: today(), check: "", addCheck: true });
+  const [pay, setPay] = useState<{ date: string; method: PaidWith; check: string; addToLedger: boolean }>({ date: today(), method: "check", check: "", addToLedger: true });
   const [adding, setAdding] = useState(false);
 
   const groups = useMemo(() => {
@@ -86,23 +87,41 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
         <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-panel px-4 py-2 shadow-lg">
           <b className="text-asu-gold">{picked.size} selected | {fmtCents(pickedRows.reduce((s, r) => s + (r.amount_cents ?? 0), 0))}</b>
           <label className="flex items-center gap-1 text-sm">Paid on<input type="date" className={input} value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></label>
-          <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />
-          <label className="flex items-center gap-1 text-sm" title="Adds the check to the ledger as uncashed, so Available stays right until it clears">
-            <input type="checkbox" checked={pay.addCheck} disabled={pickedPeople.size !== 1} onChange={(e) => setPay({ ...pay, addCheck: e.target.checked })} />
-            Write the check into the ledger
+          <select className={input} value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value as PaidWith })} aria-label="Paid with">
+            <option value="check">by check</option>
+            <option value="cash_box">in cash from the cash box</option>
+            <option value="bank_cash">in cash withdrawn at Chase</option>
+          </select>
+          {pay.method === "check" && <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />}
+          <label className="flex items-center gap-1 text-sm" title={LEDGER_HINT[pay.method]}>
+            <input type="checkbox" checked={pay.addToLedger} disabled={pay.method === "check" && pickedPeople.size !== 1}
+              onChange={(e) => setPay({ ...pay, addToLedger: e.target.checked })} />
+            {LEDGER_LABEL[pay.method]}
           </label>
-          <Button onClick={() => void attempt(flash, reload, `${picked.size} marked paid.`, async () => {
-            const txn = await payReimbursements(client, [...picked], pay.date || null, pay.check, pay.addCheck && pickedPeople.size === 1);
+          <Button onClick={() => void attempt(flash, reload, `${picked.size} marked paid ${pay.method === "check" ? "by check" : "in cash"}.`, async () => {
+            const txn = await recordReimbursementPayment(client, [...picked], pay.method, pay.date || null, pay.check,
+              pay.addToLedger && (pay.method !== "check" || pickedPeople.size === 1));
             setPicked(new Set());
             if (txn) openTxn(txn);
           })}>Mark paid</Button>
           <Button kind="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
-          {pickedPeople.size > 1 && <span className="text-xs text-helios-dim">One check pays one person, so the ledger entry is off for several people.</span>}
+          {pickedPeople.size > 1 && pay.method === "check" && <span className="text-xs text-helios-dim">One check pays one person, so the ledger entry is off for several people.</span>}
         </div>
       )}
     </div>
   );
 }
+
+const LEDGER_LABEL: Record<PaidWith, string> = {
+  check: "Write the check into the ledger",
+  cash_box: "Take it out of the Cash Box in the ledger",
+  bank_cash: "Add the withdrawal to the ledger",
+};
+const LEDGER_HINT: Record<PaidWith, string> = {
+  check: "Adds the check to the ledger as uncashed, so Available stays right until it clears",
+  cash_box: "Adds a withdrawal to the Cash Box account (made if there isn't one), so its balance stays right",
+  bank_cash: "Adds the cash withdrawal to checking now, so Available is right straight away. When the statement comes in, its withdrawal line is matched to this one, not added twice",
+};
 
 function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "client" | "reload" | "flash"> & { r: ReimbursementWithReceipts; where: string }) {
   const [note, setNote] = useState("");
@@ -161,6 +180,7 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
       <td className="w-40 p-2 text-xs">
         {paid ? <>
           <Badge tone="good">paid {shortDate(r.paid_date)}</Badge>
+          {r.paid_with && r.paid_with !== "check" && <div className="mt-1">{PAID_WITH_LABEL[r.paid_with]}</div>}
           {r.check_number && <div className="mt-1">check #{r.check_number}</div>}
           {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger</button>}
         </> : <Badge tone="warn">owed</Badge>}

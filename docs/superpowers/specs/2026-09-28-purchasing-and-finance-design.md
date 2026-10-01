@@ -241,6 +241,15 @@ transactions, statements, balances, reimbursements, resolutions and the audit
 history. After the CFO checks the import report, the prototype becomes
 read-only and Airtable is frozen.
 
+On a hosted project nobody should need the service key for this, so the CFO
+does it in the app: Finance > Bring in data uploads the prototype's export
+(`python -m sdm.export_helios`) to `finance.restore_ledger()`, an exec-only RPC
+that loads everything in one transaction, keeping the old ids, and refuses
+unless Agora is empty (it never merges into live books). The exec maps the
+export's IC/EV and subteam names to Helios's cars and subteams first. Airtable
+CSVs can also be added there a folder at a time (`purchasing.import_items()`,
+exec-only, keeps each row's status).
+
 ## Testing
 
 - RLS/RPC tests in `infra/pdm-supabase/tests/` against the local stack:
@@ -304,5 +313,9 @@ database. Ordering by `(ts, id)` would make it stable.
 - Add `purchasing` and `finance` to **Exposed schemas** in the dashboard (API settings);
   `config.toml` only covers local stacks. Without it every call returns null.
 - Set `purchasing.settings.delivery_person_id` to the delivery person's user id.
+- `20261002000000_agora_cash_budgets_restore.sql` (after 6.0.0) adds cash
+  reimbursements, season/budget-line RPCs, per-part order costs, Airtable
+  import with history, the restore, and `estimated_tax_percent` (8.1, Tempe).
+  It needs no dashboard changes.
 - In Phase A "spent" comes from recorded orders (`actual_total`). Once the
   ledger lands in Phase B it comes from statement lines instead.

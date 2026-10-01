@@ -114,6 +114,10 @@ export interface NewRow {
   notes?: string;
   /** From an Airtable Status column: PLANNED, READY, ORDERED, RECEIVED or HAVE. */
   status?: string;
+  /** Airtable's "DATE NEEDED" as written (its meaning isn't settled; execs' bulk import only). */
+  date_needed_raw?: string;
+  /** Where the row came from, e.g. "airtable:IC Team/Aero-Grid view.csv row 4" (execs' bulk import only). */
+  source?: string;
 }
 
 /** Airtable's status words -> the parts list's. */

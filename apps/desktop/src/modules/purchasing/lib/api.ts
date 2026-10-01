@@ -161,6 +161,17 @@ export async function recordOrder(c: SupabaseClient, ids: string[], orderId: str
     p_ids: ids, p_order_id: orderId, p_payment: payment, p_ordered_on: orderedOn, p_total_cents: totalCents, p_paid_by: paidBy,
   }));
 }
+/** Each part's share of a vendor order: [{id, actual_total_cents, tax_shipping_cents}]. */
+export async function recordOrderLines(c: SupabaseClient, lines: { id: string; actual_total_cents: number; tax_shipping_cents: number }[],
+  orderId: string, payment: string, orderedOn: string | null, totalCents: number | null, paidBy: string): Promise<void> {
+  unwrap(await P(c).rpc("record_order_lines", {
+    p_lines: lines, p_order_id: orderId, p_payment: payment, p_ordered_on: orderedOn, p_total_cents: totalCents, p_paid_by: paidBy,
+  }));
+}
+/** Execs: bring in rows with their Airtable status (Ordered, Received...). Returns how many were added. */
+export async function importItems(c: SupabaseClient, projectId: string, subteamId: string, rows: NewRow[]): Promise<number> {
+  return unwrap(await P(c).rpc("import_items", { p_project: projectId, p_subteam: subteamId, p_rows: rows }));
+}
 export async function addTracking(c: SupabaseClient, ids: string[], trackingNumber: string, carrier: string, eta: string | null): Promise<void> {
   unwrap(await P(c).rpc("add_tracking", { p_ids: ids, p_number: trackingNumber, p_carrier: carrier, p_eta: eta }));
 }
@@ -189,4 +200,33 @@ export function trackingUrl(carrier: string, n: string): string {
     Amazon: `https://track.amazon.com/tracking/${s}`,
   };
   return s && urls[c] ? urls[c] : "";
+}
+
+// ---- seasons and budget lines (execs)
+
+export interface Season { id: string; name: string; starts_on: string | null; ends_on: string | null; is_current: boolean }
+export interface BudgetLine { id: string; season_id: string; project_id: string; name: string; amount_cents: number; notes: string; budget_line_subteams: { subteam_id: string }[] }
+
+export async function fetchSeasons(c: SupabaseClient): Promise<Season[]> {
+  return unwrap(await P(c).from("seasons").select("id,name,starts_on,ends_on,is_current").order("name", { ascending: false }));
+}
+export async function fetchBudgetLines(c: SupabaseClient, seasonId: string): Promise<BudgetLine[]> {
+  return unwrap(await P(c).from("budget_lines").select("id,season_id,project_id,name,amount_cents,notes,budget_line_subteams(subteam_id)")
+    .eq("season_id", seasonId).order("name"));
+}
+export async function upsertSeason(c: SupabaseClient, s: { id: string | null; name: string; starts_on: string | null; ends_on: string | null; is_current: boolean }): Promise<string> {
+  return unwrap(await P(c).rpc("upsert_season", { p_id: s.id, p_name: s.name, p_starts_on: s.starts_on, p_ends_on: s.ends_on, p_current: s.is_current }));
+}
+export async function upsertBudgetLine(c: SupabaseClient, l: { id: string | null; season_id: string; project_id: string; name: string; amount_cents: number; subteam_ids: string[] }): Promise<string> {
+  return unwrap(await P(c).rpc("upsert_budget_line", {
+    p_id: l.id, p_season: l.season_id, p_project: l.project_id, p_name: l.name, p_amount_cents: l.amount_cents, p_subteams: l.subteam_ids,
+  }));
+}
+export async function deleteBudgetLine(c: SupabaseClient, id: string): Promise<void> {
+  unwrap(await P(c).rpc("delete_budget_line", { p_id: id }));
+}
+/** A purchasing setting ("estimated_tax_percent"...), or null. */
+export async function fetchSetting(c: SupabaseClient, key: string): Promise<string | null> {
+  const r = await P(c).from("settings").select("value").eq("key", key).maybeSingle();
+  return r.error ? null : ((r.data as { value: string } | null)?.value ?? null);
 }

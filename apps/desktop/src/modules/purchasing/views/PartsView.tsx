@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, itemCost, recordOrder,
+  REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
   setStatus, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
 import { today } from "../finance/useFinance";
@@ -10,6 +10,7 @@ import { parseCsv, parseTsv, type NewRow, type PasteField } from "../lib/paste";
 import { normalizeVendor } from "../finance/importers";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { PasteDialog } from "../components/PasteDialog";
+import { OrderDialog } from "../components/OrderDialog";
 import { Button, Empty, PrioritySelect, StatusSelect, SubteamChip } from "../components/ui";
 
 type Filter = "all" | "planning" | "moving" | "done";
@@ -203,6 +204,7 @@ export function PartsView({
   // ---- bulk actions
   const ids = [...selected].filter((id) => rows.some((r) => r.id === id));
   const [bulk, setBulk] = useState("");
+  const [cart, setCart] = useState<Item[] | null>(null);
   const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [track, setTrack] = useState({ number: "", carrier: "", eta: "" });
   async function applyBulk() {
@@ -218,6 +220,12 @@ export function PartsView({
     } else if (bulk === "tracking") {
       await run(`Tracking added to ${ids.length} item(s)`, () =>
         addTracking(client, ids, track.number, track.carrier || detectCarrier(track.number), track.eta || null));
+    } else if (bulk === "cart") {
+      const pick = rows.filter((r) => selected.has(r.id));
+      const locked = pick.filter((r) => !canEdit(r));
+      if (locked.length) { flash(`${locked.map((r) => r.code).join(", ")} can't be changed by you (approved already, or another subteam's).`, true); return; }
+      setCart(pick);
+      return;
     } else if (bulk === "copy") {
       const pick = rows.filter((r) => selected.has(r.id));
       const lines = [["Item", "Qty", "Unit $", "Tax/ship $", "Vendor", "Part #", "Link", "Needed by", "Notes"].join("\t")].concat(
@@ -368,6 +376,7 @@ export function PartsView({
             <option value="status:READY">Send for approval</option>
             <option value="status:PLANNED">Back to not ready</option>
             <option value="status:RECEIVED">Mark received</option>
+            <option value="cart">Split one cart's shipping & tax over these</option>
             <option value="copy">Copy as spreadsheet rows</option>
             {exec && <>
               <option value="approve">Approve</option>
@@ -398,6 +407,11 @@ export function PartsView({
         </div>
       )}
 
+      {cart && (
+        <OrderDialog client={client} items={cart} canOrder={can(caps, "purchasing.order")} vendorNames={data.vendors.map((v) => v.name)}
+          reload={reload} flash={flash} onClose={() => { setCart(null); setSelected(new Set()); }} />
+      )}
+
       {paste && tab && projectId && (
         <PasteDialog
           matrix={paste.matrix}
@@ -416,8 +430,9 @@ export function PartsView({
               groups.set(s, [...(groups.get(s) ?? []), r]);
             }
             for (const [s, rs] of groups) {
-              const ids = await addItems(client, projectId, tab, rs, s === "READY");
-              if (s !== "READY" && s !== "PLANNED" && exec) await setStatus(client, ids, s as Status);
+              // rows Airtable already had as Ordered / Received come in as they were (execs only)
+              if (s === "READY" || s === "PLANNED") await addItems(client, projectId, tab, rs, s === "READY");
+              else if (exec) await importItems(client, projectId, tab, rs.map((r) => ({ ...r, status: s })));
             }
             setPaste(null);
             await reload();

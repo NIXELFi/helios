@@ -72,6 +72,10 @@ export interface BalanceEntry {
 }
 
 export type ReimbursementStatus = "requested" | "owed" | "paid" | "denied";
+/** How a reimbursement was paid: a check, cash from the cash box, or cash withdrawn from checking. */
+export type PaidWith = "check" | "cash_box" | "bank_cash";
+export const PAID_WITH_LABEL: Record<PaidWith, string> = { check: "check", cash_box: "cash (cash box)", bank_cash: "cash (bank withdrawal)" };
+
 export interface Reimbursement {
   id: number;
   person_name: string;
@@ -85,7 +89,8 @@ export interface Reimbursement {
   status: ReimbursementStatus;
   denied_reason: string;
   check_number: string | null;
-  check_txn_id: number | null;
+  check_txn_id: number | null;   // the ledger line that paid it: the check, or the cash withdrawal
+  paid_with?: PaidWith | null;
   paid_date: string | null;
   notes: string;
   created_at: string;

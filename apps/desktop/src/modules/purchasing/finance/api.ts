@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@helios/auth";
 import { invoke } from "@tauri-apps/api/core";
-import type { Account, BalanceEntry, Reimbursement, Statement, Txn, TxnAllocation } from "./ledger";
+import type { Account, BalanceEntry, PaidWith, Reimbursement, Statement, Txn, TxnAllocation } from "./ledger";
 import type { Evidence } from "./discrepancies";
 import { allRows, type Item } from "../lib/api";
 import type { NewTxn, Plan, VendorRule } from "./importers";
@@ -120,6 +120,12 @@ export async function decideReimbursement(c: SupabaseClient, id: number, decisio
 }
 export async function payReimbursements(c: SupabaseClient, ids: number[], paidDate: string | null, checkNumber: string, addCheck: boolean): Promise<number | null> {
   return unwrap(await F(c).rpc("pay_reimbursements", { p_ids: ids, p_paid_date: paidDate, p_check_number: checkNumber, p_add_check: addCheck })) as number | null;
+}
+/** Pay by check or in cash; with addToLedger, the check or the cash withdrawal goes into the ledger too. */
+export async function recordReimbursementPayment(c: SupabaseClient, ids: number[], method: PaidWith, paidDate: string | null, checkNumber: string, addToLedger: boolean): Promise<number | null> {
+  return unwrap(await F(c).rpc("record_reimbursement_payment", {
+    p_ids: ids, p_method: method, p_paid_date: paidDate, p_check_number: checkNumber, p_add_to_ledger: addToLedger,
+  })) as number | null;
 }
 export async function addReimbursement(c: SupabaseClient, r: Partial<Reimbursement>): Promise<number> {
   return (unwrap(await F(c).from("reimbursements").insert({ status: "owed", ...r }).select("id").single()) as { id: number }).id;
@@ -285,3 +291,13 @@ export async function documentUrl(c: SupabaseClient, path: string): Promise<stri
 export interface BudgetShare { bucket: "spent" | "committed" | "planned"; source: "part" | "ledger"; ref: string; on_date: string | null; label: string; cents: number; txn_id: number | null; item_id: string | null }
 export const fetchBudgetDetail = async (c: SupabaseClient, projectId: string | null, subteamIds: string[]): Promise<BudgetShare[]> =>
   unwrap(await c.schema("purchasing").rpc("budget_detail", { p_project: projectId, p_subteams: subteamIds }));
+
+/** What restore_ledger() reports back. */
+export interface RestoreResult {
+  accounts: number; statements: number; transactions: number; invoices: number; balances: number;
+  reimbursements: number; budget_lines: number; parts: number; skipped: string[];
+}
+/** Load the standalone ledger's export into an empty Agora (exec only; refused if anything is already there). */
+export async function restoreLedger(c: SupabaseClient, data: unknown, cars: { IC: string; EV: string }, subteams: Record<string, string>): Promise<RestoreResult> {
+  return unwrap(await F(c).rpc("restore_ledger", { p_data: data, p_cars: cars, p_subteams: subteams })) as RestoreResult;
+}

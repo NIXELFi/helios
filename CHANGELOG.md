@@ -27,6 +27,39 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agora: set up budgets in the app.** Budgets > Set up budgets (execs): create
+  a season and make it current, then add, edit or delete budget lines per car,
+  each covering one or more subteams.
+- **Agora: pay reimbursements in cash.** Besides a check, an exec can mark
+  reimbursements paid in cash from the cash box (taken out of the Cash Box
+  account in the ledger) or in cash withdrawn at Chase (the withdrawal goes into
+  the ledger and the statement's line is matched to it, not counted twice).
+  Members see that they were paid in cash.
+- **Agora: split a cart's shipping and tax over its parts.** Tick the parts
+  bought together and paste the order confirmation or cart page (or drop its
+  PDF): the subtotal, shipping, tax, fees and total are read off it and each
+  part gets its share by price, to the cent. Members can save the shares as
+  estimates for their own parts; execs can mark the order placed with what each
+  part really cost (Orders & tracking > From the order confirmation, or Costs
+  from the invoice for orders already placed).
+- **Agora: estimated sales tax on approvals.** Where a request has no tax or
+  shipping, the approval card shows a rough all-in figure at the team's tax rate
+  (8.1%, a setting).
+- **Agora: Bring in data** (Finance, execs only). Restore the CFO's standalone
+  ledger export (helios-export.json) into an empty Agora in one step, keeping
+  every line, split, invoice, balance, reimbursement, budget, resolved
+  discrepancy and part as it was; or add Airtable CSV exports a whole folder at
+  a time, with car and subteam read from the folder and file names, statuses
+  carried over and parts already on a tab skipped.
+
+### Fixed
+
+- **Agora: Airtable rows already Ordered or Received can be uploaded.** Upload
+  CSV failed on them ("hasn't been approved yet"); execs now bring them in with
+  their status.
+
 ## [6.0.0] - 2026-09-30
 
 ### Added

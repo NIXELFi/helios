@@ -10,7 +10,7 @@ import { Badge, attempt, input, shortDate, whereLabel } from "./shared";
 import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 
 const STATUS: Record<ReimbursementWithReceipts["status"], [string, "warn" | "info" | "good" | "bad"]> = {
-  requested: ["Waiting for an exec", "info"], owed: ["Approved, check coming", "warn"], paid: ["Paid", "good"], denied: ["Declined", "bad"],
+  requested: ["Waiting for an exec", "info"], owed: ["Approved, payment coming", "warn"], paid: ["Paid", "good"], denied: ["Declined", "bad"],
 };
 
 /** Anyone on the team: ask to be paid back for something you bought for the team, with the receipt. */
@@ -52,7 +52,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
       {confirmDialog}
       <Card className="flex flex-col gap-3 self-start">
         <b>Ask to be paid back</b>
-        <p className="text-xs text-helios-dim">Bought something for the team with your own money? Tell us what and attach the receipt. An exec checks it and you're paid by check.</p>
+        <p className="text-xs text-helios-dim">Bought something for the team with your own money? Tell us what and attach the receipt. An exec checks it and you're paid back by check or in cash.</p>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <label className="flex flex-col gap-1">Amount you paid<input className={input} placeholder="$0.00" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
           <label className="flex flex-col gap-1">When<input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></label>
@@ -94,7 +94,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
                     <div className="text-right"><b className="tabular-nums">{fmtCents(r.amount_cents)}</b><div><Badge tone={tone}>{label}</Badge></div></div>
                   </div>
                   {r.status === "denied" && r.denied_reason && <div className="mt-1 text-xs text-helios-danger">{r.denied_reason}</div>}
-                  {r.status === "paid" && <div className="mt-1 text-xs text-helios-dim">Paid {shortDate(r.paid_date)}{r.check_number ? `, check #${r.check_number}` : ""}</div>}
+                  {r.status === "paid" && <div className="mt-1 text-xs text-helios-dim">Paid {shortDate(r.paid_date)}{r.paid_with === "cash_box" || r.paid_with === "bank_cash" ? ", in cash" : r.check_number ? `, check #${r.check_number}` : ""}</div>}
                   <div className="mt-2"><ReceiptList client={client} receipts={r.reimbursement_receipts}
                     onDelete={open ? (x) => void ask(removeReceiptQuestion(x)).then((ok) => ok && attempt(flash, reload, "Receipt removed.", () => deleteReceipt(client, x))) : undefined} /></div>
                   {open && <AddMore {...{ client, reload, flash }} r={r} />}

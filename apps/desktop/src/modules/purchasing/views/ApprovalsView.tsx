@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import { decide, itemCost, type BudgetRow, type Item } from "../lib/api";
+import { decide, fetchSetting, itemCost, type BudgetRow, type Item } from "../lib/api";
 import { fmtCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, PrioritySelect, SubteamChip } from "../components/ui";
@@ -27,6 +27,9 @@ export function ApprovalsView({
 }) {
   const { items, approvals, subteams, projects, budgets } = data;
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // members aren't asked for sales tax, so show a rough all-in figure where it's missing
+  const [taxPct, setTaxPct] = useState<number | null>(null);
+  useEffect(() => { void fetchSetting(client, "estimated_tax_percent").then((v) => setTaxPct(v && Number(v) > 0 ? Number(v) : null)); }, [client]);
   const now = Date.now();
 
   const waiting = items
@@ -81,6 +84,11 @@ export function ApprovalsView({
                 <div className="text-xs text-helios-dim">
                   {i.quantity !== null && i.unit_price_cents !== null ? `${i.quantity} x ${fmtCents(i.unit_price_cents)}` : ""}{i.vendor ? ` | ${i.vendor}` : ""}
                 </div>
+                {taxPct !== null && i.tax_shipping_cents === null && i.actual_total_cents === null && itemCost(i) > 0 && (
+                  <div className="text-xs text-helios-info" title="No tax or shipping was entered. This adds the estimated sales tax rate (an Agora setting); shipping isn't included.">
+                    about {fmtCents(Math.round(itemCost(i) * (1 + taxPct / 100)))} with ~{taxPct}% tax
+                  </div>
+                )}
               </div>
             </div>
 

@@ -3,15 +3,19 @@ import type { SupabaseClient } from "@helios/auth";
 import type { PurchasingData } from "../lib/usePurchasing";
 import type { BudgetRow } from "../lib/api";
 import { fmtCents } from "../lib/money";
-import { Card, Empty, SubteamChip } from "../components/ui";
+import { Button, Card, Empty, SubteamChip } from "../components/ui";
+import { BudgetSetup } from "./BudgetSetup";
 import { remaining } from "./ApprovalsView";
 import { fetchBudgetDetail, type BudgetShare } from "../finance/api";
 
 const BUCKET: Record<BudgetShare["bucket"], string> = { spent: "Spent", committed: "Committed (approved, not charged yet)", planned: "Planned (still on the list)" };
 
 /** Budget per line. Click a line to see every part and charge in it. */
-export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
+export function BudgetsView({ client, data, projectId, openTxn, openPart, exec, reload, flash }: {
   client: SupabaseClient; data: PurchasingData; projectId: string | null;
+  exec: boolean;                           // execs set up seasons and budget lines
+  reload: () => Promise<void>;
+  flash: (msg: string, error?: boolean) => void;
   openTxn?: (id: number) => void;          // execs: jump to the ledger line
   openPart: (code: string) => void;        // jump to the part on the parts list
 }) {
@@ -23,6 +27,7 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
   const carOrder = (pid: string | null) => (pid ? projects.findIndex((p) => p.id === pid) : 99);
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, BudgetShare[] | "loading" | string>>({});
+  const [setup, setSetup] = useState(false);
 
   function toggle(key: string, b: BudgetRow) {
     if (open === key) { setOpen(null); return; }
@@ -34,10 +39,19 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
       .catch((e) => setDetail((d) => ({ ...d, [key]: e instanceof Error ? e.message : String(e) })));
   }
 
-  if (!rows.length) return <Empty>No budget lines you can see yet. Execs set them per car and season.</Empty>;
+  const setupCard = setup && <BudgetSetup client={client} data={data} reload={reload} flash={flash} done={() => setSetup(false)} />;
+  if (!rows.length) {
+    return (
+      <div className="flex flex-col gap-4">
+        {setupCard || <Empty>No budget lines you can see yet. Execs set them per car and season.
+          {exec && <div className="mt-3"><Button onClick={() => setSetup(true)}>Set up budgets</Button></div>}</Empty>}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
+      {setupCard || (exec && <div className="flex justify-end"><Button kind="ghost" onClick={() => setSetup(true)}>Set up budgets</Button></div>)}
       <p className="text-xs text-helios-dim">
         Remaining = budget - spent - committed. "After planned" also takes off parts still on the list: if it goes negative, the plan doesn't fit the budget.
         <b className="text-helios-text"> Click a line to see what's in it.</b>
