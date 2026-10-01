@@ -253,7 +253,7 @@ The candidates assume a 20.000 mm throat against 19.947 mm on the as-built part.
 
 **Throttle response cross-check.** A lumped fill model on the CFD restrictor curve gives the 2.75 L plenum +11.6 ms (6000 rpm) / +9.7 ms (8500 rpm) of lost time over 1.44 L, against +13 / +12 ms in the 1D tip-in runs. The volume penalty is confirmed.
 
-**Hypothesis: the throttle shaft is the upstream loss (not yet CFD).** The throttle-body CAD shows a full round 10 mm shaft across the 32 mm bore, so at WOT it blocks about 39 % of the bore (open area about 490 of 804 mm²; the restrictor throat is 312.5 mm²).
+**WITHDRAWN (rested on a CAD simplification; the real shaft is about plate-thin across the bore, 8-12 % blockage, K about 0.02-0.2). Original hypothesis: the throttle shaft is the upstream loss (not yet CFD).** The throttle-body CAD shows a full round 10 mm shaft across the 32 mm bore, so at WOT it blocks about 39 % of the bore (open area about 490 of 804 mm²; the restrictor throat is 312.5 mm²).
 - A sudden-expansion estimate behind the shaft gives K = 0.4-1.1 on the bore dynamic pressure. With the mouth and bore (0.19 from Fluent) the total is 0.6-1.3, against the 1.4 needed to reconcile clean-flow CFD with the car-fitted recovery.
 - If the 3D case confirms it, a slimmer or flattened shaft, a larger throttle body, or a different throttle type is worth more than anything left in the restrictor shape: up to about +3 % at the top end.
 - No physical test (flow bench, pressure tap) is planned for now.
@@ -283,3 +283,17 @@ The 1D model's venturi was exactly that quasi-steady element. `diag/plenumwave.p
 So every VRLI result in this finding stands and is slightly conservative.
 
 This error lowers the model's plenum pressure at a given flow, so it cannot explain the car-fitted recovery being below CFD's; the old calibration absorbed it elsewhere. A recalibration of 0036 with the inertance on is the proper follow-up.
+
+**The car's intake pressure drop, self-referenced (`diag/car_intake_dp.py`).** 0036 fitted the venturi recovery to baro - MAP with baro assumed 97.3 kPa. Check: Josh AX 4-26 (G4X, MAP at 200 Hz), engine-off MAP minus MAP at sustained WOT, 500 rpm bins.
+- Engine-off MAP reads 97.0-97.2 kPa in all four sessions, so the assumed baro was right.
+
+| rpm | car dp | 1D fit (0.95 / 0.572) | Fluent A_CAD (0.965 / 0.692) | A_CAD + bare inlet (K 0.19) |
+|---|---|---|---|---|
+| 7000 | 3.2 kPa | 3.3 | 2.3 | 2.5 |
+| 9000 | 6.5 kPa | 6.8 | 4.7 | 5.1 |
+| 10000 | 7.9 kPa | 7.5 | 5.2 | 5.6 |
+
+- The car-fitted recovery reproduces on independent data: implied R is 0.55-0.60 over 6.5-10k (with the model's mass flow).
+- The gap to clean-flow CFD is real: about 2 kPa at 9-10k, of which the bare inlet is about 0.4.
+- **Leading candidate now: a bore rougher than the assumed 60 um.** On the as-built wall R falls 0.773 / 0.742 / 0.696 at 0 / 20 / 60 um; extrapolated, 0.57 needs roughly 170 um of sand-grain, which is plausible for printed layer lines across the flow. Fluent runs at 120 and 200 um are requested.
+- If confirmed, finishing the bore is worth about +3 % at the top end, not +1.2 %.
