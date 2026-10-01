@@ -257,3 +257,5 @@ About 0.5 % of each candidate's gain is throat area: the candidates assume a 20.
 - A sudden-expansion estimate behind the shaft gives K = 0.4-1.1 on the bore dynamic pressure. With the mouth and bore (0.19 from Fluent) the total is 0.6-1.3, against the 1.4 needed to reconcile clean-flow CFD with the car-fitted recovery.
 - If the 3D case confirms it, a slimmer or flattened shaft, a larger throttle body, or a different throttle type is worth more than anything left in the restrictor shape: up to about +3 % at the top end.
 - No physical test (flow bench, pressure tap) is planned for now.
+
+**Bore finish on the as-built wall (Fluent A_CAD_KS20 / A_CAD_SMOOTH).** The effect on the real part matches the stand-in. Engine torque vs today's part as-printed is in `charts/fluent/fluent_engine.csv` (rows A_CAD_KS20, A_CAD_SMOOTH); all three finishes stay attached in the operating range.
