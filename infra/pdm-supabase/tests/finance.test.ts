@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createTestUser, resetAuthUsers, serviceClient, signInAs, uniqueEmail } from "./setup.js";
 
 /**
- * 20260930000000 finance: the ledger, balances and reimbursements are
+ * 20261001010000 finance: the ledger, balances and reimbursements are
  * exec-only; any member can ask to be reimbursed and attach receipts, and
  * sees only their own requests; budgets count spending from the ledger and
  * stay per-subteam.
@@ -195,6 +195,37 @@ describe("finance", () => {
     expect(paid!.every((r) => r.status === "paid" && r.check_txn_id === txnId)).toBe(true);
   });
 
+  it("a reimbursement is paid once, and an exec can't decide their own", async () => {
+    await accounts();
+    const cfo = await person("cfo", "cfo");
+    const pres = await person("pres", "president");
+    const { data: own } = await cfo.f.rpc("request_reimbursement", { p_amount_cents: 4200, p_reason: "fuel" });
+    expect((await cfo.f.rpc("decide_reimbursement", { p_id: own, p_decision: "approve" })).error?.message).toMatch(/another exec/);
+    expect((await pres.f.rpc("decide_reimbursement", { p_id: own, p_decision: "approve" })).error).toBeNull();
+
+    const pay = { p_ids: [own], p_check_number: "1060", p_add_check: true };
+    expect((await pres.f.rpc("pay_reimbursements", pay)).error).toBeNull();
+    expect((await pres.f.rpc("pay_reimbursements", pay)).error?.message).toMatch(/already paid/);
+    expect((await pres.f.rpc("pay_reimbursements", { ...pay, p_add_check: false })).error?.message).toMatch(/already paid/);
+    const { data: checks } = await fin().from("transactions").select("id").eq("kind", "check").eq("reference", "1060");
+    expect(checks).toHaveLength(1);
+
+    // the same check number can't be written twice
+    const { data: other } = await fin().from("reimbursements").insert({ person_name: "Sam", amount_cents: 100, reason: "x", status: "owed" }).select("id").single();
+    expect((await pres.f.rpc("pay_reimbursements", { ...pay, p_ids: [other!.id] })).error?.message).toMatch(/already in the ledger/);
+  });
+
+  it("an imported statement line can't be relabelled as hand-entered and deleted", async () => {
+    const { card } = await accounts();
+    const cfo = await person("cfo", "cfo");
+    const t = (await fin().from("transactions").insert({ account_id: card, date: "2026-09-10", amount_cents: -1852, kind: "charge", source: "chase-card", source_key: "s1" }).select("id").single()).data!;
+    expect((await cfo.f.from("transactions").update({ source: "manual" }).eq("id", t.id)).error?.message).toMatch(/can't be changed/);
+    await cfo.f.from("transactions").delete().eq("id", t.id);
+    expect((await fin().from("transactions").select("id").eq("id", t.id)).data).toHaveLength(1);
+    // ordinary edits still work
+    expect((await cfo.f.from("transactions").update({ notes: "Mouser order" }).eq("id", t.id)).error).toBeNull();
+  });
+
   it("budgets count ledger spending by split, never twice, and stay per-subteam", async () => {
     const { card } = await accounts();
     const cfo = await person("cfo", "executive");
@@ -215,8 +246,8 @@ describe("finance", () => {
     await cfo.f.rpc("set_allocations", { p_txn: refund!.id, p_allocations: [{ project_id: ic, subteam_id: eng, amount_cents: 257 }] });
 
     // an ordered DAQ item not yet matched is committed; once linked it counts through the ledger only
-    const { data: ids } = await cfo.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "ADC", total_estimate_cents: 6000 }] });
-    await cfo.p.rpc("set_status", { p_ids: ids, p_status: "APPROVED" });
+    const { data: ids } = await cfo.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_ready: true, p_rows: [{ title: "ADC", total_estimate_cents: 6000 }] });
+    for (const who of ["appr1", "appr2"]) await (await person(who, "executive")).p.rpc("decide", { p_id: ids[0], p_decision: "approve" });
     await cfo.p.rpc("record_order", { p_ids: ids, p_order_id: "50112233", p_payment: "Team card", p_total_cents: 6000 });
     let rows = (await cfo.p.rpc("budget_rows")).data as any[];
     expect(rows.find((r) => r.name === "Data AQ")).toMatchObject({ spent_cents: 6000, committed_cents: 6000 });

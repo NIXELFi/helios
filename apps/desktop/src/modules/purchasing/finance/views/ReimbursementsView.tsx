@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
-import { Button, Card, Empty } from "../../components/ui";
+import { Button, Card, Empty, useConfirm } from "../../components/ui";
 import {
-  addReimbursement, decideReimbursement, payReimbursements, updateReimbursement, uploadReceipts,
+  addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, payReimbursements, updateReimbursement, uploadReceipts,
   type ReimbursementWithReceipts,
 } from "../api";
 import { today } from "../useFinance";
 import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
-import { ReceiptList, ReceiptPicker, confirmDeleteReceipt } from "./Receipts";
+import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 
 /** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check. */
 export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }: FinanceProps) {
@@ -130,15 +130,21 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
   r: ReimbursementWithReceipts; picked: boolean; toggle: (id: number, on: boolean) => void; where: string;
 }) {
   const [files, setFiles] = useState<File[]>([]);
+  const [ask, confirmDialog] = useConfirm();
   const paid = r.status === "paid";
   const saveField = (fields: Parameters<typeof updateReimbursement>[2]) => void attempt(flash, reload, "", () => updateReimbursement(client, r.id, fields));
   return (
     <tr className={`border-t border-helios-line align-top ${paid ? "opacity-60" : ""}`}>
-      <td className="w-8 p-2 text-center">{!paid && <input type="checkbox" checked={picked} onChange={(e) => toggle(r.id, e.target.checked)} aria-label="Select" />}</td>
+      <td className="w-8 p-2 text-center">{confirmDialog}{!paid && <input type="checkbox" checked={picked} onChange={(e) => toggle(r.id, e.target.checked)} aria-label="Select" />}</td>
       <td className="w-28 p-2">
         {paid ? <span className="tabular-nums">{fmtCents(r.amount_cents)}</span>
           : <input className={`${input} w-24 text-right`} defaultValue={centsToInput(r.amount_cents)} placeholder="amount?"
-              onBlur={(e) => { const c = e.target.value.trim() ? parseCents(e.target.value) : null; if (c !== r.amount_cents) saveField({ amount_cents: c }); }} />}
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                const c = text ? parseCents(text) : null;
+                if (text && c === null) { flash(`"${text}" isn't an amount.`, true); e.target.value = centsToInput(r.amount_cents); return; }
+                if (c !== r.amount_cents) saveField({ amount_cents: c === null ? null : Math.abs(c) });
+              }} />}
       </td>
       <td className="p-2">
         {paid ? r.reason : <input className={`${input} w-full`} defaultValue={r.reason} onBlur={(e) => { if (e.target.value !== r.reason) saveField({ reason: e.target.value }); }} />}
@@ -147,7 +153,7 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
       <td className="p-2">
         <div className="flex flex-wrap items-center gap-2">
           <ReceiptList client={client} receipts={r.reimbursement_receipts}
-            onDelete={paid ? undefined : (x) => void attempt(flash, reload, "Receipt removed.", () => confirmDeleteReceipt(client, x))} />
+            onDelete={paid ? undefined : (x) => void ask(removeReceiptQuestion(x)).then((ok) => ok && attempt(flash, reload, "Receipt removed.", () => deleteReceipt(client, x)))} />
           {!paid && <ReceiptPicker compact files={files} setFiles={setFiles} />}
         </div>
         {files.length > 0 && <div className="mt-1"><Button onClick={() => void attempt(flash, reload, "Receipts added.", async () => { await uploadReceipts(client, r.id, files); setFiles([]); })}>Upload {files.length}</Button></div>}
@@ -168,9 +174,11 @@ function AddForm({ client, reload, flash, done }: Pick<FinanceProps, "client" | 
   const [files, setFiles] = useState<File[]>([]);
   async function add() {
     if (!f.person.trim()) { flash("Who is owed?", true); return; }
+    const cents = f.amount.trim() ? parseCents(f.amount) : null;
+    if (f.amount.trim() && cents === null) { flash(`"${f.amount}" isn't an amount.`, true); return; }
     const ok = await attempt(flash, reload, "Added.", async () => {
-      const id = await addReimbursement(client, { person_name: f.person.trim(), amount_cents: parseCents(f.amount), reason: f.reason, requested_date: f.date || null });
-      if (files.length) await uploadReceipts(client, id, files);
+      const id = await addReimbursement(client, { person_name: f.person.trim(), amount_cents: cents === null ? null : Math.abs(cents), reason: f.reason, requested_date: f.date || null });
+      if (files.length) await attachReceiptsOrUndo(client, id, files, true);
     });
     if (ok) done();
   }

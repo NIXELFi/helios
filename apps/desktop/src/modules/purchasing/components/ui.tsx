@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { STATUS_LABEL, type Priority, type Status, type Subteam } from "../lib/api";
 
 const STATUS_STYLE: Record<Status, string> = {
@@ -113,4 +114,24 @@ export function Flash({ message, error }: { message: string | null; error?: bool
       {message}
     </div>
   );
+}
+
+interface ConfirmOptions { title: string; body: ReactNode; confirmLabel: string; danger?: boolean }
+
+/**
+ * window.confirm does nothing in the Tauri webview, so ask with Helios's own
+ * dialog. Render the returned element; `ask` resolves true on confirm and
+ * false on cancel, Escape or a click outside.
+ */
+export function useConfirm(): [(o: ConfirmOptions) => Promise<boolean>, ReactNode] {
+  const [req, setReq] = useState<(ConfirmOptions & { resolve: (ok: boolean) => void }) | null>(null);
+  const ask = useCallback((o: ConfirmOptions) => new Promise<boolean>((resolve) => setReq({ ...o, resolve })), []);
+  const dialog = req && (
+    <ConfirmDialog
+      title={req.title} body={req.body} confirmLabel={req.confirmLabel} confirmTone={req.danger ? "danger" : "default"}
+      cancelLabel="Cancel"
+      onConfirm={() => req.resolve(true)}
+      onClose={() => { req.resolve(false); setReq(null); }} />
+  );
+  return [ask, dialog];
 }

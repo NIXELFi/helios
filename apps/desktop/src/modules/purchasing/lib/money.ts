@@ -4,11 +4,13 @@
 export function parseCents(input: string | number | null | undefined): number | null {
   if (input === null || input === undefined) return null;
   if (typeof input === "number") return Number.isFinite(input) ? Math.round(input * 100) : null;
-  let s = input.trim();
+  // a typographic minus (U+2212) or dash pasted from a PDF or a web page is a minus
+  let s = input.trim().replace(/[\u2212\u2012\u2013\u2014]/g, "-");
   if (!s) return null;
   let negative = false;
   if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
   if (/CR$/i.test(s)) { negative = true; s = s.slice(0, -2); }
+  if (/\d-$/.test(s)) { negative = !negative; s = s.slice(0, -1); }   // "5.00-"
   s = s.replace(/[^0-9.\-]/g, "");
   if (s.startsWith("-")) { negative = !negative; s = s.slice(1); }
   if (!s || s === "." || !/^\d*\.?\d*$/.test(s)) return null;

@@ -3,11 +3,11 @@ import type { SupabaseClient } from "@helios/auth";
 import { fmtCents, parseCents } from "../../lib/money";
 import { can } from "../../lib/api";
 import type { PurchasingData } from "../../lib/usePurchasing";
-import { Button, Card, Empty } from "../../components/ui";
-import { requestReimbursement, uploadReceipts, withdrawReimbursement, type ReimbursementWithReceipts } from "../api";
+import { Button, Card, Empty, useConfirm } from "../../components/ui";
+import { attachReceiptsOrUndo, deleteReceipt, requestReimbursement, uploadReceipts, withdrawReimbursement, type ReimbursementWithReceipts } from "../api";
 import { today } from "../useFinance";
 import { Badge, attempt, input, shortDate, whereLabel } from "./shared";
-import { ReceiptList, ReceiptPicker, confirmDeleteReceipt } from "./Receipts";
+import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 
 const STATUS: Record<ReimbursementWithReceipts["status"], [string, "warn" | "info" | "good" | "bad"]> = {
   requested: ["Waiting for an exec", "info"], owed: ["Approved, check coming", "warn"], paid: ["Paid", "good"], denied: ["Declined", "bad"],
@@ -26,19 +26,22 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
   const [busy, setBusy] = useState(false);
   const myItems = pur.items.filter((i) => i.requester_id === userId && !["DENIED", "CANCELLED", "HAVE"].includes(i.status));
   const own = mine.filter((r) => r.user_id === userId).sort((a, b) => b.id - a.id);
+  const [ask, confirmDialog] = useConfirm();
 
   async function submit() {
     const cents = parseCents(f.amount);
     if (!cents || cents <= 0) { flash("Enter the amount you paid.", true); return; }
     if (!f.reason.trim()) { flash("Say what it was for.", true); return; }
-    if (!files.length && !confirm("No receipt attached. Execs usually need one before paying you back. Send anyway?")) return;
+    if (!files.length && !(await ask({
+      title: "No receipt attached", body: "Execs usually need one before paying you back. Send anyway?", confirmLabel: "Send anyway",
+    }))) return;
     setBusy(true);
     const ok = await attempt(flash, reload, "Sent. The execs have been told; you'll get a notification when it's decided.", async () => {
       const id = await requestReimbursement(client, {
         amount_cents: Math.abs(cents), reason: f.reason, date: f.date || null,
         project_id: f.project_id || null, subteam_id: f.subteam_id || null, item_id: f.item_id || null,
       });
-      if (files.length) await uploadReceipts(client, id, files);
+      if (files.length) await attachReceiptsOrUndo(client, id, files, false);
     });
     setBusy(false);
     if (ok) { setF({ ...f, amount: "", reason: "", item_id: "" }); setFiles([]); }
@@ -46,6 +49,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      {confirmDialog}
       <Card className="flex flex-col gap-3 self-start">
         <b>Ask to be paid back</b>
         <p className="text-xs text-helios-dim">Bought something for the team with your own money? Tell us what and attach the receipt. An exec checks it and you're paid by check.</p>
@@ -92,7 +96,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
                   {r.status === "denied" && r.denied_reason && <div className="mt-1 text-xs text-helios-danger">{r.denied_reason}</div>}
                   {r.status === "paid" && <div className="mt-1 text-xs text-helios-dim">Paid {shortDate(r.paid_date)}{r.check_number ? `, check #${r.check_number}` : ""}</div>}
                   <div className="mt-2"><ReceiptList client={client} receipts={r.reimbursement_receipts}
-                    onDelete={open ? (x) => void attempt(flash, reload, "Receipt removed.", () => confirmDeleteReceipt(client, x)) : undefined} /></div>
+                    onDelete={open ? (x) => void ask(removeReceiptQuestion(x)).then((ok) => ok && attempt(flash, reload, "Receipt removed.", () => deleteReceipt(client, x))) : undefined} /></div>
                   {open && <AddMore {...{ client, reload, flash }} r={r} />}
                 </Card>
               );
@@ -106,11 +110,14 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
 
 function AddMore({ client, r, reload, flash }: { client: SupabaseClient; r: ReimbursementWithReceipts; reload: () => Promise<void>; flash: (m: string, e?: boolean) => void }) {
   const [files, setFiles] = useState<File[]>([]);
+  const [ask, confirmDialog] = useConfirm();
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
+      {confirmDialog}
       <div className="min-w-[160px] flex-1"><ReceiptPicker compact files={files} setFiles={setFiles} /></div>
       {files.length > 0 && <Button onClick={() => void attempt(flash, reload, "Receipts added.", async () => { await uploadReceipts(client, r.id, files); setFiles([]); })}>Upload</Button>}
-      <Button kind="ghost" onClick={() => { if (confirm("Withdraw this request?")) void attempt(flash, reload, "Withdrawn.", () => withdrawReimbursement(client, r)); }}>Withdraw</Button>
+      <Button kind="ghost" onClick={() => void ask({ title: "Withdraw request", body: "Withdraw this request? Its receipts are removed too.", confirmLabel: "Withdraw", danger: true })
+        .then((ok) => ok && attempt(flash, reload, "Withdrawn.", () => withdrawReimbursement(client, r)))}>Withdraw</Button>
     </div>
   );
 }

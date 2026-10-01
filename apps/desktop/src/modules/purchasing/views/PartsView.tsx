@@ -41,8 +41,12 @@ const FIRST_COL = 2;
 
 /** A typed cell value -> the update_item patch for it. null = not a valid value. */
 function toPatch(key: string, raw: string): Record<string, unknown> | null {
-  if (key === "total") return { total_estimate_cents: parseCents(raw) };
-  if (MONEY.has(key)) return { [key]: parseCents(raw) };
+  if (key === "total" || MONEY.has(key)) {
+    const field = key === "total" ? "total_estimate_cents" : key;
+    if (raw.trim() === "") return { [field]: null };   // a cleared cell clears the price
+    const cents = parseCents(raw);
+    return cents === null ? null : { [field]: cents };   // a typo is refused, never saved as "no price"
+  }
   if (key === "quantity") {
     if (raw.trim() === "") return { quantity: null };
     const q = Number(raw.replace(/,/g, ""));
@@ -109,7 +113,7 @@ export function PartsView({
 
   function save(i: Item, key: string, raw: string) {
     const patch = toPatch(key, raw);
-    if (!patch) { flash("Quantity must be a number", true); return; }
+    if (!patch) { flash(`"${raw.trim()}" isn't a valid ${COLS.find((c) => c.key === key)?.label.toLowerCase() ?? "value"}. Nothing was changed.`, true); return; }
     return run("", () => updateItem(client, i.id, patch));
   }
 

@@ -25,7 +25,7 @@ function ReceiptChip({ client, r, onDelete }: { client: SupabaseClient; r: Recei
   return (
     <span className="group relative inline-flex items-center gap-1 rounded-md border border-helios-line bg-helios-strip text-xs">
       <button onClick={open} title={`Open ${r.file_name}`} className="flex items-center gap-1 px-1.5 py-1 hover:text-asu-gold">
-        {thumb ? <img src={thumb} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden>📄</span>}
+        {thumb ? <img src={thumb} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden className="text-[10px] font-semibold text-helios-muted">{r.content_type === "application/pdf" ? "PDF" : "FILE"}</span>}
         <span className="max-w-[120px] truncate">{r.file_name}</span>
       </button>
       {onDelete && <button className="pr-1.5 text-helios-muted hover:text-helios-danger" onClick={() => onDelete(r)} aria-label={`Remove ${r.file_name}`}>✕</button>}
@@ -67,7 +67,7 @@ export function ReceiptPicker({ files, setFiles, compact }: { files: File[]; set
         <div className="mt-2 flex flex-wrap gap-1.5">
           {files.map((f, i) => (
             <span key={i} className="inline-flex items-center gap-1 rounded-md border border-helios-line bg-helios-strip px-1.5 py-1 text-xs">
-              📎 <span className="max-w-[160px] truncate">{f.name}</span>
+              <span className="max-w-[160px] truncate">{f.name}</span>
               <button className="text-helios-muted hover:text-helios-danger" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`}>✕</button>
             </span>
           ))}
@@ -77,8 +77,6 @@ export function ReceiptPicker({ files, setFiles, compact }: { files: File[]; set
   );
 }
 
-export async function confirmDeleteReceipt(client: SupabaseClient, r: Receipt): Promise<boolean> {
-  if (!confirm(`Remove ${r.file_name}?`)) return false;
-  await deleteReceipt(client, r);
-  return true;
-}
+/** The question to ask (with useConfirm) before removing a receipt. */
+export const removeReceiptQuestion = (r: Receipt) =>
+  ({ title: "Remove receipt", body: `Remove ${r.file_name}?`, confirmLabel: "Remove", danger: true });

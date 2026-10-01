@@ -2,11 +2,11 @@ import type { SupabaseClient } from "@helios/auth";
 import { invoke } from "@tauri-apps/api/core";
 import type { Account, BalanceEntry, Reimbursement, Statement, Txn, TxnAllocation } from "./ledger";
 import type { Evidence } from "./discrepancies";
-import type { Item } from "../lib/api";
+import { allRows, type Item } from "../lib/api";
 import type { NewTxn, Plan, VendorRule } from "./importers";
 
 // Data layer for the finance side (infra/pdm-supabase/supabase/migrations/
-// 20260930000000_finance_schema.sql). RLS returns the ledger only to execs; a
+// 20261001010000_finance_schema.sql). RLS returns the ledger only to execs; a
 // member only ever gets their own reimbursement requests and receipts.
 
 export interface Category { name: string; direction: "in" | "out" | "transfer"; description: string }
@@ -44,15 +44,15 @@ export const fetchCategories = async (c: SupabaseClient): Promise<Category[]> =>
 export const fetchStatements = async (c: SupabaseClient): Promise<Statement[]> =>
   unwrap(await F(c).from("statements").select("*").order("closing_date"));
 export const fetchTransactions = async (c: SupabaseClient): Promise<Txn[]> =>
-  unwrap(await F(c).from("transactions").select("*, txn_allocations(id, project_id, subteam_id, amount_cents)").order("date").order("id"));
+  allRows<Txn>(() => F(c).from("transactions").select("*, txn_allocations(id, project_id, subteam_id, amount_cents)").order("date").order("id"));
 export const fetchBalances = async (c: SupabaseClient): Promise<BalanceEntry[]> =>
-  unwrap(await F(c).from("balance_entries").select("*").order("as_of").order("id"));
+  allRows<BalanceEntry>(() => F(c).from("balance_entries").select("*").order("as_of").order("id"));
 export const fetchEvidence = async (c: SupabaseClient): Promise<EvidenceRow[]> =>
-  unwrap(await F(c).from("evidence").select("*").order("id"));
+  allRows<EvidenceRow>(() => F(c).from("evidence").select("*").order("id"));
 export const fetchResolutions = async (c: SupabaseClient): Promise<Resolution[]> =>
-  unwrap(await F(c).from("discrepancy_resolutions").select("*"));
+  allRows<Resolution>(() => F(c).from("discrepancy_resolutions").select("*").order("key"));
 export const fetchReimbursements = async (c: SupabaseClient): Promise<ReimbursementWithReceipts[]> =>
-  unwrap(await F(c).from("reimbursements").select("*, reimbursement_receipts(*)").order("id"));
+  allRows<ReimbursementWithReceipts>(() => F(c).from("reimbursements").select("*, reimbursement_receipts(*)").order("id"));
 export const fetchEvents = async (c: SupabaseClient, entity: string, entityId: string): Promise<FinanceEvent[]> =>
   unwrap(await F(c).from("events").select("*").eq("entity", entity).eq("entity_id", entityId).order("id", { ascending: false }).limit(100));
 
@@ -143,6 +143,23 @@ export async function uploadReceipts(c: SupabaseClient, reimbursementId: number,
     unwrap(await F(c).from("reimbursement_receipts").insert({
       reimbursement_id: reimbursementId, object_path: path, file_name: f.name, content_type: f.type, size_bytes: f.size,
     }));
+  }
+}
+/**
+ * Upload receipts for a reimbursement that was just created, or undo it. If
+ * an upload fails, the half-made request is removed (its files first, while
+ * the owner may still delete them) so a retry doesn't create a second one.
+ */
+export async function attachReceiptsOrUndo(c: SupabaseClient, reimbursementId: number, files: File[], asExec: boolean): Promise<void> {
+  try {
+    await uploadReceipts(c, reimbursementId, files);
+  } catch (e) {
+    const { data } = await F(c).from("reimbursement_receipts").select("object_path").eq("reimbursement_id", reimbursementId);
+    const paths = ((data ?? []) as { object_path: string }[]).map((r) => r.object_path);
+    if (paths.length) await c.storage.from("receipts").remove(paths);
+    if (asExec) await F(c).from("reimbursements").delete().eq("id", reimbursementId);
+    else await F(c).rpc("withdraw_reimbursement", { p_id: reimbursementId });
+    throw new Error(`${e instanceof Error ? e.message : String(e)}. Nothing was sent; try again.`);
   }
 }
 export async function deleteReceipt(c: SupabaseClient, r: Receipt): Promise<void> {

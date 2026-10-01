@@ -156,7 +156,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
           file: { sha256: file.sha, file_name: file.name, format, account_id: account.id },
           statement: plan.statement, rows: [...adds, ...pairs, ...plan.extra],
           clears: plan.lines.filter((p) => p.action === "clears-check").map((p) => ({ txn_id: p.matchId!, cleared_date: p.line.date })),
-          confirms: plan.lines.filter((p) => p.action === "confirms-autopay").map((p) => ({ transfer_group: p.group!, date: p.line.date })),
+          confirms: plan.lines.filter((p) => p.action === "confirms-autopay").map((p) => ({ transfer_group: p.group!, date: p.line.date, amount_cents: p.amount_cents })),
           balances: plan.balances,
         });
         flash(`Imported: ${r.added} new line${r.added === 1 ? "" : "s"}${r.cleared ? `, ${r.cleared} check${r.cleared > 1 ? "s" : ""} cleared` : ""}`

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
-import { Button, Card, Empty } from "../../components/ui";
+import { Button, Card, Empty, useConfirm } from "../../components/ui";
 import {
   attachDocument, deleteTxn, documentUrl, fetchEvents, insertTxn, linkEvidence, linkItem, openExternal, saveCsv, setAllocations, toCsv, updateTxn,
   RECEIPT_TYPES, type FinanceEvent, type TxnFields,
@@ -134,6 +134,16 @@ export function LedgerView(props: FinanceProps & { selected: number | null; sele
   );
 }
 
+/** A share's amount: free text while typing, read as cents when you leave the box. */
+function ShareAmount({ cents, onChange }: { cents: number; onChange: (cents: number) => void }) {
+  const [text, setText] = useState(() => centsToInput(cents));
+  useEffect(() => { setText(centsToInput(cents)); }, [cents]);
+  return (
+    <input className={`${input} w-20 shrink-0 text-right`} value={text} onChange={(e) => setText(e.target.value)}
+      onBlur={() => { const c = parseCents(text); if (c === null) setText(centsToInput(cents)); else onChange(Math.abs(c)); }} />
+  );
+}
+
 function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: FinanceProps & { t: Txn; evidence: Evidence[]; close: () => void }) {
   const [form, setForm] = useState(() => ({
     date: t.date, amount: centsToInput(Math.abs(t.amount_cents)), kind: t.kind, account_id: t.account_id, description: t.description,
@@ -142,6 +152,7 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
   }));
   const [split, setSplit] = useState<TxnAllocation[]>(() => t.txn_allocations.map((a) => ({ project_id: a.project_id, subteam_id: a.subteam_id, amount_cents: a.amount_cents })));
   const [history, setHistory] = useState<FinanceEvent[] | null>(null);
+  const [ask, confirmDialog] = useConfirm();
   const abs = Math.abs(t.amount_cents);
   const splitSum = split.reduce((s, a) => s + a.amount_cents, 0);
   const linked = evidence.filter((e) => e.txn_id === t.id);
@@ -156,8 +167,13 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
   async function save() {
     const cents = parseCents(form.amount);
     if (cents === null) { flash("Amount not understood.", true); return; }
+    // Keep the line's sign unless its type changed: a fee reversal or a
+    // returned charge is positive and must stay that way on an unrelated edit.
+    const amount = form.kind === t.kind && t.amount_cents !== 0
+      ? Math.sign(t.amount_cents) * Math.abs(cents)
+      : signed(form.kind, form.kind === "transfer" && t.amount_cents < 0 ? -Math.abs(cents) : cents);
     const fields: TxnFields = {
-      date: form.date, amount_cents: signed(form.kind, form.kind === "transfer" && t.amount_cents < 0 ? -Math.abs(cents) : cents),
+      date: form.date, amount_cents: amount,
       kind: form.kind, account_id: Number(form.account_id), description: form.description, vendor: form.vendor || null,
       category: form.category, reference: form.reference || null, cleared_date: form.cleared_date || null, status: form.status,
       notes: form.notes, needs_review: form.needs_review, review_note: form.review_note,
@@ -199,9 +215,10 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
       </div>
       <div className="flex gap-2">
         <Button onClick={() => void save()}>Save</Button>
-        {t.source === "manual" && <Button kind="danger" onClick={() => {
-          if (confirm("Delete this hand-entered transaction? It stays in the history.")) void attempt(flash, reload, "Deleted.", async () => { await deleteTxn(client, t.id); close(); });
-        }}>Delete</Button>}
+        {t.source === "manual" && <Button kind="danger" onClick={() => void ask({
+          title: "Delete transaction", body: "Delete this hand-entered transaction? It stays in the history.", confirmLabel: "Delete", danger: true,
+        }).then((ok) => ok && attempt(flash, reload, "Deleted.", async () => { await deleteTxn(client, t.id); close(); }))}>Delete</Button>}
+        {confirmDialog}
       </div>
 
       {t.kind !== "transfer" && (
@@ -213,8 +230,7 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
             {split.map((a, i) => (
               <div key={i} className="flex items-center gap-1">
                 <WherePicker pur={pur} value={a} onChange={(v) => setSplit((s) => s.map((x, j) => (j === i ? { ...x, ...v } : x)))} />
-                <input className={`${input} w-20 shrink-0 text-right`} value={centsToInput(a.amount_cents)}
-                  onChange={(e) => setSplit((s) => s.map((x, j) => (j === i ? { ...x, amount_cents: parseCents(e.target.value) ?? 0 } : x)))} />
+                <ShareAmount cents={a.amount_cents} onChange={(c) => setSplit((s) => s.map((x, j) => (j === i ? { ...x, amount_cents: c } : x)))} />
                 <button className="px-1 text-helios-muted hover:text-helios-danger" onClick={() => setSplit((s) => s.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
               </div>
             ))}

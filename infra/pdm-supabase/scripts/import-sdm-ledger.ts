@@ -21,7 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 
 config();
 const url = process.env.SUPABASE_URL ?? "";
-if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/.test(url)) throw new Error(`Refusing to import into non-local ${url}`);
+if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) throw new Error(`Refusing to import into non-local ${url}`);
 const file = process.argv[2];
 if (!file) throw new Error("Usage: tsx scripts/import-sdm-ledger.ts <helios-export.json>");
 

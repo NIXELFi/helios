@@ -31,6 +31,9 @@ describe("purchasing paste", () => {
     expect(parseCents("(3.00)")).toBe(-300);
     expect(parseCents("2.57CR")).toBe(-257);
     expect(parseCents("")).toBeNull();
+    expect(parseCents("\u221212.50")).toBe(-1250);   // typographic minus from a PDF
+    expect(parseCents("5.00-")).toBe(-500);
+    expect(parseCents("abc")).toBeNull();
     expect(fmtCents(4497)).toBe("$44.97");
   });
 });

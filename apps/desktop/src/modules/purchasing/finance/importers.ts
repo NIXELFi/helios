@@ -184,6 +184,7 @@ export interface PlannedLine {
   why: string;           // plain-English reason for the action
   matchId?: number;      // the ledger line it duplicates or clears
   group?: string;        // the expected transfer it confirms
+  amount_cents?: number; // what was actually paid, when it differs from the expected transfer
   pair?: NewTxn;         // the other half of a transfer (Square payout on the Square account)
 }
 
@@ -251,6 +252,15 @@ export function classifyCard(l: Line, rules: VendorRule[]): Decision {
 }
 
 /** Decide, line by line, what an uploaded file adds to the ledger. */
+/** Do two bank descriptions name the same merchant? (a shared word of 4+ letters, ignoring bank noise) */
+const NOISE = new Set(["card", "purchase", "debit", "credit", "payment", "online", "transfer", "chase", "recurring", "with", "from"]);
+export function sameMerchant(a: string, b: string): boolean {
+  const words = (x: string) => new Set(x.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !NOISE.has(w) && !/^\d+$/.test(w)));
+  const wa = words(a);
+  for (const w of words(b)) if (wa.has(w)) return true;
+  return false;
+}
+
 export function planImport(format: Format, lines: Line[], account: Account, o: PlanOptions): Plan {
   const used = new Set<number>();
   const mine = o.existing.filter((t) => t.account_id === account.id);
@@ -289,18 +299,32 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     }
     // a card payment the ledger was expecting
     if (dec.transfer === "card") {
-      const expected = mine.find((t) => t.kind === "transfer" && t.status === "expected" && t.transfer_group && !used.has(t.id)
-        && t.amount_cents === l.amount_cents && days(t.date, l.date) <= 45);
+      const waiting = mine.filter((t) => t.kind === "transfer" && t.status === "expected" && t.transfer_group && !used.has(t.id)
+        && Math.sign(t.amount_cents) === Math.sign(l.amount_cents) && days(t.date, l.date) <= 45);
+      // the exact amount first; otherwise the one expected autopay in the window,
+      // taking the amount actually paid (it can differ from the statement by a
+      // late charge or a partial payment). Leaving it "expected" would count
+      // the payment twice once its due date passes.
+      const expected = waiting.find((t) => t.amount_cents === l.amount_cents) ?? (waiting.length === 1 ? waiting[0] : undefined);
       if (expected) {
         used.add(expected.id);
+        const differs = expected.amount_cents !== l.amount_cents;
         plan.lines.push({ line: l, action: "confirms-autopay", txn, group: expected.transfer_group!, matchId: expected.id,
-          why: "Confirms the card autopay the ledger was expecting" });
+          amount_cents: differs ? Math.abs(l.amount_cents) : undefined,
+          why: differs
+            ? `Confirms the card autopay the ledger was expecting (expected ${(Math.abs(expected.amount_cents) / 100).toFixed(2)}, paid ${(Math.abs(l.amount_cents) / 100).toFixed(2)})`
+            : "Confirms the card autopay the ledger was expecting" });
         continue;
       }
     }
-    // already in the ledger (from a statement PDF, or an earlier export)
-    const dup = mine.find((t) => !used.has(t.id) && t.amount_cents === l.amount_cents
-      && [t.date, t.post_date].some((d) => d && [l.date, l.post_date].some((e) => e && days(d, e) <= 3)));
+    // already in the ledger from another source (a statement PDF, or typed in).
+    // The same export format is matched exactly by source_key on the server,
+    // so a near match there is a different purchase that happens to cost the
+    // same (two $25.00 charges on nearby days) and must not be skipped. Across
+    // formats the dates may drift a few days; the descriptions must agree too.
+    const dup = mine.find((t) => !used.has(t.id) && t.source !== format && t.amount_cents === l.amount_cents
+      && [t.date, t.post_date].some((d) => d && [l.date, l.post_date].some((e) => e && days(d, e) <= 3))
+      && (t.date === l.date || sameMerchant(t.description || t.vendor || "", `${l.description} ${dec.vendor ?? ""}`)));
     if (dup) {
       used.add(dup.id);
       plan.lines.push({ line: l, action: "duplicate", txn, matchId: dup.id, why: "Already in the ledger" });

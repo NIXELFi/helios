@@ -311,6 +311,18 @@ create policy transactions_update on finance.transactions for update to authenti
 create policy transactions_delete on finance.transactions for delete to authenticated
   using (finance.can_edit() and source = 'manual');
 
+-- Imported lines stay imported: changing `source` would let them be deleted.
+create or replace function finance.keep_source()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.source is distinct from old.source or new.source_key is distinct from old.source_key then
+    raise exception 'where a statement line came from can''t be changed' using errcode = '42501';
+  end if;
+  return new;
+end; $$;
+create trigger transactions_keep_source before update on finance.transactions
+  for each row execute function finance.keep_source();
+
 -- Balances are append-only.
 create policy balance_entries_insert on finance.balance_entries for insert to authenticated
   with check (finance.can_edit() and entered_by = (select auth.uid()));
@@ -424,6 +436,9 @@ begin
   select * into v from finance.reimbursements where id = p_id for update;
   if not found then raise exception 'no such reimbursement' using errcode = 'P0002'; end if;
   if v.status <> 'requested' then raise exception 'that reimbursement was already decided' using errcode = '22023'; end if;
+  if v.user_id = auth.uid() then
+    raise exception 'another exec has to decide your own reimbursement' using errcode = '42501';
+  end if;
   update finance.reimbursements set
     status = case when p_decision = 'approve' then 'owed' else 'denied' end,
     denied_reason = case when p_decision = 'deny' then coalesce(p_note, '') else '' end,
@@ -448,8 +463,13 @@ declare
 begin
   if not finance.can_edit() then raise exception 'only execs pay reimbursements' using errcode = '42501'; end if;
   if coalesce(array_length(p_ids, 1), 0) = 0 then raise exception 'pick at least one' using errcode = '22023'; end if;
+  -- lock the rows so two execs paying at once can't both write a check
+  perform 1 from finance.reimbursements where id = any (p_ids) for update;
   if exists (select 1 from finance.reimbursements where id = any (p_ids) and status in ('requested', 'denied')) then
     raise exception 'approve the requests before paying them' using errcode = '22023';
+  end if;
+  if exists (select 1 from finance.reimbursements where id = any (p_ids) and status = 'paid') then
+    raise exception 'some of those were already paid' using errcode = '22023';
   end if;
   if p_add_check then
     select count(distinct lower(btrim(person_name))), min(person_name), sum(coalesce(amount_cents, 0)),
@@ -461,6 +481,9 @@ begin
     if v_total <= 0 then raise exception 'the amounts are missing' using errcode = '22023'; end if;
     select id into v_checking from finance.accounts where kind = 'checking' and active order by id limit 1;
     if v_checking is null then raise exception 'no checking account' using errcode = 'P0002'; end if;
+    if exists (select 1 from finance.transactions where account_id = v_checking and kind = 'check' and reference = v_check) then
+      raise exception 'check #% is already in the ledger', v_check using errcode = '23505';
+    end if;
     insert into finance.transactions (account_id, date, amount_cents, description, kind, category, reference, source, notes)
     values (v_checking, v_date, -v_total, 'Reimbursement check to ' || v_person || ': ' || left(v_reasons, 300),
             'check', 'Reimbursement', v_check, 'manual', 'Written for ' || array_length(p_ids, 1) || ' reimbursement(s)')
@@ -707,7 +730,7 @@ create policy "finance docs delete" on storage.objects for delete to authenticat
 --   p_rows:       new transactions (same fields as finance.transactions; lines
 --                 whose source_key already exists are skipped)
 --   p_clears:     [{txn_id, cleared_date}] checks already in the ledger that cleared
---   p_confirms:   [{transfer_group, date}] expected transfers (card autopay) that happened
+--   p_confirms:   [{transfer_group, date, amount_cents?}] expected transfers (card autopay) that happened
 --   p_balances:   [{account_id, as_of, balance_cents, note, source_key}] bank-reported balances
 create or replace function finance.import_transactions(
   p_file jsonb, p_statement jsonb default null, p_rows jsonb default '[]', p_clears jsonb default '[]',
@@ -757,8 +780,12 @@ begin
   end loop;
 
   for r in select * from jsonb_array_elements(coalesce(p_confirms, '[]')) loop
+    -- amount_cents (optional, positive): what was actually paid, when it
+    -- differs from what was expected; each side keeps its sign
     update finance.transactions set status = 'posted', date = (r ->> 'date')::date, post_date = (r ->> 'date')::date,
-      cleared_date = (r ->> 'date')::date, notes = trim(notes || ' Confirmed by ' || (p_file ->> 'file_name') || '.')
+      cleared_date = (r ->> 'date')::date, notes = trim(notes || ' Confirmed by ' || (p_file ->> 'file_name') || '.'),
+      amount_cents = case when nullif(r ->> 'amount_cents', '') is null then amount_cents
+                          else sign(amount_cents) * abs((r ->> 'amount_cents')::bigint) end
     where transfer_group = r ->> 'transfer_group' and status = 'expected';
     get diagnostics v_n = row_count;
     v_confirmed := v_confirmed + v_n;

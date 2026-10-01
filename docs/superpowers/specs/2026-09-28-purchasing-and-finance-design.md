@@ -282,7 +282,7 @@ two-exec rule, order splitting, delivery notifications, budget scope and the
 audit trail. Demo data: `scripts/seed-purchasing-demo.ts` (localhost only).
 
 Phase B result (2026-09-29): finance runs against the same local stack
-(`20260930000000_finance_schema.sql`, `tests/finance.test.ts`). The CFO's
+(`20261001010000_finance_schema.sql`, `tests/finance.test.ts`). The CFO's
 real ledger was imported locally with `scripts/import-sdm-ledger.ts` (reads
 an export made by the prototype's `python -m sdm.export_helios`; localhost
 only). Every dashboard figure matches the prototype to the cent.
@@ -298,8 +298,8 @@ database. Ordering by `(ts, id)` would make it stable.
 
 ### Deploying to a hosted project
 
-- Apply `20260929000000_purchasing_schema.sql` and
-  `20260930000000_finance_schema.sql` (in that order) **before** exposing the
+- Apply `20261001000000_purchasing_schema.sql` and
+  `20261001010000_finance_schema.sql` (in that order) **before** exposing the
   schemas: PostgREST won't start if an exposed schema doesn't exist yet.
 - Add `purchasing` and `finance` to **Exposed schemas** in the dashboard (API settings);
   `config.toml` only covers local stacks. Without it every call returns null.

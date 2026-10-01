@@ -28,13 +28,14 @@ insert into pm.capabilities (key, label, description, scope) values
 on conflict (key) do update
   set label = excluded.label, description = excluded.description, scope = excluded.scope;
 
--- Owner + Executive get everything. Any member (Lead, VP, Engineer) can
--- request in their subteam; Viewer can only look.
+-- Owner, Executive and the exec titles (President, COO, CFO, Chief Engineer;
+-- see 20260617005000_pm_exec_titles.sql) get everything. Any member (Lead,
+-- VP, Engineer) can request in their subteam; Viewer can only look.
 insert into pm.role_capabilities (role_id, capability_key)
 select r.id, c.key
 from pm.roles r
 join pm.capabilities c on (c.key like 'purchasing.%' or c.key like 'finance.%')
-where r.key in ('owner', 'executive')
+where r.key in ('owner', 'executive', 'president', 'coo', 'cfo', 'chief_engineer')
    or (r.key in ('lead', 'vp', 'engineer') and c.key in ('purchasing.view', 'purchasing.request'))
    or (r.key = 'viewer' and c.key = 'purchasing.view')
 on conflict (role_id, capability_key) do nothing;
@@ -385,7 +386,7 @@ end; $$;
 create or replace function purchasing.update_item(p_id uuid, p_patch jsonb)
 returns purchasing.items language plpgsql security definer set search_path = '' as $$
 declare
-  v_item purchasing.items; v_exec boolean := purchasing.is_exec(); k text;
+  v_item purchasing.items; v_old purchasing.items; v_exec boolean := purchasing.is_exec(); k text;
   v_requester_fields text[] := array['title', 'priority', 'justification', 'needed_by', 'vendor',
     'product_url', 'part_number', 'quantity', 'unit_price_cents', 'tax_shipping_cents',
     'total_estimate_cents', 'notes', 'helios_ref'];
@@ -395,6 +396,7 @@ begin
   if auth.uid() is null then raise exception 'authentication required' using errcode = '42501'; end if;
   select * into v_item from purchasing.items where id = p_id for update;
   if not found then raise exception 'no such item' using errcode = 'P0002'; end if;
+  v_old := v_item;
   for k in select jsonb_object_keys(p_patch) loop
     if not (k = any (v_requester_fields) or k = any (v_buyer_fields)) then
       raise exception 'field % cannot be edited', k using errcode = '22023';
@@ -445,11 +447,28 @@ begin
        set total_estimate_cents = round(v_item.quantity * v_item.unit_price_cents)::bigint + coalesce(v_item.tax_shipping_cents, 0)
      where id = p_id returning * into v_item;
   end if;
+
+  -- Approvals are for what was asked. If what is being bought or what it
+  -- costs changes while it waits, earlier approvals no longer count.
+  if v_old.status = 'READY' and (
+       v_item.title is distinct from v_old.title or v_item.vendor is distinct from v_old.vendor
+    or v_item.product_url is distinct from v_old.product_url or v_item.part_number is distinct from v_old.part_number
+    or v_item.quantity is distinct from v_old.quantity or v_item.unit_price_cents is distinct from v_old.unit_price_cents
+    or v_item.tax_shipping_cents is distinct from v_old.tax_shipping_cents
+    or v_item.total_estimate_cents is distinct from v_old.total_estimate_cents) then
+    delete from purchasing.approvals where item_id = p_id;
+    if found then
+      insert into purchasing.events (actor_id, item_id, field, new_value)
+      values (auth.uid(), p_id, 'approval', 'reset: the item changed while waiting for approval');
+    end if;
+  end if;
   return v_item;
 end; $$;
 
 -- Move items through the state machine. Requesters: PLANNED <-> READY,
--- cancel planning items, confirm RECEIVED. Execs may set anything.
+-- cancel planning items, confirm RECEIVED. Execs may set anything except
+-- APPROVED, which only decide() sets (two different execs), and nothing that
+-- hasn't been approved can be moved into the ordered/shipped/received states.
 create or replace function purchasing.set_status(p_ids uuid[], p_status text, p_note text default '')
 returns void language plpgsql security definer set search_path = '' as $$
 declare
@@ -463,6 +482,13 @@ begin
   end if;
   for v_item in select * from purchasing.items where id = any (p_ids) for update loop
     if v_item.status = p_status then continue; end if;
+    if p_status = 'APPROVED' then
+      raise exception '% needs two exec approvals: use Approve, not a status change', v_item.code using errcode = '42501';
+    end if;
+    if p_status in ('ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED')
+       and v_item.status not in ('APPROVED', 'ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED') then
+      raise exception '% hasn''t been approved yet', v_item.code using errcode = '42501';
+    end if;
     if not v_exec then
       if not purchasing.can_request_item(v_item.id) then
         raise exception '% is not in your subteam', v_item.code using errcode = '42501';
@@ -569,6 +595,10 @@ begin
   if not pm.has_capability(v_uid, 'purchasing.order', null) then
     raise exception 'only execs record orders' using errcode = '42501';
   end if;
+  if exists (select 1 from purchasing.items x where x.id = any (p_ids)
+             and x.status not in ('APPROVED', 'ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED')) then
+    raise exception 'only approved items can be ordered' using errcode = '42501';
+  end if;
   select coalesce(sum(greatest(purchasing.item_cost(x), 1)), 0), count(*) into v_sum, n
     from purchasing.items x where x.id = any (p_ids);
   v_left := p_total_cents;
@@ -595,10 +625,14 @@ begin
   if not pm.has_capability(v_uid, 'purchasing.order', null) then
     raise exception 'only execs add tracking' using errcode = '42501';
   end if;
+  if exists (select 1 from purchasing.items x where x.id = any (p_ids)
+             and x.status not in ('APPROVED', 'ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED')) then
+    raise exception 'only approved items can be shipped' using errcode = '42501';
+  end if;
   update purchasing.items set
     tracking_number = upper(regexp_replace(coalesce(p_number, ''), '[\s-]', '', 'g')),
     carrier = coalesce(nullif(p_carrier, ''), carrier), est_delivery = coalesce(p_eta, est_delivery),
-    status = case when status in ('APPROVED', 'ORDERED', 'BACKORDERED', 'READY') then 'SHIPPED' else status end,
+    status = case when status in ('APPROVED', 'ORDERED', 'BACKORDERED') then 'SHIPPED' else status end,
     shipped_at = coalesce(shipped_at, now())
   where id = any (p_ids);
   select string_agg(code || ' ' || title, ', ') into v_names from purchasing.items where id = any (p_ids);

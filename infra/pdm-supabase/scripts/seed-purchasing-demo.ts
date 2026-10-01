@@ -20,7 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 
 config();
 const url = process.env.SUPABASE_URL ?? "";
-if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/.test(url)) {
+if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) {
   throw new Error(`Refusing to seed demo data into non-local ${url}`);
 }
 let password = process.env.DEMO_PASSWORD;

@@ -68,6 +68,26 @@ describe("importers", () => {
     expect(again.lines.map((p) => p.txn.source_key)).toEqual(planImport("chase-checking", lines, CHECKING, opts()).lines.map((p) => p.txn.source_key));
   });
 
+  it("a different charge that costs the same isn't taken for a duplicate", () => {
+    const lines = parseChaseChecking(parseCsv(checkingCsv));
+    // an earlier export of the same format: exact keys catch repeats, so a near match is a new purchase
+    const sameFormat = txn({ account_id: 1, date: "2026-09-20", amount_cents: -2000, kind: "withdrawal", source: "chase-checking", description: "VENMO PAYMENT" });
+    expect(planImport("chase-checking", lines, CHECKING, opts([sameFormat])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("add");
+    // from a PDF, two days apart, but a different merchant
+    const otherMerchant = txn({ account_id: 1, date: "2026-09-19", amount_cents: -2000, kind: "withdrawal", source: "chase-checking-pdf", description: "ZELLE TO SAM" });
+    expect(planImport("chase-checking", lines, CHECKING, opts([otherMerchant])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("add");
+    const pdfVenmo = { ...otherMerchant, id: 9001, description: "Venmo payment 1234" };
+    expect(planImport("chase-checking", lines, CHECKING, opts([pdfVenmo])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("duplicate");
+  });
+
+  it("an autopay that differs from what was expected confirms it with the amount actually paid", () => {
+    const expected = txn({ account_id: 1, date: "2026-10-01", amount_cents: -40000, kind: "transfer", status: "expected", transfer_group: "autopay:0000:2026-08-25" });
+    const plan = planImport("chase-checking", parseChaseChecking(parseCsv(checkingCsv)), CHECKING, opts([expected]));
+    expect(plan.lines.find((p) => p.line.description.includes("AUTOPAY"))).toMatchObject({
+      action: "confirms-autopay", group: "autopay:0000:2026-08-25", amount_cents: 41250,
+    });
+  });
+
   it("card: charges get their vendor and category; a statement closing sets up the expected autopay", () => {
     const csv = `Transaction Date,Post Date,Description,Category,Type,Amount,Memo
 09/20/2026,09/21/2026,MOUSER ELECTRONICS,Shopping,Sale,-21.40,

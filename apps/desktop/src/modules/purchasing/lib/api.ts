@@ -4,7 +4,7 @@ import type { NewRow } from "./paste";
 // Data layer for the Purchasing module. Reads come straight from the
 // `purchasing` schema (RLS returns only what the caller may see); every write
 // goes through a SECURITY DEFINER RPC that checks capabilities server-side
-// (infra/pdm-supabase/supabase/migrations/20260929000000_purchasing_schema.sql).
+// (infra/pdm-supabase/supabase/migrations/20261001000000_purchasing_schema.sql).
 
 export type Status =
   | "PLANNED" | "READY" | "APPROVED" | "ORDERED" | "BACKORDERED" | "SHIPPED"
@@ -90,11 +90,29 @@ function unwrap<T>(res: { data: T | null; error: { message: string } | null }): 
 
 const P = (c: SupabaseClient) => c.schema("purchasing");
 
+/**
+ * Every row of a query, page by page. PostgREST caps a response at max_rows
+ * (1000) and drops the rest without an error, which would silently cut the
+ * newest ledger lines. `query` must build a fresh, deterministically ordered
+ * query each call. Steps by what came back, so a smaller server cap is fine.
+ */
+export async function allRows<T>(
+  query: () => { range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }> },
+  page = 1000,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (;;) {
+    const rows = unwrap(await query().range(out.length, out.length + page - 1)) ?? [];
+    if (rows.length === 0) return out;
+    out.push(...rows);
+  }
+}
+
 export async function fetchItems(c: SupabaseClient): Promise<Item[]> {
-  return unwrap(await P(c).from("items").select("*, item_allocations(project_id, subteam_id, percent)").order("code"));
+  return allRows<Item>(() => P(c).from("items").select("*, item_allocations(project_id, subteam_id, percent)").order("code"));
 }
 export async function fetchApprovals(c: SupabaseClient): Promise<Approval[]> {
-  return unwrap(await P(c).from("approvals").select("*"));
+  return allRows<Approval>(() => P(c).from("approvals").select("*").order("item_id").order("user_id"));
 }
 export async function fetchSubteams(c: SupabaseClient): Promise<Subteam[]> {
   return unwrap(await c.schema("pm").from("subteams").select("id,name,code,color,sort_order").order("sort_order").order("name"));

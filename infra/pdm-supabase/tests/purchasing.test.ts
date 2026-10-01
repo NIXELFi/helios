@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestUser, resetAuthUsers, serviceClient, signInAs, uniqueEmail } from "./setup.js";
 
 /**
- * 20260929000000 purchasing: any member can request parts for their own
+ * 20261001000000 purchasing: any member can request parts for their own
  * subteam; only execs approve (two of them, requester excluded) and record
  * orders; everyone sees the parts list, only their own subteam's budget.
  */
@@ -54,6 +54,15 @@ async function resetPurchasing(): Promise<void> {
   await pur().from("budget_lines").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await pur().from("seasons").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await pur().from("settings").update({ value: "" }).eq("key", "delivery_person_id");
+}
+
+/** Two different execs approve an item that is waiting (READY). */
+async function approveTwice(itemId: string): Promise<void> {
+  for (const who of ["appr1", "appr2"]) {
+    const exec = await member(who, "executive");
+    const { error } = await exec.client.rpc("decide", { p_id: itemId, p_decision: "approve" });
+    if (error) throw error;
+  }
 }
 
 describe("purchasing", () => {
@@ -127,7 +136,7 @@ describe("purchasing", () => {
     const { error: patchErr } = await eng.client.rpc("update_item", { p_id: ids![0], p_patch: { vendor_order_id: "123" } });
     expect(patchErr?.message).toMatch(/only execs/);
     const { error: statusErr } = await eng.client.rpc("set_status", { p_ids: ids, p_status: "APPROVED" });
-    expect(statusErr?.message).toMatch(/can't move/);
+    expect(statusErr?.message).toMatch(/two exec approvals/);
   });
 
   it("two execs approve; a requesting exec's own approval doesn't count; one deny stops it", async () => {
@@ -149,15 +158,15 @@ describe("purchasing", () => {
   });
 
   it("an order total is split across items; tracking and delivery notify the delivery person", async () => {
-    const cfo = await member("cfo", "executive");
+    const cfo = await member("cfo", "cfo");
     const courier = await member("courier", "executive");
     await pur().from("settings").update({ value: courier.user.id }).eq("key", "delivery_person_id");
 
     const { data: ids } = await cfo.client.rpc("add_items", {
-      p_project: ic, p_subteam: daq, p_rows: [
+      p_project: ic, p_subteam: daq, p_ready: true, p_rows: [
         { title: "A", total_estimate_cents: 3000 }, { title: "B", total_estimate_cents: 1000 }],
     });
-    await cfo.client.rpc("set_status", { p_ids: ids, p_status: "APPROVED" });
+    for (const id of ids!) await approveTwice(id);
     const { error: orderErr } = await cfo.client.rpc("record_order", {
       p_ids: ids, p_order_id: "50112233", p_payment: "Team card 0000", p_total_cents: 5639,
     });
@@ -172,6 +181,35 @@ describe("purchasing", () => {
       .from("notifications").select("kind,message").order("id");
     expect(notes!.map((n) => n.kind)).toEqual(expect.arrayContaining(["shipped", "delivered"]));
     expect(notes!.find((n) => n.kind === "delivered")!.message).toMatch(/Delivered to your place/);
+  });
+
+  it("one exec can't approve, order or ship an unapproved item on their own", async () => {
+    const cfo = await member("cfo", "cfo");
+    const { data: ids } = await cfo.client.rpc("add_items", {
+      p_project: ic, p_subteam: daq, p_ready: true, p_rows: [{ title: "Scope", total_estimate_cents: 50000 }],
+    });
+    expect((await cfo.client.rpc("set_status", { p_ids: ids, p_status: "APPROVED" })).error?.message).toMatch(/two exec approvals/);
+    expect((await cfo.client.rpc("set_status", { p_ids: ids, p_status: "ORDERED" })).error?.message).toMatch(/hasn't been approved/);
+    expect((await cfo.client.rpc("record_order", { p_ids: ids, p_order_id: "1", p_payment: "card" })).error?.message)
+      .toMatch(/only approved items/);
+    expect((await cfo.client.rpc("add_tracking", { p_ids: ids, p_number: "1Z" })).error?.message).toMatch(/only approved items/);
+    const { data: still } = await pur().from("items").select("status").eq("id", ids![0]).single();
+    expect(still!.status).toBe("READY");
+  });
+
+  it("changing a waiting request's cost throws away the approvals it already had", async () => {
+    const eng = await member("eng", "engineer", daq);
+    const pres = await member("pres", "president");
+    const chief = await member("chief", "chief_engineer");
+    const { data: ids } = await eng.client.rpc("add_items", {
+      p_project: ic, p_subteam: daq, p_ready: true, p_rows: [{ title: "Sensor", quantity: 1, unit_price_cents: 1000 }],
+    });
+    expect((await pres.client.rpc("decide", { p_id: ids![0], p_decision: "approve" })).data).toBe("READY");
+    expect((await eng.client.rpc("update_item", { p_id: ids![0], p_patch: { quantity: 100 } })).error).toBeNull();
+    expect((await chief.client.rpc("decide", { p_id: ids![0], p_decision: "approve" })).data).toBe("READY");
+    // a note doesn't change what is being bought, so it keeps the approval
+    expect((await eng.client.rpc("update_item", { p_id: ids![0], p_patch: { notes: "for the dash" } })).error).toBeNull();
+    expect((await pres.client.rpc("decide", { p_id: ids![0], p_decision: "approve" })).data).toBe("APPROVED");
   });
 
   it("budget lines cover several subteams and are only shown in scope", async () => {
