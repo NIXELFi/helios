@@ -35,9 +35,11 @@ const svc = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { 
 const pm = svc.schema("pm");
 const pur = svc.schema("purchasing");
 
-function must<T>(r: { data: T; error: unknown }): T {
+// Generic over the whole response so supabase-js's success/error unions
+// (UserResponse, AuthTokenResponsePassword) infer, not just PostgREST's shape.
+function must<R extends { data: unknown; error: unknown }>(r: R): NonNullable<R["data"]> {
   if (r.error) throw r.error;
-  return r.data;
+  return r.data as NonNullable<R["data"]>;
 }
 
 // The subteams in the Airtable cost tracker and Budget.xlsx (the source of
