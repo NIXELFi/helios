@@ -259,3 +259,27 @@ About 0.5 % of each candidate's gain is throat area: the candidates assume a 20.
 - No physical test (flow bench, pressure tap) is planned for now.
 
 **Bore finish on the as-built wall (Fluent A_CAD_KS20 / A_CAD_SMOOTH).** The effect on the real part matches the stand-in. Engine torque vs today's part as-printed is in `charts/fluent/fluent_engine.csv` (rows A_CAD_KS20, A_CAD_SMOOTH); all three finishes stay attached in the operating range.
+
+## Addendum (2026-10-01): the quasi-steady restrictor boundary, and an opt-in inertance
+
+Fluent ran the as-built restrictor with a pulsating outlet (300 Hz, +-5 kPa around 0.92 p0). The real throat flow swings +-4.7 g/s and lags by more than a quarter cycle, and the cycle-mean flow is only 0.64 % below the steady flow at the mean pressure. A quasi-steady element on the same waveform loses 5 %.
+
+The 1D model's venturi was exactly that quasi-steady element. `diag/plenumwave.py` samples the plenum cell at the restrictor exit: it pulses at firing frequency by +-2.7 to 6 kPa, and the boundary delivers 0.8-6.9 % less than the steady flow at the mean pressure (worst at 6-10.5k).
+
+**Fix (engine commit 9ce7a4ba):** `physics.restrictor_inertance` (integral dx/A, 1/m) lags the venturi flow: I dmdot/dt = p_sustain(mdot) - p_plenum.
+- The default 0 keeps the old path bit-identical.
+- The geometric value needs no tuning: about 270 for the as-built diffuser and 400 for the whole venturi give a time constant of about 1.2 ms, against 1.25 ms implied by Fluent's amplitude ratio.
+
+**Effect** (`diag/inertance_check.py`, 1.44 L box, VRLI 198-298 mm at its ECU table, I = 400):
+- As-built torque moves -0.6..+1.1 % by rpm (+0.3 % on 6-12k).
+- The VRLI gain is slightly larger with the inertia on:
+
+| band | quasi-steady | inertial |
+|---|---|---|
+| 6-12k | +5.0 % | +5.3 % |
+| 7-10.5k | +3.6 % | +3.9 % |
+| 10.5-12.5k | +8.5 % | +9.2 % |
+
+So every VRLI result in this finding stands and is slightly conservative.
+
+This error lowers the model's plenum pressure at a given flow, so it cannot explain the car-fitted recovery being below CFD's; the old calibration absorbed it elsewhere. A recalibration of 0036 with the inertance on is the proper follow-up.
