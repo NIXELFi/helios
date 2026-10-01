@@ -605,16 +605,29 @@
  ],
  "restrictor": [
   {
+   "V": 1.44,
+   "ext": 0,
+   "dout": 30,
+   "ang": 3.2,
+   "diffuser_mm": 89,
+   "recovery": 0.507,
+   "auc_p1": 0.39,
+   "auc_top": 0.56,
+   "peak_bt_ratio": 1.004
+  },
+  {
+   "V": 1.44,
    "ext": 0,
    "dout": 34,
    "ang": 3.2,
    "diffuser_mm": 125,
    "recovery": 0.55,
-   "auc_p1": -0.35,
-   "auc_top": 0.21,
-   "peak_bt_ratio": 1.0024
+   "auc_p1": 0.15,
+   "auc_top": 0.22,
+   "peak_bt_ratio": 1.0015
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 38,
    "ang": 3.2,
@@ -625,91 +638,209 @@
    "peak_bt_ratio": 1.0
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 44,
    "ang": 3.2,
    "diffuser_mm": 215,
    "recovery": 0.588,
-   "auc_p1": -0.63,
-   "auc_top": -0.2,
-   "peak_bt_ratio": 0.9996
+   "auc_p1": -0.13,
+   "auc_top": -0.19,
+   "peak_bt_ratio": 0.9986
   },
   {
+   "V": 1.44,
+   "ext": 0,
+   "dout": 50,
+   "ang": 3.2,
+   "diffuser_mm": 268,
+   "recovery": 0.594,
+   "auc_p1": -0.21,
+   "auc_top": -0.29,
+   "peak_bt_ratio": 0.9979
+  },
+  {
+   "V": 1.44,
    "ext": 0,
    "dout": 30,
    "ang": 6.0,
    "diffuser_mm": 48,
    "recovery": 0.5,
-   "auc_p1": -0.22,
-   "auc_top": 0.39,
-   "peak_bt_ratio": 1.0037
+   "auc_p1": 0.28,
+   "auc_top": 0.4,
+   "peak_bt_ratio": 1.0028
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 34,
    "ang": 6.0,
    "diffuser_mm": 67,
    "recovery": 0.541,
-   "auc_p1": -0.5,
-   "auc_top": -0.02,
-   "peak_bt_ratio": 1.0009
+   "auc_p1": 0.0,
+   "auc_top": -0.01,
+   "peak_bt_ratio": 1.0
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 38,
    "ang": 6.0,
    "diffuser_mm": 86,
    "recovery": 0.561,
-   "auc_p1": -0.68,
+   "auc_p1": -0.18,
    "auc_top": -0.28,
-   "peak_bt_ratio": 0.9989
+   "peak_bt_ratio": 0.998
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 44,
    "ang": 6.0,
    "diffuser_mm": 114,
    "recovery": 0.574,
-   "auc_p1": -0.85,
+   "auc_p1": -0.35,
    "auc_top": -0.52,
-   "peak_bt_ratio": 0.9972
+   "peak_bt_ratio": 0.9962
   },
   {
+   "V": 1.44,
    "ext": 0,
    "dout": 50,
    "ang": 6.0,
    "diffuser_mm": 143,
    "recovery": 0.578,
-   "auc_p1": -0.95,
+   "auc_p1": -0.45,
    "auc_top": -0.66,
-   "peak_bt_ratio": 0.9962
+   "peak_bt_ratio": 0.9953
   },
   {
+   "V": 1.44,
+   "ext": 0,
+   "dout": 30,
+   "ang": 8.0,
+   "diffuser_mm": 36,
+   "recovery": 0.486,
+   "auc_p1": 0.07,
+   "auc_top": 0.08,
+   "peak_bt_ratio": 1.0005
+  },
+  {
+   "V": 1.44,
    "ext": 0,
    "dout": 34,
    "ang": 8.0,
    "diffuser_mm": 50,
    "recovery": 0.522,
-   "auc_p1": -0.79,
+   "auc_p1": -0.3,
    "auc_top": -0.46,
-   "peak_bt_ratio": 0.9975
+   "peak_bt_ratio": 0.9966
   },
   {
+   "V": 1.44,
+   "ext": 0,
+   "dout": 38,
+   "ang": 8.0,
+   "diffuser_mm": 64,
+   "recovery": 0.537,
+   "auc_p1": -0.55,
+   "auc_top": -0.82,
+   "peak_bt_ratio": 0.994
+  },
+  {
+   "V": 1.44,
    "ext": 0,
    "dout": 44,
    "ang": 8.0,
    "diffuser_mm": 85,
    "recovery": 0.546,
-   "auc_p1": -1.28,
+   "auc_p1": -0.79,
    "auc_top": -1.17,
+   "peak_bt_ratio": 0.9915
+  },
+  {
+   "V": 1.44,
+   "ext": 0,
+   "dout": 50,
+   "ang": 8.0,
+   "diffuser_mm": 107,
+   "recovery": 0.547,
+   "auc_p1": -0.94,
+   "auc_top": -1.38,
+   "peak_bt_ratio": 0.9899
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 30,
+   "ang": 3.2,
+   "diffuser_mm": 89,
+   "recovery": 0.507,
+   "auc_p1": 0.31,
+   "auc_top": 0.45,
+   "peak_bt_ratio": 1.0021
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 38,
+   "ang": 3.2,
+   "diffuser_mm": 161,
+   "recovery": 0.572,
+   "auc_p1": 0.0,
+   "auc_top": 0.0,
+   "peak_bt_ratio": 1.0
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 50,
+   "ang": 3.2,
+   "diffuser_mm": 268,
+   "recovery": 0.594,
+   "auc_p1": -0.15,
+   "auc_top": -0.2,
+   "peak_bt_ratio": 0.9991
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 30,
+   "ang": 8.0,
+   "diffuser_mm": 36,
+   "recovery": 0.486,
+   "auc_p1": -0.04,
+   "auc_top": -0.08,
+   "peak_bt_ratio": 0.9991
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 38,
+   "ang": 8.0,
+   "diffuser_mm": 64,
+   "recovery": 0.537,
+   "auc_p1": -0.58,
+   "auc_top": -0.86,
+   "peak_bt_ratio": 0.9949
+  },
+  {
+   "V": 2.75,
+   "ext": 0,
+   "dout": 50,
+   "ang": 8.0,
+   "diffuser_mm": 107,
+   "recovery": 0.547,
+   "auc_p1": -0.92,
+   "auc_top": -1.34,
    "peak_bt_ratio": 0.9924
   }
  ],
  "cd": [
   [
    0.93,
-   -0.9066169381057421,
-   -0.6252655588847578
+   -0.4107901500780664,
+   -0.6196197317683727
   ],
   [
    0.95,
@@ -718,8 +849,8 @@
   ],
   [
    0.97,
-   -0.1206740311794019,
-   0.5702563338369826
+   0.37968068387650433,
+   0.5754936887056861
   ]
  ],
  "vrli": [
@@ -2993,118 +3124,52 @@
  },
  "options": [
   {
-   "runner_cap": "short \u2264135 mm",
-   "plenum_cap": "small box \u22641.0 L",
+   "runner_cap": "runner \u2264248 mm (no longer)",
+   "plenum_cap": "plenum \u22641.44 L (today)",
    "static": {
-    "auc": -2.1878885994725095,
-    "V": 1.0,
-    "outside": 133.10000000000002
-   },
-   "static_protruding": {
-    "auc": 0.019231849119250022,
-    "V_box": 1.0,
-    "outside": 133.10000000000002,
-    "protrusion": 75,
-    "total_runner": 208.10000000000002
-   },
-   "vrli": {
-    "auc": 0.792766951779722,
-    "V_box": 1.0,
-    "outside": 108.10000000000002,
-    "stroke": 75.0
-   }
-  },
-  {
-   "runner_cap": "short \u2264135 mm",
-   "plenum_cap": "medium \u22642.0 L",
-   "static": {
-    "auc": -1.951057625506314,
-    "V": 2.0,
-    "outside": 133.10000000000002
-   },
-   "static_protruding": {
-    "auc": 0.6103034579357347,
-    "V_box": 2.0,
-    "outside": 133.10000000000002,
-    "protrusion": 75,
-    "total_runner": 208.10000000000002
-   },
-   "vrli": {
-    "auc": 3.3860625519164467,
-    "V_box": 2.0,
-    "outside": 108.10000000000002,
-    "stroke": 150.0
-   }
-  },
-  {
-   "runner_cap": "short \u2264135 mm",
-   "plenum_cap": "large \u22643.5 L",
-   "static": {
-    "auc": -1.950482514590779,
-    "V": 3.5,
-    "outside": 133.10000000000002
-   },
-   "static_protruding": {
-    "auc": 1.1576199233101159,
-    "V_box": 3.5,
-    "outside": 133.10000000000002,
-    "protrusion": 75,
-    "total_runner": 208.10000000000002
-   },
-   "vrli": {
-    "auc": 4.3646515639618855,
-    "V_box": 3.5,
-    "outside": 108.10000000000002,
-    "stroke": 150.0
-   }
-  },
-  {
-   "runner_cap": "as-built \u2264250 mm",
-   "plenum_cap": "small box \u22641.0 L",
-   "static": {
-    "auc": 0.19380895760308103,
-    "V": 1.0,
+    "auc": 0.48390820543631197,
+    "V": 1.44,
     "outside": 208.10000000000002
    },
    "static_protruding": {
-    "auc": 0.2408172932875985,
-    "V_box": 1.0,
-    "outside": 248.10000000000002,
-    "protrusion": 50,
-    "total_runner": 298.1
-   },
-   "vrli": {
-    "auc": 3.116309369365533,
-    "V_box": 1.0,
-    "outside": 208.10000000000002,
-    "stroke": 75.0
-   }
-  },
-  {
-   "runner_cap": "as-built \u2264250 mm",
-   "plenum_cap": "medium \u22642.0 L",
-   "static": {
-    "auc": 0.8309645743261651,
-    "V": 2.0,
-    "outside": 208.10000000000002
-   },
-   "static_protruding": {
-    "auc": 0.9329948790398834,
-    "V_box": 2.0,
+    "auc": 0.6634380219105784,
+    "V_box": 1.44,
     "outside": 248.10000000000002,
     "protrusion": 75,
     "total_runner": 323.1
    },
    "vrli": {
-    "auc": 5.4325040746829645,
-    "V_box": 2.0,
+    "auc": 5.1192515108629655,
+    "V_box": 1.44,
     "outside": 208.10000000000002,
     "stroke": 150.0
    }
   },
   {
-   "runner_cap": "as-built \u2264250 mm",
-   "plenum_cap": "large \u22643.5 L",
+   "runner_cap": "runner \u2264248 mm (no longer)",
+   "plenum_cap": "\u22642.75 L",
+   "static": {
+    "auc": 1.0905835318369528,
+    "V": 2.75,
+    "outside": 208.10000000000002
+   },
+   "static_protruding": {
+    "auc": 1.1806005726410884,
+    "V_box": 2.75,
+    "outside": 233.10000000000002,
+    "protrusion": 100,
+    "total_runner": 333.1
+   },
+   "vrli": {
+    "auc": 6.178917081187119,
+    "V_box": 2.75,
+    "outside": 208.10000000000002,
+    "stroke": 150.0
+   }
+  },
+  {
+   "runner_cap": "runner \u2264248 mm (no longer)",
+   "plenum_cap": "\u22643.5 L",
    "static": {
     "auc": 1.2176836977976002,
     "V": 3.5,
@@ -3125,62 +3190,62 @@
    }
   },
   {
-   "runner_cap": "long \u2264410 mm",
-   "plenum_cap": "small box \u22641.0 L",
+   "runner_cap": "runner \u2264283 mm (+35)",
+   "plenum_cap": "plenum \u22641.44 L (today)",
    "static": {
-    "auc": 0.6329376839248946,
-    "V": 1.0,
-    "outside": 333.1
+    "auc": 0.5280211125940459,
+    "V": 1.44,
+    "outside": 283.1
    },
    "static_protruding": {
-    "auc": 0.6329376839248946,
-    "V_box": 1.0,
-    "outside": 333.1,
-    "protrusion": 0,
-    "total_runner": 333.1
+    "auc": 0.7982064866534744,
+    "V_box": 1.44,
+    "outside": 283.1,
+    "protrusion": 25,
+    "total_runner": 308.1
    },
    "vrli": {
-    "auc": 4.26342965854567,
-    "V_box": 1.0,
-    "outside": 308.1,
-    "stroke": 75.0
-   }
-  },
-  {
-   "runner_cap": "long \u2264410 mm",
-   "plenum_cap": "medium \u22642.0 L",
-   "static": {
-    "auc": 1.1188768445275166,
-    "V": 2.0,
-    "outside": 333.1
-   },
-   "static_protruding": {
-    "auc": 1.1188768445275166,
-    "V_box": 2.0,
-    "outside": 333.1,
-    "protrusion": 0,
-    "total_runner": 333.1
-   },
-   "vrli": {
-    "auc": 5.636222472295915,
-    "V_box": 2.0,
+    "auc": 5.306465599972876,
+    "V_box": 1.44,
     "outside": 258.1,
     "stroke": 150.0
    }
   },
   {
-   "runner_cap": "long \u2264410 mm",
-   "plenum_cap": "large \u22643.5 L",
+   "runner_cap": "runner \u2264283 mm (+35)",
+   "plenum_cap": "\u22642.75 L",
    "static": {
-    "auc": 1.439714213666865,
-    "V": 3.5,
-    "outside": 333.1
+    "auc": 1.0905835318369528,
+    "V": 2.75,
+    "outside": 208.10000000000002
    },
    "static_protruding": {
-    "auc": 1.439714213666865,
+    "auc": 1.236717198194115,
+    "V_box": 2.75,
+    "outside": 283.1,
+    "protrusion": 50,
+    "total_runner": 333.1
+   },
+   "vrli": {
+    "auc": 6.242494330396986,
+    "V_box": 2.75,
+    "outside": 258.1,
+    "stroke": 150.0
+   }
+  },
+  {
+   "runner_cap": "runner \u2264283 mm (+35)",
+   "plenum_cap": "\u22643.5 L",
+   "static": {
+    "auc": 1.2176836977976002,
+    "V": 3.5,
+    "outside": 208.10000000000002
+   },
+   "static_protruding": {
+    "auc": 1.3926665065163268,
     "V_box": 3.5,
-    "outside": 333.1,
-    "protrusion": 0,
+    "outside": 283.1,
+    "protrusion": 50,
     "total_runner": 333.1
    },
    "vrli": {
@@ -3951,19 +4016,19 @@
    0.23867427721628864
   ],
   [
-   "Diffuser outlet 30-50 mm (3.2\u00b0)",
-   -0.63,
+   "Restrictor length 40-228 mm (best diffuser, \u2264 8\u00b0)",
+   -5.331,
    0.0
   ],
   [
    "Diffuser half-angle 3.2-8\u00b0 (38 mm)",
-   -0.68,
+   -0.55,
    0.0
   ],
   [
    "Throat Cd 0.93-0.97",
-   -0.9066169381057421,
-   0.0
+   -0.4107901500780664,
+   0.37968068387650433
   ],
   [
    "VRLI stroke 0-150 mm (1.44 L box, 208 mm retracted)",
@@ -3978,63 +4043,71 @@
  ],
  "picks": [
   {
-   "name": "Static-S: 1 L, 133 mm",
-   "auc": -2.1878885994725095,
-   "drv": -5.646996016890881,
-   "top": 8.211865923698337,
-   "peak_hp": 65.67768532866005,
-   "avg_hp": 51.86567785974445
+   "name": "Static-A: 1.44 L, 208 mm",
+   "auc": 0.48390820543631197,
+   "drv": -1.2394102907311466,
+   "top": 4.213715689181341,
+   "peak_hp": 62.107733299898555,
+   "avg_hp": 53.15709682923954
   },
   {
-   "name": "Static-S+: 1 L box, 133 + 75 mm in",
-   "auc": 0.019231849119250022,
-   "drv": -1.4824932831122961,
-   "top": 2.9472212173399015,
-   "peak_hp": 61.617275787707065,
-   "avg_hp": 52.88479168504514
+   "name": "Static-A+: 1.44 L box, 248 + 75 mm in",
+   "auc": 0.6634380219105784,
+   "drv": -1.0221509982811239,
+   "top": 2.871736788628021,
+   "peak_hp": 61.336458769753385,
+   "avg_hp": 52.960399675814394
   },
   {
-   "name": "Static-M: 2 L, 208 mm",
-   "auc": 0.8309645743261651,
-   "drv": -0.9729003703358718,
-   "top": 4.9404219850329945,
-   "peak_hp": 63.10484984736084,
-   "avg_hp": 53.36796016719685
+   "name": "Static-B: 3.5 L, 208 mm",
+   "auc": 1.2176836977976002,
+   "drv": -0.500356473204111,
+   "top": 5.283044576025886,
+   "peak_hp": 63.80527007062011,
+   "avg_hp": 53.58330482650407
   },
   {
-   "name": "Static-M+: 2 L box, 248 + 75 mm in",
-   "auc": 0.9329948790398834,
-   "drv": -0.5460359404019455,
-   "top": 2.725064157296986,
-   "peak_hp": 61.28143753122211,
-   "avg_hp": 53.0879147715001
+   "name": "Static-B+: 3.5 L box, 233 + 100 mm in",
+   "auc": 1.3418286459099926,
+   "drv": 0.01044966061831687,
+   "top": 1.160252301296083,
+   "peak_hp": 60.75940448904899,
+   "avg_hp": 53.215184316814344
   },
   {
-   "name": "Static-L: 3.5 L, 333 mm",
-   "auc": 1.439714213666865,
-   "drv": 0.10037623134588891,
-   "top": 1.0377580545692489,
-   "peak_hp": 60.66050119858939,
-   "avg_hp": 53.24460985176787
+   "name": "Static-C: 3.5 L, 208 mm",
+   "auc": 1.2176836977976002,
+   "drv": -0.500356473204111,
+   "top": 5.283044576025886,
+   "peak_hp": 63.80527007062011,
+   "avg_hp": 53.58330482650407
   },
   {
-   "name": "VRLI-S: 1 L box, 108 mm + 75 stroke",
-   "auc": 0.792766951779722,
-   "drv": -2.412751346576114,
-   "top": 10.1416027281809,
-   "peak_hp": 65.74120858741662,
-   "avg_hp": 53.40670911851571
+   "name": "Static-C+: 3.5 L box, 283 + 50 mm in",
+   "auc": 1.3926665065163268,
+   "drv": 0.05715393554071024,
+   "top": 1.0966336741288663,
+   "peak_hp": 60.70803806385361,
+   "avg_hp": 53.23046676629607
   },
   {
-   "name": "VRLI-M: 2 L box, 208 mm + 150 stroke",
-   "auc": 5.4325040746829645,
-   "drv": 5.017652593436783,
-   "top": 6.829312801020904,
-   "peak_hp": 63.285909874009576,
-   "avg_hp": 55.54016523473832
+   "name": "VRLI-A: 1.44 L box, 208 mm + 150 stroke",
+   "auc": 5.1192515108629655,
+   "drv": 4.942259424509832,
+   "top": 5.9556391365235495,
+   "peak_hp": 63.313745011786764,
+   "avg_hp": 55.341888188941404
   },
   {
-   "name": "VRLI-L: 3.5 L box, 208 mm + 150 stroke",
+   "name": "VRLI-B: 3.5 L box, 208 mm + 150 stroke",
+   "auc": 6.712287693345154,
+   "drv": 6.722160032986668,
+   "top": 6.990375727249587,
+   "peak_hp": 63.80527007062011,
+   "avg_hp": 56.19399032709481
+  },
+  {
+   "name": "VRLI-C: 3.5 L box, 208 mm + 150 stroke",
    "auc": 6.712287693345154,
    "drv": 6.722160032986668,
    "top": 6.990375727249587,

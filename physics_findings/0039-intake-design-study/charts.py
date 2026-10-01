@@ -92,8 +92,8 @@ title(fig, "Where each knob acts in the rpm range", "Blue = more torque than as-
 fig.tight_layout(rect=(0, 0.02, 1, TOP(fig))); save(fig, "03_where_it_acts.png")
 
 # ---------- coarse-grid helpers (G2 / G3 run at 500 rpm steps) ----------
-def coarse(grid, **kw):
-    x = d[d.grid == grid]
+def coarse(grid, V=1.44, **kw):
+    x = d[(d.grid == grid) & np.isclose(d.V, V)]
     for k, v in kw.items(): x = x[np.isclose(x[k], v)]
     return x
 RC = np.arange(4000, 12501, 500.0)
@@ -124,16 +124,18 @@ fig.tight_layout(rect=(0, 0.02, 1, TOP(fig))); save(fig, "04_plenum_shape.png");
 # ---------- 5. restrictor ----------
 import study
 fig, axs = plt.subplots(1, 3, figsize=(18, 5.6), gridspec_kw=dict(width_ratios=[1, 1, 0.8])); rrows = []
-for ax, e in zip(axs[:2], [0, 100]):
-    ref = coarse("G3", dout=38, ang=3.2, ext=e, cd=0.95).sort_values("rpm").bt.values
+e = 0
+for ax, VV in zip(axs[:2], [1.44, 2.75]):
+    ref = g1c(VV, 0)
     douts = [30, 34, 38, 44, 50]; angs = [3.2, 6.0, 8.0]; M = np.full((len(angs), len(douts)), np.nan)
     for i, a in enumerate(angs):
         for j, D in enumerate(douts):
-            x = coarse("G3", dout=D, ang=a, ext=e, cd=0.95).sort_values("rpm")
+            x = coarse("G3", V=VV, dout=D, ang=a, ext=e, cd=0.95).sort_values("rpm")
+            if D == 38 and a == 3.2: x = pd.DataFrame(dict(rpm=RC, bt=ref))
             if len(x) == len(RC) and len(ref) == len(RC):
                 M[i, j] = auc_rel(x.bt.values, ref); top = auc_rel(x.bt.values, ref, "top 10.5-12.5k")
                 L = (D - 20) / 2 / math.tan(math.radians(a)); rec = study.ETA_REL * study.R_idel(D / 1000, a)
-                rrows.append(dict(ext=e, dout=D, ang=a, diffuser_mm=round(L), recovery=round(rec, 3), auc_p1=round(M[i, j], 2), auc_top=round(top, 2),
+                rrows.append(dict(V=VV, ext=e, dout=D, ang=a, diffuser_mm=round(L), recovery=round(rec, 3), auc_p1=round(M[i, j], 2), auc_top=round(top, 2),
                                   peak_bt_ratio=round(float(x.bt.max() / ref.max()), 4)))
     lim = max(2, np.nanmax(np.abs(M)) if np.isfinite(M).any() else 2)
     ax.pcolormesh(np.arange(len(douts)), np.arange(len(angs)), M, cmap=DIV, norm=TwoSlopeNorm(0, -lim, lim), shading="nearest")
@@ -143,10 +145,10 @@ for ax, e in zip(axs[:2], [0, 100]):
             ax.text(j, i, f"{M[i,j]:+.1f}%\n{L:.0f} mm", ha="center", va="center", fontsize=9, color=INK)
     ax.set_xticks(range(len(douts))); ax.set_xticklabels([f"{D}" for D in douts]); ax.set_yticks(range(len(angs))); ax.set_yticklabels([f"{a:g}°" for a in angs])
     ax.set_xlabel("diffuser outlet diameter (mm)"); ax.set_ylabel("diffuser half-angle"); ax.grid(False)
-    ax.set_title(f"runner {outside(e):.0f} mm: P1 avg torque vs as-built venturi", loc="left", fontsize=11.5, fontweight="semibold", color=INK)
-ax = axs[2]; ref = coarse("G3", dout=38, ang=3.2, ext=0, cd=0.95).sort_values("rpm").bt.values; cds = []
+    ax.set_title(f"{VV:g} L plenum: P1 avg torque vs as-built venturi", loc="left", fontsize=11.5, fontweight="semibold", color=INK)
+ax = axs[2]; ref = g1c(1.44, 0); cds = []
 for cd in [0.93, 0.95, 0.97]:
-    x = coarse("G3", dout=38, ang=3.2, ext=0, cd=cd).sort_values("rpm").bt.values
+    x = ref if cd == 0.95 else coarse("G3", dout=38, ang=3.2, ext=0, cd=cd).sort_values("rpm").bt.values
     ok = len(x) == len(RC) and len(ref) == len(RC)
     cds.append((cd, auc_rel(x, ref) if ok else np.nan, auc_rel(x, ref, "top 10.5-12.5k") if ok else np.nan))
 ax.bar([f"Cd {c:.2f}" for c, _, _ in cds], [t for _, _, t in cds], color=[CAT[1], MUTED, CAT[0]], width=0.55)
@@ -156,7 +158,8 @@ ax.axhline(0, color=INK2, lw=1); ax.set_ylabel("10.5-12.5k avg torque vs Cd 0.95
 m_ = max(1.0, np.nanmax(np.abs([t for _, _, t in cds])) if np.isfinite([t for _, _, t in cds]).any() else 1.0); ax.set_ylim(-1.6 * m_, 1.6 * m_)
 ax.set_title("Throat discharge coefficient", loc="left", fontsize=11.5, fontweight="semibold", color=INK)
 title(fig, "Restrictor venturi geometry (20 mm throat)", "Cells: % change and the diffuser length that geometry needs (throat to outlet). As-built = 38 mm, 3.2°, ~161 mm.",
-      "Recovery = car-calibrated 0.62 efficiency scaled by Idelchik's diffuser loss vs angle and area ratio. The venturi is a lumped boundary: its length/inertance is not modelled.")
+      "Recovery = car-calibrated 0.62 x Idelchik loss; lumped venturi (no length/inertance). CAUTION: the OUTLET-diameter trend is a 1D artifact (the plenum bell after a small outlet acts "
+      "as a lossless second diffuser) - size the outlet from 11_restrictor_length.png. The ANGLE trend at a fixed outlet is sound.")
 fig.tight_layout(rect=(0, 0.03, 1, TOP(fig))); save(fig, "05_restrictor.png"); res["restrictor"] = rrows; res["cd"] = cds
 
 # ---------- 6. VRLI: envelope x outside length x stroke ----------
@@ -196,8 +199,8 @@ Tn, _, _ = core.vrli(S, best.Venv, best.lo, best.lo + best.stroke, displace=Fals
 res["vrli_speed"] = dict(design=best.to_dict(), speed=sp, no_displacement=auc(Tn))
 
 # ---------- 7. options matrix (packaging envelope) ----------
-CAPS_V = {"small box ≤1.0 L": 1.0, "medium ≤2.0 L": 2.0, "large ≤3.5 L": 3.5}
-CAPS_L = {"short ≤135 mm": -115, "as-built ≤250 mm": 0, "long ≤410 mm": 160}
+CAPS_V = {"plenum ≤1.44 L (today)": 1.44, "≤2.75 L": 2.75, "≤3.5 L": 3.5}
+CAPS_L = {"runner ≤248 mm (no longer)": 0, "runner ≤283 mm (+35)": 35}
 MAXPRO = 150   # mm a runner may protrude / stroke into the plenum (needs a plenum ~190 mm tall)
 opts = []
 for ln, lcap in CAPS_L.items():
@@ -220,7 +223,7 @@ res["options"] = opts
 fig, axs = plt.subplots(1, 3, figsize=(18, 6.2), sharey=True)
 for ax, key, nm in zip(axs, ["static", "static_protruding", "vrli"], ["Static, runners outside the plenum", "Static, runners protrude into the plenum", "VRLI (telescoping into the plenum)"]):
     M = np.array([[o[key]["auc"] if o[key] else np.nan for o in opts if o["runner_cap"] == ln] for ln in CAPS_L])
-    ax.pcolormesh(np.arange(3), np.arange(3), M, cmap=DIV, norm=TwoSlopeNorm(0, -20, 20), shading="nearest"); ax.grid(False)
+    ax.pcolormesh(np.arange(len(CAPS_V)), np.arange(len(CAPS_L)), M, cmap=DIV, norm=TwoSlopeNorm(0, -8, 8), shading="nearest"); ax.grid(False)
     for i, ln in enumerate(CAPS_L):
         for j, vn in enumerate(CAPS_V):
             o = [o for o in opts if o["runner_cap"] == ln and o["plenum_cap"] == vn][0][key]
@@ -229,8 +232,8 @@ for ax, key, nm in zip(axs, ["static", "static_protruding", "vrli"], ["Static, r
             elif key == "static_protruding": t = f"{o['auc']:+.1f}%\n{o['V_box']:g} L box\n{o['outside']:.0f} + {o['protrusion']} mm in"
             else: t = f"{o['auc']:+.1f}%\n{o['V_box']:g} L box\n{o['outside']:.0f} mm + {o['stroke']:.0f} stroke"
             ax.text(j, i, t, ha="center", va="center", fontsize=9.5, color=INK)
-    ax.set_xticks(range(3)); ax.set_xticklabels(list(CAPS_V), fontsize=9.5); ax.set_title(nm, loc="left", fontsize=12, fontweight="semibold", color=INK)
-axs[0].set_yticks(range(3)); axs[0].set_yticklabels([k.replace(" ≤", "\n≤") for k in CAPS_L], fontsize=9.5); axs[0].set_ylabel("runner length allowed above the head flange")
+    ax.set_xticks(range(len(CAPS_V))); ax.set_xticklabels(list(CAPS_V), fontsize=9.5); ax.set_title(nm, loc="left", fontsize=12, fontweight="semibold", color=INK)
+axs[0].set_yticks(range(len(CAPS_L))); axs[0].set_yticklabels([k.replace(" ≤", "\n≤") for k in CAPS_L], fontsize=9.5); axs[0].set_ylabel("runner length allowed above the head flange")
 title(fig, "Best design in each packaging envelope (P1 6-12k average torque vs as-built)", "Each cell = the best grid design that fits that plenum-box volume and runner reach. Protrusion / VRLI stroke capped at 150 mm (needs a ~190 mm tall plenum).", NOTE)
 fig.tight_layout(rect=(0, 0.02, 1, TOP(fig))); save(fig, "07_options_matrix.png")
 
@@ -276,8 +279,10 @@ knobs.append(("Plenum volume 0.5-3.5 L (each at its best runner)", [max(auc(S.at
 ps = pd.DataFrame(res["plenum_shape"]); ps = ps[(ps.V == 1.44) & ps.auc.notna()]
 if len(ps): knobs.append(("Plenum shape: half / double height (1.44 L)", [r.auc - ps[(ps.lf == 1) & (ps.ext == r.ext)].auc.iloc[0] for r in ps.itertuples()]))
 if res["restrictor"]:
-    rs = pd.DataFrame(res["restrictor"]); rs = rs[rs.ext == 0]
-    knobs.append(("Diffuser outlet 30-50 mm (3.2°)", list(rs[rs.ang == 3.2].auc_p1)))
+    rs = pd.DataFrame(res["restrictor"]); rs = rs[(rs.ext == 0) & (rs.V == 1.44)]
+    if os.path.exists(os.path.join(OUT, "restrictor_short.csv")):
+        rsh = pd.read_csv(os.path.join(OUT, "restrictor_short.csv"))
+        knobs.append(("Restrictor length 40-228 mm (best diffuser, ≤ 8°)", list(rsh["V1.44 P1 6-12k"]) + [0.0]))
     knobs.append(("Diffuser half-angle 3.2-8° (38 mm)", list(rs[rs.dout == 38].auc_p1)))
 knobs.append(("Throat Cd 0.93-0.97", [p for _, p, _ in res["cd"] if np.isfinite(p)]))
 v0 = VR[(VR.Venv == 1.44) & (VR.lo == -40) & (VR.stroke <= 150)]
@@ -297,7 +302,7 @@ fig.tight_layout(rect=(0, 0.03, 1, TOP(fig))); save(fig, "09_what_matters.png")
 # ---------- 10. recommended options vs today + dyno ----------
 def cell(ln, vn): return [o for o in opts if o["runner_cap"] == ln and o["plenum_cap"] == vn][0]
 L_ = list(CAPS_L); V_ = list(CAPS_V); picks = []
-for tag, ln, vn in [("S", L_[0], V_[0]), ("M", L_[1], V_[1]), ("L", L_[2], V_[2])]:
+for tag, ln, vn in [("A", L_[0], V_[0]), ("B", L_[0], V_[2]), ("C", L_[1], V_[2])]:
     o = cell(ln, vn)
     st = o["static"]; picks.append((f"Static-{tag}: {st['V']:g} L, {st['outside']:.0f} mm", S.at(st["V"], st["outside"] - OUTSIDE0), "static"))
     sp_ = o["static_protruding"]
@@ -323,6 +328,6 @@ for col, kind in enumerate(["static", "vrli"]):
         else: ax.set_xlabel("engine speed (krpm)")
 axs[0, 0].set_ylim(25, 60); axs[0, 1].set_ylim(25, 60); axs[1, 0].set_xlim(4, 12.6)
 res["today"] = dict(peak_hp=float(HP(TODAY).max()), avg_hp=band_mean(R, HP(TODAY), "P1 6-12k"))
-title(fig, "Recommended intake options, small to large", "S = short runners + small box (≤135 mm, ≤1 L), M = as-built envelope (≤250 mm, ≤2 L), L = long + large (≤410 mm, ≤3.5 L). '+' = runners protrude into the plenum.", NOTE)
+title(fig, "Recommended intake options, small to large", "A = today's envelope (runner ≤248 mm, plenum ≤1.44 L), B = bigger plenum (≤3.5 L), C = bigger plenum + 35 mm more reach. '+' = runners protrude into the plenum.", NOTE)
 fig.tight_layout(rect=(0, 0.02, 1, TOP(fig))); save(fig, "10_options_torque_power.png")
 json.dump(res, open(os.path.join(OUT, "results.json"), "w"), indent=1, default=float)

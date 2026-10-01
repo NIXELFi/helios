@@ -58,6 +58,11 @@ def vrli_for(Venv, lo, stroke, weights):
 TIERS = [(f"{kind} | reach <= {'as-built' if ext == 0 else f'+{ext} mm'} | plenum <= {V:g} L",
           dict(kind=kind, ext_max=ext, V_max=V, stroke_max=150))
          for kind in ("static", "vrli") for ext in (0, 40) for V in (1.44, 2.0, 2.75, 3.5)]
+# Concept A (CDR): trumpets telescope INSIDE the plenum, so only the fixed outside runner is packaging-limited and the
+# effective length can reach outside + stroke. Needs a plenum tall enough for the stroke (~stroke + 40 mm).
+TIERS += [(f"vrli-inside | outside runner <= {'as-built' if ext == 0 else f'+{ext} mm'} | box <= {V:g} L",
+           dict(kind="vrli_in", ext_max=ext, V_max=V, stroke_max=150))
+          for ext in (0, 40) for V in (1.44, 2.75, 3.5)]
 W_P1 = np.where((R >= 6000) & (R <= 12000), 1.0, 0.15)
 rows = []
 for tname, t in TIERS:
@@ -72,7 +77,9 @@ for tname, t in TIERS:
         for Venv in [v for v in S.Vs if v <= t["V_max"] + 1e-9] + ([t["V_max"]] if t["V_max"] not in S.Vs else []):
             for st in range(25, t["stroke_max"] + 1, 25):
                 # outside (fixed) runner lo, the telescoping part adds up to `st` inside the plenum; the long end is the reach
-                for hi in range(int(t["ext_max"]) - 150, int(t["ext_max"]) + 1, 10):
+                his = (range(int(t["ext_max"]) - 150, int(t["ext_max"]) + 1, 10) if t["kind"] == "vrli"
+                       else [lo_ + st for lo_ in range(int(t["ext_max"]) - 150, int(t["ext_max"]) + 1, 10)])
+                for hi in his:
                     lo = hi - st
                     if lo < S.exts[0] or Venv - BORE_A * st < S.Vs[0]:
                         continue
