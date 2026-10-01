@@ -74,3 +74,40 @@ What it needs: a plenum tall enough for the travel (stroke + about 40 mm, i.e. a
 - `nothrottle.py --watch` must run alongside: Windows 11 EcoQoS otherwise holds the engine processes at 25 % of a core.
 - Raw team logs (`data/ld_raw`, `ld_traces`, `josh_raw`) are gitignored.
 - 20-cell results are kept in `results_c20.ndjson`.
+
+## Addendum (2026-10-01): trade-off study inside the team's packaging limits
+
+**Constraints (Nick):** the fully extended runner is at most 300 mm above the head flange (lengths exclude the port and engine; today's runner is 248 mm), and the stroke is at most 100 mm. Scripts: `vrli_stroke.py` (stroke sweep), `vrli_combos.py` (every combination: retracted 108-248 mm x stroke 0-200 mm x 4 boxes, 4546 designs, `charts/combos/combos_all.csv`) and `tradeoff.py` (`charts/tradeoff/`). Restrictor and throat-Cd effects are applied as per-rpm torque ratios (G4 recovery sweep with Idelchik + wall friction, and the Cd sweep).
+
+**How the two ends work.** The **extended** length sets the midrange (7-10.5k) and with it the worst case. The **retracted** length sets the top end (10.5-12.5k): about +10 % when retracted to 150-190 mm, about +4.5 % when retracted to 248 mm. Inside the limits the 300 mm reach is the binding constraint: each 10 mm of reach is worth about 0.25 pts of worst case, and stroke beyond 100 mm adds about 0.1 pt at 300 mm.
+
+**What matters most** (worst-case swing around the recommended package, `T1_what_matters.png`):
+
+| knob | swing (pts) |
+|---|---|
+| VRLI stroke 0-100 mm | 3.1 |
+| actuator speed 50 mm/s to instant (200 mm/s baseline) | 2.2 |
+| placement of the 100 mm window | 2.1 |
+| long-end reach 248-300 mm | 1.9 |
+| restrictor length 60-228 mm (flat above ~120 mm) | 1.9 |
+| throat Cd 0.90-0.99 | 1.3 |
+| plenum box 1.44-3.5 L | 0.9 |
+| ECU table per duty cycle vs single table | 0.2 |
+| taller plenum 120 -> 140 mm (estimate) | 0.2 |
+
+**Packages** (`T6_decision_table.png`):
+
+| package | box | runner (mm, retracted -> extended) | restrictor | worst | 6-12k | mid | top | mass | plenum height | t90 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| today | 1.44 L | 248 fixed | 228 mm | 0 | 0 | 0 | 0 | - | 120 | 105 ms |
+| short restrictor only | 1.44 L | 248 fixed | 123 mm (38 mm outlet, 5.5°) | +0.0 | +0.1 | +0.1 | +0.1 | - | 120 | 105 ms |
+| static, bigger plenum | 2.75 L | 233 fixed | 123 mm | +0.3 | +0.7 | +0.4 | +0.7 | - | 120 | 149 ms |
+| VRLI 50 mm | 1.44 L | 248 -> 298 | 123 mm | +2.1 | +2.9 | +2.2 | +4.7 | 0.69 kg | 120 | 105 ms |
+| VRLI 80 mm | 2.75 L | 213 -> 293 | 123 mm | +3.1 | +4.3 | +3.6 | +6.6 | 0.89 kg | 120 | 149 ms |
+| VRLI 100 mm | 1.44 L | 198 -> 298 | 123 mm | +2.7 | +3.9 | +2.7 | +6.3 | 1.02 kg | 140 | 105 ms |
+| **VRLI 100 mm (recommended)** | **2.75 L** | **198 -> 298** | **123 mm** | **+3.4** | **+4.8** | **+3.6** | **+7.8** | **1.02 kg** | **140** | **149 ms** |
+| same, with a Cd 0.98 nozzle | 2.75 L | 198 -> 298 | 123 mm | +3.7 | +5.4 | +4.2 | +8.7 | 1.02 kg | 140 | 149 ms |
+
+**Pick:** VRLI, 2.75 L box, runner 198 -> 298 mm (100 mm stroke), a 38 mm-outlet / 5.5° venturi of about 123 mm, and a well-radiused converging side (Cd about 0.98). That gives +3.7 % worst case and +5.4 % on 6-12k, so P1 is met on the dyno metric.
+- **Fallbacks:** the 80 mm version (213 -> 293) if the plenum must stay 120 mm tall (-0.3 pt), or 1.44 L if throttle response outranks torque (-0.7 pt, t90 105 vs 149 ms).
+- **Actuator:** do not go below 200 mm/s; at 100 mm/s about 1 pt is lost.

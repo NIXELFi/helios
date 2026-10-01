@@ -62,7 +62,7 @@ def head(fig, t, sub, note=None):
     fig.text(0.012, 1 - 0.62 / h, sub, fontsize=11, color=INK2, va="top")
     if note: fig.text(0.012, 0.012, note, fontsize=8.6, color=MUTED)
 TOP = lambda fig: 1 - 1.05 / fig.get_figheight()
-NOTE = ("1D engine model (160-cell plenum), neutral tune, scaled to the calibrated SDM26 sim. VRLI = trumpets telescoping inside the plenum box; "
-        "retracted runner <= today's 248 mm above the head flange (+80 mm port). Schedule limited to 200 mm/s at 3000 rpm/s sweeps.")
+NOTE = ("1D engine model (160-cell plenum), neutral tune, scaled to the calibrated SDM26 sim. Runner lengths are above the head flange (engine/port excluded; today 248 mm). "
+        "VRLI = trumpets telescoping inside the plenum box, 200 mm/s at 3000 rpm/s sweeps.")
 def save(fig, n): fig.savefig(os.path.join(OUT, n), dpi=150); plt.close(fig); print("wrote", n)
 
