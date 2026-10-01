@@ -245,7 +245,7 @@ Engine torque vs today's actual restrictor (60 um wall unless noted):
 | B, 20 um wall | 120 mm | +1.2 % | +0.8 % | separated |
 | B, smooth wall | 120 mm | +1.9 % | +1.3 % | separated, less |
 
-About 0.5 % of each candidate's gain is throat area: the candidates assume a 20.000 mm throat.
+The candidates assume a 20.000 mm throat against 19.947 mm on the as-built part. That is 0.53 % more area, but worth only about 0.15 % at the top end and 0.1 % on 6-12k (Cd sweep: +0.3 % per +0.01 of Cd), because the engine runs unchoked; Fluent's engine-match gives 0.07 %. The gains are shape, not throat size. (An earlier version of this note said 0.5 %; that holds only at full choke.)
 
 **Inlet (Fluent, real Bosch bore from CAD, no plate or shaft).** The bare throttle-body mouth loses K = 0.19 on the 32 mm bore dynamic pressure, about 0.4-0.5 kPa at 53-60 g/s. The vault's slip-on bellmouth cuts that to K 0.07-0.08, worth +0.34 % airflow at the top end. The restrictor behind either is unchanged.
 - This is about a sixth of the 2.5-3.3 kPa needed to explain the car-fitted recovery.
