@@ -190,3 +190,14 @@ Torque columns use the ratio transfer to the car-fitted level: R_1D = 0.572 x R_
   - Either the installation (throttle body, the plenum dump, pulsating flow) loses that, or the car fit absorbed another model error.
   - Pending from Fluent: the 3D throttle body, a plenum-dump case and a pulsating outlet.
 - **Pending:** A's diffuser behind the short nozzle (about 191 mm), 4.0° and 4.5° diffusers (about 159 / 144 mm), smooth-wall variants, and a shape optimiser on the engine's operating range (p_exit/p0 0.85-0.95 at 10.5 / 11.5 / 12.5k).
+
+**Wall roughness (Fluent A_SMOOTH / B_SMOOTH, same day).** The 60 um sand-grain wall is an assumed as-printed finish. Against a smooth wall it costs about 0.011 of Cd and 0.06-0.08 of R on either geometry.
+
+| geometry | wall | Cd | R (fit) | top end vs rough A | 6-12k vs rough A |
+|---|---|---|---|---|---|
+| A (228 mm) | 60 um | 0.974 | 0.724 | 0 | 0 |
+| A (228 mm) | smooth | 0.987 | 0.787 | +1.6 % | +1.0 % |
+| B (120 mm) | 60 um | 0.974 | 0.679 | -0.8 % | -0.6 % |
+| B (120 mm) | smooth | 0.989 | 0.757 | +1.0 % | +0.7 % |
+
+Bore finish is worth about 1.8 % at the top end on the short restrictor, more than the length trade. A smooth 120 mm restrictor beats today's rough 228 mm one. The real bore finish is unmeasured: measure it, or smooth it and re-dyno.

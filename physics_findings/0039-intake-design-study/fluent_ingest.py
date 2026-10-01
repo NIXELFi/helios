@@ -67,11 +67,20 @@ def main():
             cfgp, rpm, ext = job
             p = subprocess.Popen([study.EXE, cfgp, str(rpm), "20", f"plenum_n_cells={study.CELLS}", f"runner_mouth_extension={ext / 1000:.4f}"], stdout=subprocess.PIPE, text=True)
             unthrottle(p.pid); return json.loads(p.communicate()[0].strip().splitlines()[-1])["bt"]
-        res = {}
+        ONLY = [g for g in T.index if "--only" not in sys.argv or g in sys.argv[sys.argv.index("--only") + 1].split(",") or g == "A"]
+        res = {}; cachef = os.path.join(out, "engine_cache.json")          # (mode, geometry, Cd, R) -> torque curve, so reruns only do new geometries
+        cache = json.load(open(cachef)) if os.path.exists(cachef) else {}
         for mode, col_r, col_cd in [("ratio", "R_1D", "Cd_1D"), ("absolute", "R_fit", "Cd_fit")]:
-            for g in T.index:
-                _, cfgp = study.make_cfg(R=round(float(T[col_r][g]), 4), cd=round(float(min(T[col_cd][g], 0.99)), 3))
-                with ThreadPoolExecutor(study.THREADS) as ex: res[(mode, g)] = np.array(list(ex.map(run, [(cfgp, r, 0) for r in rpms])))
+            for g in ONLY:
+                Rv, cdv = round(float(T[col_r][g]), 4), round(float(min(T[col_cd][g], 0.99)), 3); key = f"{mode}|{g}|{cdv}|{Rv}"
+                if key not in cache:
+                    d_ = json.load(open(study.BASE)); d_["restrictor"]["discharge_coefficient"] = cdv
+                    d_["physics"].pop("afr_map", None); d_["physics"].pop("spark_advance_map", None)
+                    d_["physics"]["restrictor_diffuser_efficiency"] = round(Rv / (1 - (0.020 / 0.038) ** 4), 5)
+                    cfgp = os.path.join(out, f"cfg_{mode}_{g}.json"); json.dump(d_, open(cfgp, "w"), indent=1)   # exact Cd/R (make_cfg names round R to 2 dp)
+                    with ThreadPoolExecutor(study.THREADS) as ex: cache[key] = list(ex.map(run, [(cfgp, r, 0) for r in rpms]))
+                    json.dump(cache, open(cachef, "w"))
+                res[(mode, g)] = np.array(cache[key])
         R_ = np.array(rpms, float); base = res[("ratio", "A")]
         band = lambda Tq, lo, hi: (np.trapezoid(Tq[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) / np.trapezoid(base[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) - 1) * 100
         E = pd.DataFrame([dict(mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])
