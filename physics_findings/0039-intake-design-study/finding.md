@@ -225,3 +225,30 @@ Leading candidate: **losses upstream of the restrictor**, which the 1D model doe
 - **Test:** tap a pressure sensor between the throttle body and the restrictor throat and log it at WOT above 9k.
 - If confirmed, the loss is recoverable (filter, throttle path) and worth up to about +4 % at the top end.
 - Remaining candidates: pulsating flow and a bore rougher than 60 um.
+
+**Reference moved to the car's actual part (Fluent A_CAD, 2026-10-01).** The as-built restrictor read from the team's CAD is worse than the cone stand-in A: Cd 0.965 on the 20 mm rule area and R 0.692, against 0.974 and 0.724.
+- Its throat is 19.947 mm (0.53 % under the rule area), its land is 10 mm, and its diffuser's wall angle grows from 0 to 3.65°.
+- All comparisons are now against A_CAD: R_1D = 0.572 x R/0.692, Cd_1D = 0.95 x Cd/0.965. The table is `charts/fluent/fluent_engine.csv`; the old one against A is `fluent_engine_refA.csv`.
+
+Engine torque vs today's actual restrictor (60 um wall unless noted):
+
+| geometry | length | top end 10.5-12.5k | 6-12k | diffuser flow |
+|---|---|---|---|---|
+| A_CAD: as-built | 228.5 mm | 0 | 0 | attached |
+| A_NOZ: 3.2° + short nozzle | 186 mm | +1.5 % | +1.0 % | attached |
+| F: 4.0° + short nozzle | 154 mm | +1.0 % | +0.7 % | attached |
+| **G: 4.5° + short nozzle** | **140 mm** | **+0.7 %** | **+0.5 %** | attached |
+| B: 5.5° + short nozzle | 120 mm | 0.0 % | 0.0 % | separated |
+| C: 5° to 36 mm | 117 mm | +0.1 % | +0.1 % | attached only at light flow |
+| D: 6° | 112 mm | -0.4 % | -0.3 % | separated |
+| E: 8° to 34 mm | 77 mm | -2.3 % | -1.6 % | separated |
+| B, 20 um wall | 120 mm | +1.2 % | +0.8 % | separated |
+| B, smooth wall | 120 mm | +1.9 % | +1.3 % | separated, less |
+
+About 0.5 % of each candidate's gain is throat area: the candidates assume a 20.000 mm throat.
+
+**Inlet (Fluent, real Bosch bore from CAD, no plate or shaft).** The bare throttle-body mouth loses K = 0.19 on the 32 mm bore dynamic pressure, about 0.4-0.5 kPa at 53-60 g/s. The vault's slip-on bellmouth cuts that to K 0.07-0.08, worth +0.34 % airflow at the top end. The restrictor behind either is unchanged.
+- This is about a sixth of the 2.5-3.3 kPa needed to explain the car-fitted recovery.
+- The plate and shaft (3D case) or the 1D fit itself must account for the rest; the pressure tap between throttle body and throat is still the direct test.
+
+**Throttle response cross-check.** A lumped fill model on the CFD restrictor curve gives the 2.75 L plenum +11.6 ms (6000 rpm) / +9.7 ms (8500 rpm) of lost time over 1.44 L, against +13 / +12 ms in the 1D tip-in runs. The volume penalty is confirmed.

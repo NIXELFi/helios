@@ -62,11 +62,15 @@ def main():
     if not rows:
         print("no brief_*.csv in", MAPS); return
     T = pd.DataFrame(rows).set_index("geometry")
-    if "A" in T.index:
-        T["R_1D"] = 0.572 * T.R_fit / T.R_fit["A"]; T["Cd_1D"] = 0.95 * T.Cd_fit / T.Cd_fit["A"]
+    # Reference = the car's actual part. A_CAD (as-built wall from the team's CAD, 19.947 mm throat) once it exists;
+    # the cone stand-in A before that. Override with --ref NAME.
+    REF = sys.argv[sys.argv.index("--ref") + 1] if "--ref" in sys.argv else ("A_CAD" if "A_CAD" in T.index else "A")
+    if REF in T.index:
+        T["R_1D"] = 0.572 * T.R_fit / T.R_fit[REF]; T["Cd_1D"] = 0.95 * T.Cd_fit / T.Cd_fit[REF]
+    print("reference geometry:", REF)
     out = os.path.join(H, "charts", "fluent"); os.makedirs(out, exist_ok=True)
     T.round(4).to_csv(os.path.join(out, "fluent_fit.csv")); pd.set_option("display.width", 220); print(T.round(3).to_string())
-    if "--run" in sys.argv and "A" in T.index:
+    if "--run" in sys.argv and REF in T.index:
         sys.path.insert(0, H); import study
         from concurrent.futures import ThreadPoolExecutor
         from nothrottle import unthrottle
@@ -75,7 +79,7 @@ def main():
             cfgp, rpm, ext = job
             p = subprocess.Popen([study.EXE, cfgp, str(rpm), "20", f"plenum_n_cells={study.CELLS}", f"runner_mouth_extension={ext / 1000:.4f}"], stdout=subprocess.PIPE, text=True)
             unthrottle(p.pid); return json.loads(p.communicate()[0].strip().splitlines()[-1])["bt"]
-        ONLY = [g for g in T.index if "--only" not in sys.argv or g in sys.argv[sys.argv.index("--only") + 1].split(",") or g == "A"]
+        ONLY = [g for g in T.index if "--only" not in sys.argv or g in sys.argv[sys.argv.index("--only") + 1].split(",") or g == REF]
         res = {}; cachef = os.path.join(out, "engine_cache.json")          # (mode, geometry, Cd, R) -> torque curve, so reruns only do new geometries
         cache = json.load(open(cachef)) if os.path.exists(cachef) else {}
         for mode, col_r, col_cd in [("ratio", "R_1D", "Cd_1D"), ("absolute", "R_fit", "Cd_fit")]:
@@ -92,10 +96,10 @@ def main():
             for g in T.index:                                   # the table always lists every geometry already simulated
                 k2 = f"{mode}|{g}|{round(float(min(T[col_cd][g], 0.99)), 3)}|{round(float(T[col_r][g]), 4)}"
                 if k2 in cache: res[(mode, g)] = np.array(cache[k2])
-        R_ = np.array(rpms, float); base = res[("ratio", "A")]
+        R_ = np.array(rpms, float); base = res[("ratio", REF)]
         band = lambda Tq, lo, hi: (np.trapezoid(Tq[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) / np.trapezoid(base[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) - 1) * 100
-        E = pd.DataFrame([dict(mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])
-        E.round(2).to_csv(os.path.join(out, "fluent_engine.csv"), index=False); print("\nengine torque vs geometry A at the car-fitted level (%):"); print(E.round(2).to_string(index=False))
+        E = pd.DataFrame([dict(reference=REF, mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])
+        E.round(2).to_csv(os.path.join(out, "fluent_engine.csv"), index=False); print("\nengine torque vs the reference geometry (car-fitted level), %:"); print(E.round(2).to_string(index=False))
 
 if __name__ == "__main__":
     main()

@@ -409,7 +409,7 @@
  },
  "restrictor": {
   "throat_diameter": 0.02,
-  "discharge_coefficient": 0.965,
+  "discharge_coefficient": 0.971,
   "converging_half_angle": 8.0,
   "diverging_half_angle": 3.2,
   "outlet_diameter": 0.038
@@ -514,7 +514,7 @@
   "exhaust_junction_momentum": true,
   "exhaust_gas_gamma": 1.3,
   "exhaust_gas_r": 295.0,
-  "restrictor_diffuser_efficiency": 0.66633
+  "restrictor_diffuser_efficiency": 0.71724
  },
  "description": "Finding 0036: the as-built SDM26 (0033 intake, 0034 exhaust) running the car's logged WOT tune (ignition + lambda at the WOT-measured sensor lag), with the momentum-mixing exhaust merge junctions and burned-gas gamma/R (0035), Tempe ambient (97.3 kPa, 305 K), venturi diffuser recovery 0.62 (matches the car's baro-MAP drop within 0.5 kPa) and realistic WOT exhaust wall temperatures (900/750/650 K). Engine level unchanged from the shipped physics (combustion efficiency 0.94, stock FMEP); the only fitted number is a constant drivetrain efficiency 0.94 (wheel/brake), chosen over speed-dependent loss models by cross-validation. No wave knob fitted. Team-dyno RMSE 2.01 kW (6-12.5k), 1.69 kW (7-11.5k).",
  "_tune_note": "physics.spark_advance_map = WOT median 'Ignition Angle' (deg BTDC); physics.afr_map = WOT median 'Lambda 1' x 14.7, lambda shifted 270 ms (sensor transport lag, audit hunt/proxy.py filter: APS >= 85 %, no cuts, fuel pressure > 300). Logged pulls end at 10.75k; the maps hold the last value above. Heat release is O2-limited (0032), so rich lambda costs fuel, not the stoichiometric heat.",
