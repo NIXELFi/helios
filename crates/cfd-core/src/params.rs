@@ -554,6 +554,7 @@ pub fn apply_override(
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,
         "restrictor_cd" => cfg.restrictor_cd = value,
+        "restrictor_inertance" => cfg.restrictor_inertance = value.max(0.0),
         "restrictor_loss_coef" => cfg.restrictor_loss_coef = value,
 
         // Exhaust primaries

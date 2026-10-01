@@ -193,6 +193,92 @@ pub fn venturi_restrictor_mdot(
     (mdot, p_t_phys, choked)
 }
 
+/// Finding 0039: venturi mass flow with the inertia of its air column.
+///
+/// The quasi-steady venturi follows the instantaneous plenum pressure, so a
+/// pulsating plenum drags its flow up and down the (concave) steady curve and
+/// the cycle mean falls 1-7 % below the steady flow at the mean pressure.
+/// Transient CFD of the same part (300 Hz, +-5 kPa) shows the real flow
+/// swings about 0.4 of that and lags by a quarter cycle: the air column in
+/// the diffuser low-pass filters the pulsation.
+///
+/// Model: unsteady Bernoulli for that column,
+///     I dmdot/dt = p_sustain(mdot) - p_plenum,   I = integral dx / A  [1/m]
+/// where p_sustain(mdot) is the plenum pressure at which the quasi-steady
+/// venturi delivers mdot (the inverse of venturi_restrictor_mdot). Steady
+/// state is exactly the quasi-steady curve; mdot is clamped to [0, choked].
+/// Explicit Euler: the time constant I / |dp/dmdot| is about 1 ms, the
+/// solver step about 1e-6..1e-5 s.
+#[allow(clippy::too_many_arguments)]
+pub fn venturi_mdot_inertial(
+    mdot_prev: f64, p_plenum: f64, p0: f64, t0: f64,
+    a_t: f64, cd: f64, gamma: f64, r_gas: f64, recovery: f64,
+    inertance: f64, dt: f64,
+) -> f64 {
+    let r = recovery.clamp(0.0, 0.99);
+    let pr_star = critical_pressure_ratio(gamma);
+    let p_onset = p0 * (pr_star + r * (1.0 - pr_star));
+    let (m_star, _, _) = venturi_restrictor_mdot(0.5 * p_onset, p0, t0, a_t, cd, gamma, r_gas, recovery);
+    let m = mdot_prev.clamp(0.0, m_star);
+    // pressure the venturi sustains at flow m: bisection on the monotone steady curve
+    let p_sustain = if m >= m_star * (1.0 - 1e-9) {
+        p_onset
+    } else if m <= 0.0 {
+        p0
+    } else {
+        let (mut lo, mut hi) = (p_onset, p0);          // mdot(lo) = m_star >= m >= mdot(hi) = 0
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            let (mm, _, _) = venturi_restrictor_mdot(mid, p0, t0, a_t, cd, gamma, r_gas, recovery);
+            if mm > m { lo = mid } else { hi = mid }
+        }
+        0.5 * (lo + hi)
+    };
+    (m + dt * (p_sustain - p_plenum) / inertance.max(1e-9)).clamp(0.0, m_star)
+}
+
+/// Static pressure in the first plenum cell (the venturi's back pressure).
+pub fn venturi_plenum_face_pressure(state: &PipeState) -> f64 {
+    let src = state.n_ghost;
+    let gm1 = state.gamma - 1.0;
+    let a_src = state.area[src];
+    let rho_src = state.q[src * N_VARS + I_RHO_A] / a_src;
+    let u_src = state.q[src * N_VARS + I_MOM_A] / (rho_src * a_src);
+    let big_e_src = state.q[src * N_VARS + I_E_A] / a_src;
+    (gm1 * (big_e_src - 0.5 * rho_src * u_src * u_src)).max(1e-9)
+}
+
+/// Plenum-LEFT ghost for a GIVEN venturi mass flow (finding 0039, used with
+/// venturi_mdot_inertial). Same ghost construction as
+/// fill_venturi_restrictor_left: plenum-face static pressure and a static
+/// temperature that conserves stagnation enthalpy.
+pub fn fill_venturi_restrictor_left_with_mdot(state: &mut PipeState, t_0: f64, mdot: f64) -> f64 {
+    let ng = state.n_ghost;
+    let gamma = state.gamma;
+    let gm1 = gamma - 1.0;
+    let r_gas = state.r_gas;
+    let cp = gamma * r_gas / gm1;
+    let p_ghost = venturi_plenum_face_pressure(state);
+    for i in 0..ng {
+        let a_g = state.area[i];
+        let g = mdot * r_gas / (p_ghost * a_g);
+        let k = g * g / (2.0 * cp);
+        let t_ghost = if k > 1e-30 {
+            ((-1.0 + (1.0 + 4.0 * k * t_0).sqrt()) / (2.0 * k)).max(1.0)
+        } else {
+            t_0
+        };
+        let rho_ghost = p_ghost / (r_gas * t_ghost);
+        let u_ghost = mdot / (rho_ghost * a_g);
+        let big_e_ghost = p_ghost / gm1 + 0.5 * rho_ghost * u_ghost * u_ghost;
+        state.q[i * N_VARS + I_RHO_A] = rho_ghost * a_g;
+        state.q[i * N_VARS + I_MOM_A] = rho_ghost * u_ghost * a_g;
+        state.q[i * N_VARS + I_E_A]   = big_e_ghost * a_g;
+        state.q[i * N_VARS + I_Y_A]   = 0.0;
+    }
+    mdot
+}
+
 /// Plenum-LEFT ghost state for the venturi restrictor. The ghost carries
 /// the plenum-face static pressure, the venturi mass flow, and a static
 /// temperature that CONSERVES STAGNATION ENTHALPY: T = T0 - u^2/(2 c_p)
@@ -249,6 +335,31 @@ mod venturi_tests {
     const R: f64 = 287.0;
 
     fn a_t() -> f64 { 0.25 * std::f64::consts::PI * 0.02 * 0.02 }
+
+    /// 0039: at a constant plenum pressure the inertial venturi relaxes onto
+    /// the quasi-steady curve, and under a fast pressure oscillation its flow
+    /// swings less than the quasi-steady flow does.
+    #[test]
+    fn venturi_inertia_relaxes_to_steady_and_filters_pulsation() {
+        let (p0, t0, cd, rec, inert) = (97_300.0, 305.0, 0.95, 0.572, 270.0);
+        let p = 0.92 * p0;
+        let (m_qs, _, _) = venturi_restrictor_mdot(p, p0, t0, a_t(), cd, G, R, rec);
+        let mut m = 0.5 * m_qs;
+        for _ in 0..20_000 { m = venturi_mdot_inertial(m, p, p0, t0, a_t(), cd, G, R, rec, inert, 1e-6); }
+        assert!((m / m_qs - 1.0).abs() < 1e-6, "{m} vs {m_qs}");
+        // 300 Hz, +-5 kPa: quasi-steady swing vs inertial swing over the last cycle
+        let (mut lo, mut hi, mut qlo, mut qhi) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        let dt = 1e-6; let n = (4.0 / 300.0 / dt) as usize;
+        for k in 0..n {
+            let pk = p + 5_000.0 * (2.0 * std::f64::consts::PI * 300.0 * k as f64 * dt).sin();
+            m = venturi_mdot_inertial(m, pk, p0, t0, a_t(), cd, G, R, rec, inert, dt);
+            if k > n * 3 / 4 {
+                let q = venturi_restrictor_mdot(pk, p0, t0, a_t(), cd, G, R, rec).0;
+                lo = lo.min(m); hi = hi.max(m); qlo = qlo.min(q); qhi = qhi.max(q);
+            }
+        }
+        assert!((hi - lo) < 0.6 * (qhi - qlo), "inertial swing {} vs quasi-steady {}", hi - lo, qhi - qlo);
+    }
 
     /// FSAE 20 mm, Cd = 1, 293 K, 1 atm: isentropic choked ceiling
     /// mdot* = A p0 sqrt(g/(R T0)) (2/(g+1))^((g+1)/(2(g-1))) = 0.0752 kg/s.

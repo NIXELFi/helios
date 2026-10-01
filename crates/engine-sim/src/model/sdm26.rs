@@ -8,7 +8,8 @@ use crate::bcs::junction_cv::{JunctionCV, JunctionCVLeg, PipeEnd};
 use crate::cylinder::valve::{seat_window_from_reference_lift, LiftProfile};
 use crate::bcs::restrictor::{
     fill_choked_restrictor_left, fill_choked_restrictor_left_full,
-    fill_venturi_restrictor_left, venturi_recovery_fraction,
+    fill_venturi_restrictor_left, fill_venturi_restrictor_left_with_mdot, venturi_mdot_inertial,
+    venturi_plenum_face_pressure, venturi_recovery_fraction,
 };
 
 /// Idelchik diagram 5-2 piecewise approximation: conical-diffuser loss
@@ -529,6 +530,12 @@ pub struct SDM26Config {
     /// Optional explicit diffuser efficiency η_d ∈ (0, 1] for the venturi
     /// model. None → derive from the diffuser half-angle via Idelchik.
     pub restrictor_diffuser_efficiency: Option<f64>,
+    /// Finding 0039: inertance of the venturi's air column, integral dx/A
+    /// (1/m; about 270 for the as-built 161 mm diffuser, about 400 for the
+    /// whole 228 mm venturi). 0 (default) = quasi-steady venturi, bit-identical
+    /// to before. > 0 lags the venturi mass flow (see `venturi_mdot_inertial`).
+    /// Only used with `restrictor_venturi_model`.
+    pub restrictor_inertance: f64,
 
     /// 0032 fix 4: add a flanged open-end correction δ to each runner's
     /// acoustic length (the 1-D junction has no radiation mass, so the
@@ -692,6 +699,7 @@ impl Default for SDM26Config {
             intake_runner_entry_ks: None,
             restrictor_venturi_model: false,
             restrictor_diffuser_efficiency: None,
+            restrictor_inertance: 0.0,
             intake_runner_end_correction: false,
             intake_runner_end_corrections: None,
             exhaust_collector_end_correction: false,
@@ -1088,6 +1096,8 @@ pub struct SDM26Engine {
     pub local_losses: Vec<Vec<(usize, f64)>>,
     pub mass_in_restrictor: f64,
     pub mass_out_collector: f64,
+    /// Finding 0039: lagged venturi mass flow (None until the first step).
+    pub venturi_mdot_lag: Option<f64>,
 }
 
 impl SDM26Engine {
@@ -1491,6 +1501,7 @@ impl SDM26Engine {
             local_losses,
             mass_in_restrictor: 0.0,
             mass_out_collector: 0.0,
+            venturi_mdot_lag: None,
         }
     }
 
@@ -1577,9 +1588,25 @@ impl SDM26Engine {
                 let recovery = venturi_recovery_fraction(
                     sigma, phi, cfg.restrictor_diffuser_efficiency,
                 );
-                fill_venturi_restrictor_left(
-                    plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd, recovery,
-                );
+                if cfg.restrictor_inertance > 0.0 {
+                    // 0039: the venturi's air column has inertia; lag its flow.
+                    let p_face = venturi_plenum_face_pressure(plenum);
+                    let prev = self.venturi_mdot_lag.unwrap_or_else(|| {
+                        crate::bcs::restrictor::venturi_restrictor_mdot(
+                            p_face, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,
+                            plenum.gamma, plenum.r_gas, recovery).0
+                    });
+                    let mdot = venturi_mdot_inertial(
+                        prev, p_face, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,
+                        plenum.gamma, plenum.r_gas, recovery, cfg.restrictor_inertance, dt,
+                    );
+                    self.venturi_mdot_lag = Some(mdot);
+                    fill_venturi_restrictor_left_with_mdot(plenum, cfg.t_ambient, mdot);
+                } else {
+                    fill_venturi_restrictor_left(
+                        plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd, recovery,
+                    );
+                }
             } else if cfg.restrictor_cd_mach_k > 0.0 {
                 fill_choked_restrictor_left_full(
                     plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,

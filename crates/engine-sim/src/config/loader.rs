@@ -231,6 +231,7 @@ fn set_physics_f64(cfg: &mut SDM26Config, key: &str, v: f64) -> bool {
         "restrictor_cd_mach_k" => cfg.restrictor_cd_mach_k = v,
         "restrictor_loss_coef" => cfg.restrictor_loss_coef = v,
         "restrictor_diffuser_efficiency" => cfg.restrictor_diffuser_efficiency = Some(v),
+        "restrictor_inertance" => cfg.restrictor_inertance = v,
         "intake_junction_loss_coef" => cfg.intake_junction_loss_coef = v,
         "exhaust_junction_loss_coef" => cfg.exhaust_junction_loss_coef = v,
         "intake_runner_entry_k" => cfg.intake_runner_entry_k = v,
