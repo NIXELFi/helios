@@ -13,11 +13,14 @@
  * first run). Safe to re-run: it clears purchasing data and re-seeds.
  */
 import { config } from "dotenv";
+import WebSocket from "ws";
 import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
+// Node < 22 has no native WebSocket, which supabase-js needs at createClient() (as in tests/setup.ts).
+(globalThis as any).WebSocket ??= WebSocket;
 config();
 const url = process.env.SUPABASE_URL ?? "";
 if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) {
@@ -123,10 +126,14 @@ async function main() {
   ] })) as string[];
   must(await exec2.rpc("decide", { p_id: approved[0], p_decision: "approve" }));
   must(await (await as("president@demo.test")).rpc("decide", { p_id: approved[0], p_decision: "approve" }));
-  const ordered = must(await exec1.rpc("add_items", { p_project: cars.SDM27, p_subteam: st.DAQ, p_ready: false, p_rows: [
+  const ordered = must(await exec1.rpc("add_items", { p_project: cars.SDM27, p_subteam: st.DAQ, p_ready: true, p_rows: [
     { title: "TBM Brakes WSPD cable 3 ft", quantity: 1, unit_price_cents: 3100, tax_shipping_cents: 1620, vendor: "TBM Brakes" },
   ] })) as string[];
-  must(await exec1.rpc("set_status", { p_ids: ordered, p_status: "APPROVED" }));
+  // two execs other than the requester approve before it can be ordered
+  for (const id of ordered) {
+    must(await exec2.rpc("decide", { p_id: id, p_decision: "approve" }));
+    must(await (await as("president@demo.test")).rpc("decide", { p_id: id, p_decision: "approve" }));
+  }
   must(await exec1.rpc("record_order", { p_ids: ordered, p_order_id: "T20001", p_payment: "Team card", p_total_cents: 4720 }));
   must(await exec1.rpc("add_tracking", { p_ids: ordered, p_number: "1Z999AA10123456784", p_carrier: "UPS" }));
   must(await exec1.rpc("add_items", { p_project: cars.SDM27e, p_subteam: st.BAT, p_ready: false, p_rows: [

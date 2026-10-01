@@ -16,9 +16,12 @@
  * project is a separate, deliberate step.
  */
 import { config } from "dotenv";
+import WebSocket from "ws";
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 
+// Node < 22 has no native WebSocket, which supabase-js needs at createClient() (as in tests/setup.ts).
+(globalThis as any).WebSocket ??= WebSocket;
 config();
 const url = process.env.SUPABASE_URL ?? "";
 if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) throw new Error(`Refusing to import into non-local ${url}`);

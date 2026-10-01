@@ -52,7 +52,7 @@ export function OverviewView({ fin, pur, openTxn, go }: FinanceProps & { go: (v:
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Tile hero label="Available to spend" value={<Money cents={s?.available_cents} />} note="Bank − card owed − uncashed checks − reimbursements owed" />
+        <Tile hero label="Available to spend" value={<Money cents={s?.available_cents} />} note="Bank - card owed - uncashed checks - reimbursements owed" />
         <Tile label={`${d.checking.name} balance`} value={<Money cents={s?.bank_balance_cents} />}
           note={s?.bank_balance_basis ? `${s.bank_balance_basis.entered_by_name === "Chase statement" ? "Statement" : "Entered"} ${shortDate(s.bank_balance_basis.as_of)} + logged since` : "Not entered yet"} />
         <Tile label="Card owed" value={<Money cents={(s?.card_owed_cents ?? 0) + (s?.card_pending_cents ?? 0)} />}
@@ -132,7 +132,7 @@ export function OverviewView({ fin, pur, openTxn, go }: FinanceProps & { go: (v:
           </table>
         </Card>
         <Card>
-          <div className="flex items-center justify-between"><b>Latest activity</b><button className="text-xs text-asu-gold hover:underline" onClick={() => go("ledger")}>Full ledger →</button></div>
+          <div className="flex items-center justify-between"><b>Latest activity</b><button className="text-xs text-asu-gold hover:underline" onClick={() => go("ledger")}>Full ledger</button></div>
           <table className="mt-2 w-full text-sm">
             <tbody>
               {recent.map((t) => (

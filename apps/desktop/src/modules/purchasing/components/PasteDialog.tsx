@@ -79,7 +79,7 @@ export function PasteDialog({
             </tbody>
           </table>
         </div>
-        {matrix.length > 200 && <p className="mt-1 text-xs text-helios-muted">…and {matrix.length - 200} more rows.</p>}
+        {matrix.length > 200 && <p className="mt-1 text-xs text-helios-muted">...and {matrix.length - 200} more rows.</p>}
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
           <label className="flex items-center gap-2"><input type="checkbox" checked={header} onChange={(e) => setHeader(e.target.checked)} /> First row is a header</label>
           <input
@@ -102,7 +102,7 @@ export function PasteDialog({
         {problem && <p className="mt-2 text-sm text-helios-danger">{problem}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <Button kind="ghost" onClick={onCancel}>Cancel</Button>
-          <Button onClick={add} disabled={busy}>{busy ? "Adding…" : `Add ${rows.length} item${rows.length === 1 ? "" : "s"}`}</Button>
+          <Button onClick={add} disabled={busy}>{busy ? "Adding..." : `Add ${rows.length} item${rows.length === 1 ? "" : "s"}`}</Button>
         </div>
       </div>
     </div>

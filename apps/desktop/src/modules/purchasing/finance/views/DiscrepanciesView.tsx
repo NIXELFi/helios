@@ -48,7 +48,7 @@ export function DiscrepanciesView({ client, fin, pur, reload, flash, me, openTxn
       ))}
       {resolved.length > 0 && (
         <Card className="p-0">
-          <button className="w-full px-4 py-2 text-left font-semibold" onClick={() => setShowResolved((s) => !s)}>{showResolved ? "▾" : "▸"} Resolved ({resolved.length})</button>
+          <button className="w-full px-4 py-2 text-left font-semibold" onClick={() => setShowResolved((s) => !s)}>{showResolved ? "v" : ">"} Resolved ({resolved.length})</button>
           {showResolved && (
             <div className="divide-y divide-helios-line border-t border-helios-line">
               {resolved.map(({ d, note, by, at }) => (
@@ -77,11 +77,11 @@ function Item({ d, evById, client, reload, flash, me, openTxn }: Pick<FinancePro
         <div className="flex-1">
           <div>{d.message}</div>
           <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-            {d.txn_ids.map((id) => <button key={id} className="rounded border border-helios-line px-1.5 py-0.5 hover:border-asu-gold hover:text-asu-gold" onClick={() => openTxn(id)}>ledger line #{id} →</button>)}
+            {d.txn_ids.map((id) => <button key={id} className="rounded border border-helios-line px-1.5 py-0.5 hover:border-asu-gold hover:text-asu-gold" onClick={() => openTxn(id)}>ledger line #{id}</button>)}
             {d.evidence_ids.slice(0, 8).map((id) => {
               const e = evById.get(id);
               return <span key={id} className="rounded border border-helios-line px-1.5 py-0.5 text-helios-dim" title={e?.items}>
-                {e ? `${e.kind === "request" ? e.source_file : e.kind} · ${e.vendor ?? ""} ${fmtCents(e.total_cents)}` : `#${id}`}</span>;
+                {e ? `${e.kind === "request" ? e.source_file : e.kind} | ${e.vendor ?? ""} ${fmtCents(e.total_cents)}` : `#${id}`}</span>;
             })}
             {d.evidence_ids.length > 8 && <span className="text-helios-muted">+{d.evidence_ids.length - 8} more</span>}
           </div>

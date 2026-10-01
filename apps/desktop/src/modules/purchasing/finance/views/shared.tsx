@@ -36,7 +36,7 @@ export const shortDate = (d: string | null) => {
   return new Date(y!, (m ?? 1) - 1, day ?? 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 };
 
-export const accountLabel = (a: Account | undefined) => (a ? `${a.name}${a.last4 && !a.name.includes(a.last4) ? ` ••${a.last4}` : ""}` : "?");
+export const accountLabel = (a: Account | undefined) => (a ? `${a.name}${a.last4 && !a.name.includes(a.last4) ? ` ...${a.last4}` : ""}` : "?");
 
 export function Tile({ label, value, note, hero }: { label: string; value: ReactNode; note?: ReactNode; hero?: boolean }) {
   return (
@@ -60,7 +60,7 @@ export function Badge({ tone = "plain", children, title }: { tone?: "good" | "ba
 }
 
 export function Money({ cents, signed }: { cents: number | null | undefined; signed?: boolean }) {
-  if (cents === null || cents === undefined) return <span className="text-helios-muted">—</span>;
+  if (cents === null || cents === undefined) return <span className="text-helios-muted">-</span>;
   return <span className={`tabular-nums ${signed ? (cents < 0 ? "text-helios-danger" : cents > 0 ? "text-helios-success" : "") : ""}`}>{fmtCents(cents)}</span>;
 }
 
@@ -104,7 +104,7 @@ export function WherePicker({ pur, value, onChange }: {
         {pur.projects.map((p) => <option key={p.id} value={p.id}>{p.car_code}</option>)}
       </select>
       <select className={`${input} min-w-0 flex-[2]`} value={value.subteam_id} onChange={(e) => onChange({ ...value, subteam_id: e.target.value })}>
-        <option value="">Subteam…</option>
+        <option value="">Subteam...</option>
         {pur.subteams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
       </select>
     </>

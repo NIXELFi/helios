@@ -101,6 +101,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
     const card = file.pdf?.card;
     const p = planImport(format, lines, account, {
       fileName: file.name, rules, accounts: fin.accounts, existing: fin.txns, squareCategory,
+      source: file.pdf ? `${format}-pdf` : undefined,
       cardStatement: card ? { periodStart: null, closing: card.closing_date }
         : account.kind === "credit_card" && statement.on && statement.closing ? { periodStart: statement.start || null, closing: statement.closing } : null,
     });
@@ -160,7 +161,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
           balances: plan.balances,
         });
         flash(`Imported: ${r.added} new line${r.added === 1 ? "" : "s"}${r.cleared ? `, ${r.cleared} check${r.cleared > 1 ? "s" : ""} cleared` : ""}`
-          + `${r.confirmed ? ", autopay confirmed" : ""}${r.balances ? `, ${r.balances} bank balance${r.balances > 1 ? "s" : ""}` : ""}. New lines needing a category or subteam are under Ledger → Needs attention.`);
+          + `${r.confirmed ? ", autopay confirmed" : ""}${r.balances ? `, ${r.balances} bank balance${r.balances > 1 ? "s" : ""}` : ""}. New lines needing a category or subteam are under Ledger -> Needs attention.`);
         setFile(null);
       });
     }
@@ -178,7 +179,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
           onClick={() => pick.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") pick.current?.click(); }}
           className={`cursor-pointer rounded-lg border border-dashed p-6 text-center ${over ? "border-asu-gold bg-asu-gold/10" : "border-helios-line hover:bg-helios-strip"}`}>
           <div className="font-semibold">Drop a CSV here or <span className="text-asu-gold">choose a file</span></div>
-          <div className="mt-1 text-xs text-helios-dim">Chase checking or card statement (PDF) · Chase CSV export · Square transactions export (dues, sales) · a list of invoices · any other bank CSV</div>
+          <div className="mt-1 text-xs text-helios-dim">Chase checking or card statement (PDF) | Chase CSV export | Square transactions export (dues, sales) | a list of invoices | any other bank CSV</div>
           <input ref={pick} type="file" accept=".csv,text/csv,.pdf,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void load(f); e.target.value = ""; }} />
         </div>
         <p className="mt-2 text-xs text-helios-dim">Nothing is saved until you press Import. The same file can't be imported twice, and lines already in the ledger (for example from a PDF statement) are skipped.</p>
@@ -198,7 +199,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
             {format !== "invoices" && (
               <label className="flex flex-col gap-1">Into account
                 <select className={input} value={accountId ?? ""} onChange={(e) => setAccountId(Number(e.target.value) || null)}>
-                  <option value="">Pick…</option>{fin.accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
+                  <option value="">Pick...</option>{fin.accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
                 </select></label>
             )}
             {format === "square" && (
@@ -232,7 +233,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
                     <tr key={inv.n} className={`border-t border-helios-line ${dup ? "opacity-50" : ""}`}>
                       <td className="p-2">{inv.vendor}</td><td className="p-2">{inv.date}</td><td className="p-2">{inv.order_ref}</td>
                       <td className="p-2 text-right tabular-nums">{fmtCents(inv.total_cents)}</td>
-                      <td className="p-2">{dup ? <Badge>already added</Badge> : txn ? <button className="text-asu-gold hover:underline" onClick={() => openTxn(txn.id)}>{shortDate(txn.date)} {txn.vendor || txn.description} →</button> : <Badge tone="warn">no charge found yet</Badge>}</td>
+                      <td className="p-2">{dup ? <Badge>already added</Badge> : txn ? <button className="text-asu-gold hover:underline" onClick={() => openTxn(txn.id)}>{shortDate(txn.date)} {txn.vendor || txn.description}</button> : <Badge tone="warn">no charge found yet</Badge>}</td>
                     </tr>))}</tbody>
                 </table>
               </div>
@@ -256,13 +257,13 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
                     <tbody>{plan.lines.map((p, i) => (
                       <tr key={i} className={`border-t border-helios-line align-top ${p.action === "duplicate" ? "opacity-50" : ""}`}>
                         <td className="whitespace-nowrap p-2">{shortDate(p.line.date)}</td>
-                        <td className="p-2">{p.line.description}{p.line.reference ? <span className="text-helios-dim"> · {p.line.reference}</span> : null}</td>
+                        <td className="p-2">{p.line.description}{p.line.reference ? <span className="text-helios-dim"> | {p.line.reference}</span> : null}</td>
                         <td className={`p-2 text-right tabular-nums ${p.line.amount_cents < 0 ? "text-helios-danger" : "text-helios-success"}`}>{fmtCents(p.line.amount_cents)}</td>
                         <td className="p-2">
                           <Badge tone={ACTION[p.action]![1]}>{ACTION[p.action]![0]}</Badge>
-                          {p.action === "add" && <span className="ml-1 text-helios-dim">{p.txn.kind}{p.txn.vendor ? ` · ${p.txn.vendor}` : ""}</span>}
+                          {p.action === "add" && <span className="ml-1 text-helios-dim">{p.txn.kind}{p.txn.vendor ? ` | ${p.txn.vendor}` : ""}</span>}
                           {p.matchId && <button className="ml-1 text-asu-gold hover:underline" onClick={() => openTxn(p.matchId!)}>#{p.matchId}</button>}
-                          {p.pair && <div className="text-helios-dim">and −{fmtCents(p.line.amount_cents)} out of Square</div>}
+                          {p.pair && <div className="text-helios-dim">and -{fmtCents(p.line.amount_cents)} out of Square</div>}
                           {p.action === "add" && p.txn.review_note && <div className="text-asu-gold">{p.txn.review_note}</div>}
                         </td>
                         <td className="p-2">{p.action === "add" && p.txn.kind !== "transfer" ? (
@@ -277,7 +278,7 @@ export function ImportView({ client, fin, reload, flash, openTxn }: FinanceProps
 
           <div className="flex gap-2">
             <Button disabled={busy || !!already || wrongAccount || (format === "invoices" ? !invoices.some((x) => !x.dup) : !plan?.lines.length)} onClick={() => void run()}>
-              {busy ? "Importing…" : "Import"}</Button>
+              {busy ? "Importing..." : "Import"}</Button>
             <Button kind="ghost" onClick={() => setFile(null)}>Cancel</Button>
           </div>
         </Card>
@@ -305,12 +306,12 @@ function MapPicker({ headers, map, setMap }: { headers: string[]; map: GenericMa
   const field = (k: keyof Omit<GenericMap, "flip">, label: string) => (
     <label className="flex flex-col gap-1 text-xs">{label}
       <select className={input} value={map[k]} onChange={(e) => setMap({ ...map, [k]: Number(e.target.value) })}>
-        <option value={-1}>—</option>{headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+        <option value={-1}>-</option>{headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
       </select></label>
   );
   return (
     <div className="flex flex-wrap items-end gap-2 rounded-md border border-helios-line p-2">
-      {field("date", "Date")}{field("description", "Description")}{field("amount", "Amount (+ in, − out)")}
+      {field("date", "Date")}{field("description", "Description")}{field("amount", "Amount (+ in, - out)")}
       <span className="pb-1.5 text-xs text-helios-dim">or</span>{field("debit", "Money out")}{field("credit", "Money in")}
       {field("reference", "Reference")}{field("balance", "Balance")}
       <label className="flex items-center gap-1 pb-1.5 text-xs"><input type="checkbox" checked={map.flip} onChange={(e) => setMap({ ...map, flip: e.target.checked })} />Amounts are reversed (charges positive)</label>

@@ -28,7 +28,7 @@ function ReceiptChip({ client, r, onDelete }: { client: SupabaseClient; r: Recei
         {thumb ? <img src={thumb} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden className="text-[10px] font-semibold text-helios-muted">{r.content_type === "application/pdf" ? "PDF" : "FILE"}</span>}
         <span className="max-w-[120px] truncate">{r.file_name}</span>
       </button>
-      {onDelete && <button className="pr-1.5 text-helios-muted hover:text-helios-danger" onClick={() => onDelete(r)} aria-label={`Remove ${r.file_name}`}>✕</button>}
+      {onDelete && <button className="pr-1.5 text-helios-muted hover:text-helios-danger" onClick={() => onDelete(r)} aria-label={`Remove ${r.file_name}`}>x</button>}
     </span>
   );
 }
@@ -68,7 +68,7 @@ export function ReceiptPicker({ files, setFiles, compact }: { files: File[]; set
           {files.map((f, i) => (
             <span key={i} className="inline-flex items-center gap-1 rounded-md border border-helios-line bg-helios-strip px-1.5 py-1 text-xs">
               <span className="max-w-[160px] truncate">{f.name}</span>
-              <button className="text-helios-muted hover:text-helios-danger" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`}>✕</button>
+              <button className="text-helios-muted hover:text-helios-danger" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`}>x</button>
             </span>
           ))}
         </div>

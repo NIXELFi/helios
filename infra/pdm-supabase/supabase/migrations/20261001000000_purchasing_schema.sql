@@ -222,6 +222,20 @@ returns boolean language sql stable security definer set search_path = '' as $$
       and pm.has_capability((select auth.uid()), 'purchasing.request', a.subteam_id));
 $$;
 
+-- Quantities are positive and prices aren't negative (a typo'd minus sign
+-- would quietly shrink a subteam's planned spend). Shipping may be a credit.
+create or replace function purchasing.check_amounts(p jsonb)
+returns void language plpgsql immutable set search_path = '' as $$
+begin
+  if nullif(p ->> 'quantity', '')::numeric <= 0 then
+    raise exception 'quantity must be more than zero' using errcode = '22023';
+  end if;
+  if nullif(p ->> 'unit_price_cents', '')::bigint < 0 or nullif(p ->> 'total_estimate_cents', '')::bigint < 0
+     or nullif(p ->> 'actual_total_cents', '')::bigint < 0 then
+    raise exception 'a price can''t be negative' using errcode = '22023';
+  end if;
+end; $$;
+
 create or replace function purchasing.display_name(uid uuid)
 returns text language sql stable security definer set search_path = '' as $$
   select coalesce(nullif(u.raw_user_meta_data ->> 'display_name', ''), u.email::text, 'someone')
@@ -340,6 +354,7 @@ begin
 
   for v_row in select * from jsonb_array_elements(p_rows) loop
     if coalesce(btrim(v_row ->> 'title'), '') = '' then continue; end if;
+    perform purchasing.check_amounts(v_row);
     insert into purchasing.items (
       title, status, priority, season_id, requester_id, requester_name, justification, needed_by,
       vendor, product_url, part_number, quantity, unit_price_cents, tax_shipping_cents,
@@ -397,6 +412,12 @@ begin
   select * into v_item from purchasing.items where id = p_id for update;
   if not found then raise exception 'no such item' using errcode = 'P0002'; end if;
   v_old := v_item;
+  -- checked before looking at the patch, so an empty one can't read an item
+  if not (v_exec or purchasing.can_request_item(p_id)) then
+    raise exception 'you can only edit items for your own subteam' using errcode = '42501';
+  end if;
+  if jsonb_typeof(p_patch) <> 'object' then raise exception 'nothing to change' using errcode = '22023'; end if;
+  perform purchasing.check_amounts(p_patch);
   for k in select jsonb_object_keys(p_patch) loop
     if not (k = any (v_requester_fields) or k = any (v_buyer_fields)) then
       raise exception 'field % cannot be edited', k using errcode = '22023';
@@ -455,7 +476,8 @@ begin
     or v_item.product_url is distinct from v_old.product_url or v_item.part_number is distinct from v_old.part_number
     or v_item.quantity is distinct from v_old.quantity or v_item.unit_price_cents is distinct from v_old.unit_price_cents
     or v_item.tax_shipping_cents is distinct from v_old.tax_shipping_cents
-    or v_item.total_estimate_cents is distinct from v_old.total_estimate_cents) then
+    or v_item.total_estimate_cents is distinct from v_old.total_estimate_cents
+    or v_item.actual_total_cents is distinct from v_old.actual_total_cents) then
     delete from purchasing.approvals where item_id = p_id;
     if found then
       insert into purchasing.events (actor_id, item_id, field, new_value)

@@ -68,7 +68,7 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
               <div className="flex items-center justify-between border-b border-helios-line px-4 py-2">
                 <b>{g.person}</b>
                 <span className="text-sm">{g.owed ? <><b className="tabular-nums">{fmtCents(g.owed)}</b> owed ({g.unpaid})</> : <Badge tone="good">all paid</Badge>}
-                  {g.paid > 0 && <span className="text-helios-dim"> · {fmtCents(g.paid)} paid</span>}</span>
+                  {g.paid > 0 && <span className="text-helios-dim"> | {fmtCents(g.paid)} paid</span>}</span>
               </div>
               <table className="w-full text-sm">
                 <tbody>
@@ -84,7 +84,7 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
 
       {picked.size > 0 && (
         <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-panel px-4 py-2 shadow-lg">
-          <b className="text-asu-gold">{picked.size} selected · {fmtCents(pickedRows.reduce((s, r) => s + (r.amount_cents ?? 0), 0))}</b>
+          <b className="text-asu-gold">{picked.size} selected | {fmtCents(pickedRows.reduce((s, r) => s + (r.amount_cents ?? 0), 0))}</b>
           <label className="flex items-center gap-1 text-sm">Paid on<input type="date" className={input} value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></label>
           <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />
           <label className="flex items-center gap-1 text-sm" title="Adds the check to the ledger as uncashed, so Available stays right until it clears">
@@ -111,7 +111,7 @@ function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "cl
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <b>{r.person_name}</b> <span className="text-helios-dim">asked {shortDate(r.created_at)}</span>
-          <div className="text-sm">{r.reason}{where && <span className="text-helios-dim"> · {where}</span>}{r.requested_date && <span className="text-helios-dim"> · paid {shortDate(r.requested_date)}</span>}</div>
+          <div className="text-sm">{r.reason}{where && <span className="text-helios-dim"> | {where}</span>}{r.requested_date && <span className="text-helios-dim"> | paid {shortDate(r.requested_date)}</span>}</div>
         </div>
         <b className="text-lg tabular-nums">{fmtCents(r.amount_cents)}</b>
       </div>
@@ -148,7 +148,7 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
       </td>
       <td className="p-2">
         {paid ? r.reason : <input className={`${input} w-full`} defaultValue={r.reason} onBlur={(e) => { if (e.target.value !== r.reason) saveField({ reason: e.target.value }); }} />}
-        <div className="mt-1 text-xs text-helios-dim">{[where, r.requested_date && `dated ${shortDate(r.requested_date)}`, r.user_id && "asked in Helios"].filter(Boolean).join(" · ")}</div>
+        <div className="mt-1 text-xs text-helios-dim">{[where, r.requested_date && `dated ${shortDate(r.requested_date)}`, r.user_id && "asked in Helios"].filter(Boolean).join(" | ")}</div>
       </td>
       <td className="p-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -162,7 +162,7 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
         {paid ? <>
           <Badge tone="good">paid {shortDate(r.paid_date)}</Badge>
           {r.check_number && <div className="mt-1">check #{r.check_number}</div>}
-          {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger →</button>}
+          {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger</button>}
         </> : <Badge tone="warn">owed</Badge>}
       </td>
     </tr>

@@ -52,6 +52,7 @@ export interface Txn {
   needs_review: boolean;
   review_note: string;
   source: string;
+  source_key?: string | null;
   statement_id: number | null;
   notes: string;
   allocation_basis: string;

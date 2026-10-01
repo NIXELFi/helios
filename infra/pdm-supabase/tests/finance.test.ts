@@ -215,6 +215,33 @@ describe("finance", () => {
     expect((await pres.f.rpc("pay_reimbursements", { ...pay, p_ids: [other!.id] })).error?.message).toMatch(/already in the ledger/);
   });
 
+  it("execs can't approve, pay or edit their own reimbursement by writing the row directly", async () => {
+    await accounts();
+    const cfo = await person("cfo", "cfo");
+    const { data: own } = await cfo.f.rpc("request_reimbursement", { p_amount_cents: 4200, p_reason: "fuel" });
+    expect((await cfo.f.from("reimbursements").update({ status: "owed" }).eq("id", own)).error?.message).toMatch(/another exec/);
+    expect((await cfo.f.from("reimbursements").update({ amount_cents: 999999 }).eq("id", own)).error?.message).toMatch(/another exec/);
+    expect((await cfo.f.from("reimbursements").insert({ person_name: "me", user_id: cfo.user.id, amount_cents: 1, status: "owed" })).error?.message)
+      .toMatch(/Get reimbursed/);
+    // someone else's: name, amount and reason can be fixed, but not the decision
+    const { data: other } = await cfo.f.from("reimbursements").insert({ person_name: "Sam", amount_cents: 100, reason: "x" }).select("id").single();
+    expect((await cfo.f.from("reimbursements").update({ amount_cents: 150 }).eq("id", other!.id)).error).toBeNull();
+    expect((await cfo.f.from("reimbursements").update({ status: "paid" }).eq("id", other!.id)).error?.message).toMatch(/buttons/);
+    expect((await cfo.f.from("reimbursements").insert({ person_name: "Sam", amount_cents: 1, status: "paid" })).error).not.toBeNull();
+    // the withdraw RPC still works for the owner
+    expect((await cfo.f.rpc("withdraw_reimbursement", { p_id: own })).error).toBeNull();
+  });
+
+  it("a split's shares are positive", async () => {
+    const { card } = await accounts();
+    const cfo = await person("cfo", "cfo");
+    const t = (await fin().from("transactions").insert({ account_id: card, date: "2026-09-10", amount_cents: -10000, kind: "charge" }).select("id").single()).data!;
+    const st = (await pm().from("subteams").select("id").limit(1).single()).data!.id;
+    expect((await cfo.f.rpc("set_allocations", { p_txn: t.id, p_allocations: [
+      { project_id: null, subteam_id: st, amount_cents: 15000 }, { project_id: null, subteam_id: st, amount_cents: -5000 }] })).error?.message)
+      .toMatch(/positive/);
+  });
+
   it("an imported statement line can't be relabelled as hand-entered and deleted", async () => {
     const { card } = await accounts();
     const cfo = await person("cfo", "cfo");

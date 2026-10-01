@@ -205,6 +205,8 @@ export interface PlanOptions {
   existing: Txn[];
   squareCategory?: string;                      // Dues, Merch & website sales...
   cardStatement?: { periodStart: string | null; closing: string } | null;
+  /** Where the lines came from, when it isn't the CSV format itself ("chase-card-pdf"). */
+  source?: string;
 }
 
 const days = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
@@ -267,6 +269,10 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
   const squareAcct = o.accounts.find((a) => /square/i.test(a.name) && a.kind === "holding") ?? null;
   const seen = new Map<string, number>();
   const plan: Plan = { format, account, lines: [], balances: [], statement: null, extra: [] };
+  // A statement PDF and a CSV export of the same account describe the same
+  // lines with different keys, so each gets its own source and key prefix.
+  const source = o.source ?? format;
+  const keyPrefix = `${source}:${account.id}:`;
 
   for (const l of lines) {
     const card = format === "chase-card" || (format === "generic" && account.kind === "credit_card");
@@ -279,12 +285,12 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     const sig = `${l.date}|${l.amount_cents}|${l.description}`;
     const k = (seen.get(sig) ?? 0) + 1;
     seen.set(sig, k);
-    const source_key = l.external_id ? `${format}:${account.id}:${l.external_id}` : `${format}:${account.id}:${l.date}:${l.amount_cents}:${hashText(l.description)}:${k}`;
+    const source_key = l.external_id ? `${keyPrefix}${l.external_id}` : `${keyPrefix}${l.date}:${l.amount_cents}:${hashText(l.description)}:${k}`;
     const txn: NewTxn = {
       account_id: account.id, date: l.date, post_date: l.post_date, cleared_date: dec.kind === "check" ? l.date : l.post_date ?? l.date,
       amount_cents: l.amount_cents, description: dec.description, vendor: dec.vendor, kind: dec.kind, category: dec.category,
       reference: l.reference, status: "posted", transfer_group: null, needs_review: !!dec.review, review_note: dec.review,
-      source: format, source_key, notes: `From ${o.fileName}${l.description && l.description !== dec.description ? `: ${l.description}` : ""}`,
+      source, source_key, notes: `From ${o.fileName}${l.description && l.description !== dec.description ? `: ${l.description}` : ""}`,
     };
 
     // a check written in Helios that has now cleared
@@ -299,7 +305,7 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     }
     // a card payment the ledger was expecting
     if (dec.transfer === "card") {
-      const waiting = mine.filter((t) => t.kind === "transfer" && t.status === "expected" && t.transfer_group && !used.has(t.id)
+      const waiting = mine.filter((t) => t.kind === "transfer" && t.status === "expected" && t.transfer_group?.startsWith("autopay:") && !used.has(t.id)
         && Math.sign(t.amount_cents) === Math.sign(l.amount_cents) && days(t.date, l.date) <= 45);
       // the exact amount first; otherwise the one expected autopay in the window,
       // taking the amount actually paid (it can differ from the statement by a
@@ -317,12 +323,14 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
         continue;
       }
     }
-    // already in the ledger from another source (a statement PDF, or typed in).
-    // The same export format is matched exactly by source_key on the server,
-    // so a near match there is a different purchase that happens to cost the
-    // same (two $25.00 charges on nearby days) and must not be skipped. Across
-    // formats the dates may drift a few days; the descriptions must agree too.
-    const dup = mine.find((t) => !used.has(t.id) && t.source !== format && t.amount_cents === l.amount_cents
+    // already in the ledger from another source (a statement PDF, a CSV, the
+    // old ledger, or typed in). A line keyed by this same source and scheme
+    // is matched exactly by source_key on the server, so a near match there is
+    // a different purchase that happens to cost the same (two $25.00 charges on
+    // nearby days) and must not be skipped. Across sources the dates may drift
+    // a few days; the descriptions must agree too.
+    const sameScheme = (t: Txn) => t.source === source && (t.source_key ?? "").startsWith(keyPrefix);
+    const dup = mine.find((t) => !used.has(t.id) && !sameScheme(t) && t.amount_cents === l.amount_cents
       && [t.date, t.post_date].some((d) => d && [l.date, l.post_date].some((e) => e && days(d, e) <= 3))
       && (t.date === l.date || sameMerchant(t.description || t.vendor || "", `${l.description} ${dec.vendor ?? ""}`)));
     if (dup) {

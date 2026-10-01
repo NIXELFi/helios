@@ -39,7 +39,7 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs text-helios-dim">
-        Remaining = budget − spent − committed. "After planned" also takes off parts still on the list: if it goes negative, the plan doesn't fit the budget.
+        Remaining = budget - spent - committed. "After planned" also takes off parts still on the list: if it goes negative, the plan doesn't fit the budget.
         <b className="text-helios-text"> Click a line to see what's in it.</b>
         <span className="ml-3 inline-flex items-center gap-1"><i className="inline-block size-2 rounded-sm bg-helios-success" />spent</span>
         <span className="ml-2 inline-flex items-center gap-1"><i className="inline-block size-2 rounded-sm bg-violet-400" />committed</span>
@@ -52,7 +52,7 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
           <Card key={pid ?? "team"} className="p-0">
             <div className="flex items-center justify-between px-4 pb-1 pt-3">
               <h2 className="font-semibold">{project ? <>{project.car_code} <span className="text-helios-dim">{project.name}</span></> : <>Team <span className="text-helios-dim">shared by both cars</span></>}</h2>
-              <span className="text-xs text-helios-dim">{fmtCents(totals.budget)} budget · <b className={totals.left < 0 ? "text-helios-danger" : "text-helios-text"}>{fmtCents(totals.left)} left</b></span>
+              <span className="text-xs text-helios-dim">{fmtCents(totals.budget)} budget | <b className={totals.left < 0 ? "text-helios-danger" : "text-helios-text"}>{fmtCents(totals.left)} left</b></span>
             </div>
             <table className="w-full text-[13px]">
               <thead className="text-[11px] uppercase tracking-wider text-helios-dim">
@@ -73,7 +73,7 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
                     <Fragment key={key}>
                       <tr className={`cursor-pointer border-t border-helios-line hover:bg-helios-strip ${open === key ? "bg-helios-strip" : ""}`} onClick={() => toggle(key, b)}>
                         <td className="p-2">
-                          <div className="font-semibold"><span className="mr-1 text-helios-muted">{open === key ? "▾" : "▸"}</span>{b.name}</div>
+                          <div className="font-semibold"><span className="mr-1 text-helios-muted">{open === key ? "v" : ">"}</span>{b.name}</div>
                           <div className="mt-0.5 flex gap-1">{b.subteam_ids.map((id) => <SubteamChip key={id} subteam={subteams.find((s) => s.id === id)} />)}</div>
                         </td>
                         <td className="p-2 text-right">{fmtCents(b.budget_cents)}</td>
@@ -94,7 +94,7 @@ export function BudgetsView({ client, data, projectId, openTxn, openPart }: {
                       {open === key && (
                         <tr className="bg-helios-base/40">
                           <td colSpan={8} className="px-6 py-3">
-                            {d === "loading" || d === undefined ? <span className="text-xs text-helios-dim">Loading…</span>
+                            {d === "loading" || d === undefined ? <span className="text-xs text-helios-dim">Loading...</span>
                               : typeof d === "string" ? <span className="text-xs text-helios-danger">{d}</span>
                               : !d.length ? <span className="text-xs text-helios-dim">Nothing in this line yet.</span>
                               : <Detail shares={d} openTxn={openTxn} openPart={openPart} noLine={!b.budget_line_id} />}
@@ -122,7 +122,7 @@ function Detail({ shares, openTxn, openPart, noLine }: {
       {noLine && <p className="text-xs text-helios-dim">This spending is tagged to a subteam that no budget line covers. An exec can add a budget line for it, or re-tag the charges in the Ledger.</p>}
       {groups.map(([k, xs]) => (
         <div key={k}>
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-helios-dim">{BUCKET[k]} · {fmtCents(xs.reduce((s, x) => s + x.cents, 0))}</div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-helios-dim">{BUCKET[k]} | {fmtCents(xs.reduce((s, x) => s + x.cents, 0))}</div>
           <table className="w-full text-xs">
             <tbody>
               {xs.map((x, i) => (
@@ -132,8 +132,8 @@ function Detail({ shares, openTxn, openPart, noLine }: {
                   <td className="py-1">{x.label}</td>
                   <td className="w-24 py-1 text-right tabular-nums">{fmtCents(x.cents)}</td>
                   <td className="w-28 py-1 text-right">
-                    {x.source === "part" ? <button className="text-asu-gold hover:underline" onClick={() => openPart(x.ref)}>Show part →</button>
-                      : x.txn_id && openTxn ? <button className="text-asu-gold hover:underline" onClick={() => openTxn(x.txn_id!)}>Ledger line →</button> : null}
+                    {x.source === "part" ? <button className="text-asu-gold hover:underline" onClick={() => openPart(x.ref)}>Show part</button>
+                      : x.txn_id && openTxn ? <button className="text-asu-gold hover:underline" onClick={() => openTxn(x.txn_id!)}>Ledger line</button> : null}
                   </td>
                 </tr>
               ))}

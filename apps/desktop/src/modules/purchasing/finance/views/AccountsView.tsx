@@ -65,7 +65,7 @@ function AccountRow({ a, client, fin, pur, reload, flash, done }: Pick<FinancePr
       {statements.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
           <span className="text-helios-dim">Statements:</span>
-          {statements.map((s) => <Badge key={s.id} title={s.source_file}>{shortDate(s.closing_date)}{s.ending_cents !== null ? ` · ${fmtCents(s.ending_cents)}` : ` · ${fmtCents(s.net_charges_cents)}`}</Badge>)}
+          {statements.map((s) => <Badge key={s.id} title={s.source_file}>{shortDate(s.closing_date)}{s.ending_cents !== null ? ` | ${fmtCents(s.ending_cents)}` : ` | ${fmtCents(s.net_charges_cents)}`}</Badge>)}
         </div>
       )}
     </Card>

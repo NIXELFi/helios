@@ -18,6 +18,14 @@ export function parseCents(input: string | number | null | undefined): number | 
   return negative ? -cents : cents;
 }
 
+/** A typed amount: blank is "none" (null), anything else must read as money or it throws. */
+export function requireCents(input: string | null | undefined, what = "amount"): number | null {
+  if (!input?.trim()) return null;
+  const cents = parseCents(input);
+  if (cents === null) throw new Error(`"${input.trim()}" isn't a valid ${what}.`);
+  return cents;
+}
+
 export function fmtCents(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return "";
   const sign = cents < 0 ? "-" : "";

@@ -71,13 +71,27 @@ describe("importers", () => {
   it("a different charge that costs the same isn't taken for a duplicate", () => {
     const lines = parseChaseChecking(parseCsv(checkingCsv));
     // an earlier export of the same format: exact keys catch repeats, so a near match is a new purchase
-    const sameFormat = txn({ account_id: 1, date: "2026-09-20", amount_cents: -2000, kind: "withdrawal", source: "chase-checking", description: "VENMO PAYMENT" });
+    const sameFormat = txn({ account_id: 1, date: "2026-09-20", amount_cents: -2000, kind: "withdrawal", source: "chase-checking", source_key: "chase-checking:1:2026-09-20:-2000:abc:1", description: "VENMO PAYMENT" });
     expect(planImport("chase-checking", lines, CHECKING, opts([sameFormat])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("add");
     // from a PDF, two days apart, but a different merchant
     const otherMerchant = txn({ account_id: 1, date: "2026-09-19", amount_cents: -2000, kind: "withdrawal", source: "chase-checking-pdf", description: "ZELLE TO SAM" });
     expect(planImport("chase-checking", lines, CHECKING, opts([otherMerchant])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("add");
     const pdfVenmo = { ...otherMerchant, id: 9001, description: "Venmo payment 1234" };
     expect(planImport("chase-checking", lines, CHECKING, opts([pdfVenmo])).lines.find((p) => p.line.description.includes("VENMO"))!.action).toBe("duplicate");
+  });
+
+  it("a statement PDF and a CSV export of the same lines never both get added", () => {
+    const lines = parseChaseChecking(parseCsv(checkingCsv));
+    // the CSV went in first; now the PDF of the same month (same parser output, PDF source)
+    const csv = planImport("chase-checking", lines, CHECKING, opts());
+    const csvRows = csv.lines.map((p, i) => txn({ ...p.txn, id: 7000 + i } as Partial<Txn> & Pick<Txn, "account_id" | "date" | "amount_cents" | "kind">));
+    const pdf = planImport("chase-checking", lines, CHECKING, { ...opts(csvRows), source: "chase-checking-pdf" });
+    expect(pdf.lines.every((p) => p.action !== "add")).toBe(true);
+    expect(pdf.lines[0]!.txn.source_key.startsWith("chase-checking-pdf:1:")).toBe(true);
+    // and the other way round
+    const pdfRows = planImport("chase-checking", lines, CHECKING, { ...opts(), source: "chase-checking-pdf" }).lines
+      .map((p, i) => txn({ ...p.txn, id: 8000 + i } as Partial<Txn> & Pick<Txn, "account_id" | "date" | "amount_cents" | "kind">));
+    expect(planImport("chase-checking", lines, CHECKING, opts(pdfRows)).lines.every((p) => p.action !== "add")).toBe(true);
   });
 
   it("an autopay that differs from what was expected confirms it with the amount actually paid", () => {

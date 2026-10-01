@@ -81,14 +81,14 @@ export function LedgerView(props: FinanceProps & { selected: number | null; sele
           <input type="date" className={input} value={f.start} onChange={(e) => set({ start: e.target.value })} title="From" />
           <input type="date" className={input} value={f.end} onChange={(e) => set({ end: e.target.value })} title="To" />
           <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={f.attention} onChange={(e) => set({ attention: e.target.checked })} />Needs attention</label>
-          <input className={`${input} w-44`} placeholder="Search…" value={f.q} onChange={(e) => set({ q: e.target.value })} />
+          <input className={`${input} w-44`} placeholder="Search..." value={f.q} onChange={(e) => set({ q: e.target.value })} />
           {JSON.stringify(f) !== JSON.stringify(NO_FILTERS) && <Button kind="ghost" onClick={() => setF(NO_FILTERS)}>Clear</Button>}
           <div className="ml-auto flex gap-2">
             <Button kind="ghost" onClick={() => void exportCsv()}>Export CSV</Button>
             <Button onClick={() => { setAdding(true); select(null); }}>+ Transaction</Button>
           </div>
         </div>
-        <div className="text-xs text-helios-dim">{rows.length} transactions · spending {fmtCents(spend)} · money in {fmtCents(income)}</div>
+        <div className="text-xs text-helios-dim">{rows.length} transactions | spending {fmtCents(spend)} | money in {fmtCents(income)}</div>
 
         {rows.length ? (
           <div className="overflow-auto rounded-lg border border-helios-line bg-helios-panel">
@@ -105,14 +105,14 @@ export function LedgerView(props: FinanceProps & { selected: number | null; sele
                     <td className="whitespace-nowrap p-2 text-xs">{fin.accounts.find((a) => a.id === t.account_id)?.name}</td>
                     <td className="p-2">
                       {t.vendor || t.description}
-                      {t.kind === "check" && <span className="text-xs text-helios-dim"> · check {t.reference}{t.cleared_date ? "" : " (uncashed)"}</span>}
+                      {t.kind === "check" && <span className="text-xs text-helios-dim"> | check {t.reference}{t.cleared_date ? "" : " (uncashed)"}</span>}
                       {t.status === "expected" && <> <Badge>expected</Badge></>}
                       {t.kind === "transfer" && <> <Badge tone="info">transfer</Badge></>}
                       {t.needs_review && <> <Badge tone="warn" title={t.review_note}>review</Badge></>}
                     </td>
                     <td className="p-2 text-xs">{t.category === "Needs category" ? <Badge tone="warn">needs category</Badge> : t.category}</td>
                     <td className="p-2 text-xs">{t.txn_allocations.length ? t.txn_allocations.map((a) => where(a.project_id, a.subteam_id)).join(", ")
-                      : isSpend(t) ? <span className="text-helios-muted">—</span> : ""}</td>
+                      : isSpend(t) ? <span className="text-helios-muted">-</span> : ""}</td>
                     <td className="p-2 text-center text-xs text-helios-dim">{evCount.get(t.id) ?? ""}</td>
                     <td className="p-2 text-right"><Money cents={t.amount_cents} signed /></td>
                     <td className="p-2 text-right text-xs tabular-nums text-helios-dim">{fmtCents(running.get(t.id))}</td>
@@ -192,9 +192,9 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
       <div className="flex items-start justify-between">
         <div>
           <b>{t.vendor || t.description || "Transaction"}</b>
-          <div className="text-xs text-helios-dim">#{t.id} · {t.source === "manual" ? "entered by hand" : `from ${t.source}`}{t.statement_id ? " · on a statement" : ""}</div>
+          <div className="text-xs text-helios-dim">#{t.id} | {t.source === "manual" ? "entered by hand" : `from ${t.source}`}{t.statement_id ? " | on a statement" : ""}</div>
         </div>
-        <button className="text-helios-dim hover:text-helios-text" onClick={close} aria-label="Close">✕</button>
+        <button className="text-helios-dim hover:text-helios-text" onClick={close} aria-label="Close">x</button>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-sm">
@@ -231,7 +231,7 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
               <div key={i} className="flex items-center gap-1">
                 <WherePicker pur={pur} value={a} onChange={(v) => setSplit((s) => s.map((x, j) => (j === i ? { ...x, ...v } : x)))} />
                 <ShareAmount cents={a.amount_cents} onChange={(c) => setSplit((s) => s.map((x, j) => (j === i ? { ...x, amount_cents: c } : x)))} />
-                <button className="px-1 text-helios-muted hover:text-helios-danger" onClick={() => setSplit((s) => s.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
+                <button className="px-1 text-helios-muted hover:text-helios-danger" onClick={() => setSplit((s) => s.filter((_, j) => j !== i))} aria-label="Remove">x</button>
               </div>
             ))}
           </div>
@@ -271,14 +271,14 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
 
       <div className="border-t border-helios-line pt-3">
         {history === null
-          ? <button className="text-xs text-helios-dim hover:text-helios-text" onClick={() => void fetchEvents(client, "transactions", String(t.id)).then(setHistory).catch(() => setHistory([]))}>▸ Show history</button>
+          ? <button className="text-xs text-helios-dim hover:text-helios-text" onClick={() => void fetchEvents(client, "transactions", String(t.id)).then(setHistory).catch(() => setHistory([]))}>Show history</button>
           : history.length ? (
             <table className="w-full text-xs">
               <tbody>{history.map((h) => (
                 <tr key={h.id} className="border-t border-helios-line align-top">
                   <td className="py-1 whitespace-nowrap text-helios-dim">{shortDate(h.at)}</td>
                   <td className="py-1 px-1">{h.field}</td>
-                  <td className="py-1 break-all text-helios-dim">{h.field.startsWith("*") ? "" : `${h.old_value ?? "∅"} → ${h.new_value ?? "∅"}`}</td>
+                  <td className="py-1 break-all text-helios-dim">{h.field.startsWith("*") ? "" : `${h.old_value ?? "(none)"} -> ${h.new_value ?? "(none)"}`}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -293,7 +293,7 @@ function EvidenceRowView({ e, action, onAction, onOpen }: { e: Evidence; action:
     <div className="mt-1 flex items-center gap-2 rounded-md border border-helios-line px-2 py-1.5 text-xs">
       <Badge tone={e.kind === "request" ? "info" : "plain"}>{e.kind === "request" ? "part" : e.kind}</Badge>
       <div className="min-w-0 flex-1">
-        <div className="truncate">{e.vendor ?? "?"} {e.order_ref ? `· ${e.order_ref}` : ""} {e.kind === "request" ? `· ${e.source_file}` : ""}</div>
+        <div className="truncate">{e.vendor ?? "?"} {e.order_ref ? `| ${e.order_ref}` : ""} {e.kind === "request" ? `| ${e.source_file}` : ""}</div>
         <div className="truncate text-helios-dim">{shortDate(e.date)} {e.items.slice(0, 60)}</div>
       </div>
       <span className="tabular-nums">{fmtCents(e.total_cents)}</span>
@@ -330,7 +330,7 @@ function NewTxn({ client, fin, pur, reload, flash, done }: FinanceProps & { done
   }
   return (
     <Card className="sticky top-0 flex flex-col gap-2 text-sm">
-      <div className="flex items-center justify-between"><b>New transaction</b><button className="text-helios-dim" onClick={() => done(null)}>✕</button></div>
+      <div className="flex items-center justify-between"><b>New transaction</b><button className="text-helios-dim" onClick={() => done(null)}>x</button></div>
       <div className="flex flex-wrap gap-1">
         {(["check", "deposit", "withdrawal", "charge", "fee"] as TxnKind[]).map((k) => (
           <button key={k} onClick={() => setForm({ ...form, kind: k })}

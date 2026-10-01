@@ -29,7 +29,7 @@ export function BalancesView({ client, fin, reload, flash, me }: FinanceProps) {
       </div>
       <Card className="p-0">
         <button className="w-full px-4 py-3 text-left font-semibold" onClick={() => setAllOpen((o) => !o)}>
-          {allOpen ? "▾" : "▸"} Every entry and its reconciliation ({fin.balances.length})
+          {allOpen ? "v" : ">"} Every entry and its reconciliation ({fin.balances.length})
         </button>
         {allOpen && (
           <div className="overflow-auto border-t border-helios-line">
@@ -45,7 +45,7 @@ export function BalancesView({ client, fin, reload, flash, me }: FinanceProps) {
                       <td className="p-2 whitespace-nowrap">{e.as_of}</td>
                       <td className="p-2">{accountLabel(fin.accounts.find((a) => a.id === e.account_id))}{e.measure === "available_credit" && <span className="text-xs text-helios-dim"> (available credit)</span>}</td>
                       <td className="p-2 text-right tabular-nums">{fmtCents(e.balance_cents)}</td>
-                      <td className="p-2 text-right tabular-nums text-helios-dim">{r?.computed_cents != null ? fmtCents(r.computed_cents) : "—"}</td>
+                      <td className="p-2 text-right tabular-nums text-helios-dim">{r?.computed_cents != null ? fmtCents(r.computed_cents) : "-"}</td>
                       <td className="p-2 text-right">{r?.difference_cents ? <Badge tone="bad">{fmtSigned(r.difference_cents)}</Badge> : r?.difference_cents === 0 ? <Badge tone="good">ties out</Badge> : <span className="text-xs text-helios-muted">starting point</span>}</td>
                       <td className="p-2 text-xs">{e.entered_by_name}{e.note && <div className="text-helios-dim">{e.note}</div>}</td>
                     </tr>
@@ -97,8 +97,8 @@ function AccountCard({ a, client, fin, reload, flash, me, now, closings, recon }
     <Card>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <b>{a.name}</b>{a.last4 && !a.name.includes(a.last4) && <span className="ml-1 font-mono text-xs text-helios-dim">••{a.last4}</span>}
-          <div className="text-xs text-helios-dim">{KIND_NOTE[a.kind]}{!a.active && " · on hold"}</div>
+          <b>{a.name}</b>{a.last4 && !a.name.includes(a.last4) && <span className="ml-1 font-mono text-xs text-helios-dim">...{a.last4}</span>}
+          <div className="text-xs text-helios-dim">{KIND_NOTE[a.kind]}{!a.active && " | on hold"}</div>
         </div>
         {lastRecon?.difference_cents ? <Badge tone="bad" title="Entered balance minus what the ledger computes">{fmtSigned(lastRecon.difference_cents)} unexplained</Badge>
           : lastRecon?.difference_cents === 0 ? <Badge tone="good">ties out</Badge> : null}
@@ -108,7 +108,7 @@ function AccountCard({ a, client, fin, reload, flash, me, now, closings, recon }
         <button className="group my-2 block text-left text-3xl font-semibold tabular-nums hover:text-asu-gold" title="Click to enter a new balance"
           onClick={() => { setEditing(true); setAsOf(now); }}>
           {latest ? fmtCents(latest.balance_cents) : computed !== null ? fmtCents(computed) : <span className="text-base text-helios-muted">No balance yet</span>}
-          <span className="ml-2 text-sm text-helios-muted group-hover:text-asu-gold">✎</span>
+          <span className="ml-2 text-sm text-helios-muted group-hover:text-asu-gold">edit</span>
         </button>
       ) : (
         <form className="my-2 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void save(); }}>
@@ -122,7 +122,7 @@ function AccountCard({ a, client, fin, reload, flash, me, now, closings, recon }
       )}
 
       <div className="text-xs text-helios-dim">
-        {latest && <>{shortDate(latest.as_of)} · {latest.entered_by_name}{!latest.confirmed && <> <Badge tone="warn">unconfirmed</Badge></>}</>}
+        {latest && <>{shortDate(latest.as_of)} | {latest.entered_by_name}{!latest.confirmed && <> <Badge tone="warn">unconfirmed</Badge></>}</>}
         {headroom && (
           <div className="mt-1">
             Cycle since {headroom.cycle_start ? shortDate(headroom.cycle_start) : "?"}: {fmtCents(headroom.posted_cents)} posted
@@ -138,7 +138,7 @@ function AccountCard({ a, client, fin, reload, flash, me, now, closings, recon }
 
       {history.length > 0 && (
         <div className="mt-2">
-          <button className="text-xs text-helios-dim hover:text-helios-text" onClick={() => setShowHistory((s) => !s)}>{showHistory ? "▾" : "▸"} History ({history.length})</button>
+          <button className="text-xs text-helios-dim hover:text-helios-text" onClick={() => setShowHistory((s) => !s)}>{showHistory ? "v" : ">"} History ({history.length})</button>
           {showHistory && (
             <table className="mt-1 w-full text-xs">
               <tbody>

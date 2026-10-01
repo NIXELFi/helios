@@ -4,7 +4,7 @@ import {
   REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, itemCost, recordOrder,
   setStatus, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
-import { centsToInput, fmtCents, parseCents } from "../lib/money";
+import { centsToInput, fmtCents, parseCents, requireCents } from "../lib/money";
 import { parseCsv, parseTsv, type NewRow, type PasteField } from "../lib/paste";
 import { normalizeVendor } from "../finance/importers";
 import type { PurchasingData } from "../lib/usePurchasing";
@@ -140,9 +140,12 @@ export function PartsView({
     if (!draft.title?.trim()) { flash("Give the item a name first", true); return; }
     const row: NewRow = { title: draft.title.trim() };
     if (draft.quantity) row.quantity = Number(draft.quantity);
-    const unit = parseCents(draft.unit_price_cents ?? ""); if (unit !== null) row.unit_price_cents = unit;
-    const tax = parseCents(draft.tax_shipping_cents ?? ""); if (tax !== null) row.tax_shipping_cents = tax;
-    const tot = parseCents(draft.total ?? ""); if (tot !== null) row.total_estimate_cents = tot;
+    if (draft.quantity && !(Number(draft.quantity) > 0)) { flash(`"${draft.quantity}" isn't a valid quantity.`, true); return; }
+    try {
+      const unit = requireCents(draft.unit_price_cents, "unit price"); if (unit !== null) row.unit_price_cents = unit;
+      const tax = requireCents(draft.tax_shipping_cents, "tax/shipping"); if (tax !== null) row.tax_shipping_cents = tax;
+      const tot = requireCents(draft.total, "total"); if (tot !== null) row.total_estimate_cents = tot;
+    } catch (e) { flash((e as Error).message, true); return; }
     for (const k of ["vendor", "part_number", "product_url", "notes", "needed_by", "priority"] as const) if (draft[k]) row[k] = draft[k];
     await run(`Added ${row.title}`, () => addItems(client, projectId, tab, [row], false));
     setDraft({});
@@ -204,7 +207,7 @@ export function PartsView({
       await run(`Approved ${ids.length} item(s)`, async () => { for (const id of ids) await decide(client, id, "approve"); });
     } else if (bulk === "order") {
       await run(`${ids.length} item(s) marked ordered`, () =>
-        recordOrder(client, ids, order.id, order.payment, order.on || null, parseCents(order.total), order.paidBy));
+        recordOrder(client, ids, order.id, order.payment, order.on || null, requireCents(order.total, "order total"), order.paidBy));
     } else if (bulk === "tracking") {
       await run(`Tracking added to ${ids.length} item(s)`, () =>
         addTracking(client, ids, track.number, track.carrier || detectCarrier(track.number), track.eta || null));
@@ -245,8 +248,8 @@ export function PartsView({
           ))}
         </div>
         <div className="flex items-center gap-3 text-xs text-helios-dim">
-          <span>{rows.length} items · {fmtCents(total)} estimated</span>
-          <input className="w-56 rounded-md border border-helios-line bg-helios-strip px-2 py-1 text-sm" placeholder="Search this tab…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <span>{rows.length} items | {fmtCents(total)} estimated</span>
+          <input className="w-56 rounded-md border border-helios-line bg-helios-strip px-2 py-1 text-sm" placeholder="Search this tab..." value={q} onChange={(e) => setQ(e.target.value)} />
           {canAddHere && (
             <label className="cursor-pointer rounded-md border border-helios-line px-2 py-1 text-sm text-helios-text hover:bg-helios-strip" title="Upload an Airtable (or Excel) CSV export into this tab">
               Upload CSV
@@ -333,7 +336,7 @@ export function PartsView({
                         <input
                           className="h-8 w-full bg-transparent px-2 outline-none placeholder:text-helios-muted focus:bg-helios-strip focus:ring-1 focus:ring-asu-gold"
                           type={c.key === "needed_by" ? "date" : "text"}
-                          placeholder={c.key === "title" ? `Type or paste a new ${tabSubteam?.code ?? ""} item…` : c.key === "total" ? "auto" : ""}
+                          placeholder={c.key === "title" ? `Type or paste a new ${tabSubteam?.code ?? ""} item...` : c.key === "total" ? "auto" : ""}
                           value={draft[c.key] ?? ""}
                           onChange={(e) => setDraft((d) => ({ ...d, [c.key]: e.target.value }))}
                         />
@@ -354,7 +357,7 @@ export function PartsView({
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-strip px-4 py-2 shadow-lg">
           <b className="text-asu-gold">{ids.length} selected</b>
           <select className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" value={bulk} onChange={(e) => setBulk(e.target.value)}>
-            <option value="">Choose an action…</option>
+            <option value="">Choose an action...</option>
             <option value="status:READY">Send for approval</option>
             <option value="status:PLANNED">Back to not ready</option>
             <option value="status:RECEIVED">Mark received</option>
@@ -443,7 +446,7 @@ function Cell({ item, col, edit, onSave }: { item: Item; col: string; edit: bool
   const numeric = col === "quantity" || MONEY.has(col);
   if (!edit) {
     return col === "product_url" && initial
-      ? <a className="block truncate px-2 text-asu-gold hover:underline" href={initial} target="_blank" rel="noreferrer">open ↗</a>
+      ? <a className="block truncate px-2 text-asu-gold hover:underline" href={initial} target="_blank" rel="noreferrer">open</a>
       : <span className={`block truncate px-2 leading-8 ${numeric ? "text-right" : ""}`}>{initial}</span>;
   }
   return (

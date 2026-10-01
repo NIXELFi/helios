@@ -224,7 +224,7 @@ export function parseCheckingWords(pages: Word[][]): CheckingStatement {
     if (got !== totals[sec]) problems.push(`${sec} rows add up to ${(got / 100).toFixed(2)}, the summary says ${(totals[sec] / 100).toFixed(2)}`);
     if (sec in counts && counts[sec] !== rs.length) problems.push(`${rs.length} ${sec} rows found, the summary says ${counts[sec]}`);
   }
-  if (summary.opening! + totals.deposit - totals.withdrawal - totals.check !== summary.ending) problems.push("opening + deposits − withdrawals − checks isn't the ending balance");
+  if (summary.opening! + totals.deposit - totals.withdrawal - totals.check !== summary.ending) problems.push("opening + deposits - withdrawals - checks isn't the ending balance");
   if (daily.length && [...daily].sort().at(-1)![1] !== summary.ending) problems.push("the last daily balance isn't the ending balance");
   if (!last4) problems.push("account number not found");
   if (problems.length) throw new StatementError(`This statement doesn't add up, so nothing was imported: ${problems.join("; ")}`);

@@ -212,6 +212,19 @@ describe("purchasing", () => {
     expect((await pres.client.rpc("decide", { p_id: ids![0], p_decision: "approve" })).data).toBe("APPROVED");
   });
 
+  it("an empty edit can't be used to read an item, and amounts must make sense", async () => {
+    const eng = await member("eng", "engineer", daq);
+    const outsider = await member("outsider", "engineer", aero);
+    const { data: ids } = await eng.client.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Secret part" }] });
+    const peek = await outsider.client.rpc("update_item", { p_id: ids![0], p_patch: {} });
+    expect(peek.error?.message).toMatch(/own subteam/);
+    expect(peek.data).toBeNull();
+    expect((await eng.client.rpc("update_item", { p_id: ids![0], p_patch: { quantity: -3 } })).error?.message).toMatch(/more than zero/);
+    expect((await eng.client.rpc("update_item", { p_id: ids![0], p_patch: { unit_price_cents: -100 } })).error?.message).toMatch(/negative/);
+    expect((await eng.client.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "x", quantity: 0 }] })).error?.message)
+      .toMatch(/more than zero/);
+  });
+
   it("budget lines cover several subteams and are only shown in scope", async () => {
     const cfo = await member("cfo", "executive");
     const aem = await subteam("Aero Manufacturing", "AEM");

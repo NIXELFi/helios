@@ -72,14 +72,14 @@ export function ApprovalsView({
                   <PrioritySelect priority={i.priority} editable={false} onChange={() => {}} />
                   <span>asked by <b className="text-helios-text">{i.requester_name}</b></span>
                   <span className={flag === "stale" ? "text-helios-danger" : flag === "nudge" ? "text-helios-warn" : ""}>
-                    waiting {hours < 24 ? `${Math.max(1, Math.round(hours))} h` : `${Math.floor(hours / 24)} days`}{flag === "stale" ? " · over 14 days" : ""}
+                    waiting {hours < 24 ? `${Math.max(1, Math.round(hours))} h` : `${Math.floor(hours / 24)} days`}{flag === "stale" ? " | over 14 days" : ""}
                   </span>
                 </div>
               </div>
               <div className="text-right">
                 <div className="text-xl font-bold">{fmtCents(itemCost(i))}</div>
                 <div className="text-xs text-helios-dim">
-                  {i.quantity !== null && i.unit_price_cents !== null ? `${i.quantity} × ${fmtCents(i.unit_price_cents)}` : ""}{i.vendor ? ` · ${i.vendor}` : ""}
+                  {i.quantity !== null && i.unit_price_cents !== null ? `${i.quantity} x ${fmtCents(i.unit_price_cents)}` : ""}{i.vendor ? ` | ${i.vendor}` : ""}
                 </div>
               </div>
             </div>
@@ -88,8 +88,8 @@ export function ApprovalsView({
               <div className="text-sm">
                 {i.justification && <p className="mb-1"><span className="text-helios-dim">Why:</span> {i.justification}</p>}
                 {i.notes && <p className="mb-1"><span className="text-helios-dim">Notes:</span> {i.notes}</p>}
-                {i.product_url && <a className="text-asu-gold hover:underline" href={i.product_url} target="_blank" rel="noreferrer">Open product page ↗</a>}
-                <p className="mt-2 text-xs text-helios-dim">{count} of 2 exec approvals{i.requester_id === userId ? " · your own request doesn't count toward them" : ""}</p>
+                {i.product_url && <a className="text-asu-gold hover:underline" href={i.product_url} target="_blank" rel="noreferrer">Open product page</a>}
+                <p className="mt-2 text-xs text-helios-dim">{count} of 2 exec approvals{i.requester_id === userId ? " | your own request doesn't count toward them" : ""}</p>
               </div>
               <table className="text-xs">
                 <thead className="text-helios-dim"><tr><th className="text-left">Budget</th><th className="text-right">Left now</th><th className="text-right">After</th></tr></thead>
@@ -103,7 +103,7 @@ export function ApprovalsView({
                       <tr key={a.subteam_id}>
                         <td>{b.project_code} {b.name}</td>
                         <td className="text-right">{fmtCents(before)}</td>
-                        <td className={`text-right ${before - share < 0 ? "font-semibold text-helios-danger" : ""}`}>{fmtCents(before - share)}{before - share < 0 ? " · over" : ""}</td>
+                        <td className={`text-right ${before - share < 0 ? "font-semibold text-helios-danger" : ""}`}>{fmtCents(before - share)}{before - share < 0 ? " | over" : ""}</td>
                       </tr>
                     );
                   })}

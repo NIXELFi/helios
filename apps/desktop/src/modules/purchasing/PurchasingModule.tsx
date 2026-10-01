@@ -151,7 +151,7 @@ export function AgoraModule() {
         {nav.filter((n) => n.show).map(({ id, label: l, Icon, count }) => navButton(id, l, Icon, count))}
         {financeExec && (
           <>
-            <div className="mb-2 mt-4 px-2 text-[10px] font-bold uppercase tracking-[0.18em] text-helios-muted">Finance · execs only</div>
+            <div className="mb-2 mt-4 px-2 text-[10px] font-bold uppercase tracking-[0.18em] text-helios-muted">Finance (execs only)</div>
             {financeNav.map(({ id, label: l, Icon, count }) => navButton(id, l, Icon, count))}
           </>
         )}
@@ -179,7 +179,7 @@ export function AgoraModule() {
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto p-6">
           <Flash message={error ?? fin.error} error />
           <Flash message={flashMsg?.text ?? null} error={flashMsg?.error} />
-          {loading || (isFinance && financeExec && fin.loading) ? <div className="text-sm text-helios-dim">Loading…</div>
+          {loading || (isFinance && financeExec && fin.loading) ? <div className="text-sm text-helios-dim">Loading...</div>
             : shown === "parts" ? <PartsView client={client} data={data} projectId={projectId} reload={reloadAll} flash={flash} focus={partFocus} />
             : shown === "approvals" ? <ApprovalsView client={client} data={data} userId={user?.id ?? null} reload={reloadAll} flash={flash} />
             : shown === "orders" ? <OrdersView client={client} data={data} reload={reloadAll} flash={flash} />

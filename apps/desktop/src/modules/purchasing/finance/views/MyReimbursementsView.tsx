@@ -74,7 +74,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
           )}
         </div>
         <ReceiptPicker files={files} setFiles={setFiles} />
-        <Button disabled={busy} onClick={() => void submit()}>{busy ? "Sending…" : "Send to the execs"}</Button>
+        <Button disabled={busy} onClick={() => void submit()}>{busy ? "Sending..." : "Send to the execs"}</Button>
       </Card>
 
       <section>
@@ -89,7 +89,7 @@ export function MyReimbursementsView({ client, pur, mine, userId, reload, flash 
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div>{r.reason}</div>
-                      <div className="text-xs text-helios-dim">{[shortDate(r.requested_date), where(r.project_id, r.subteam_id)].filter(Boolean).join(" · ")}</div>
+                      <div className="text-xs text-helios-dim">{[shortDate(r.requested_date), where(r.project_id, r.subteam_id)].filter(Boolean).join(" | ")}</div>
                     </div>
                     <div className="text-right"><b className="tabular-nums">{fmtCents(r.amount_cents)}</b><div><Badge tone={tone}>{label}</Badge></div></div>
                   </div>

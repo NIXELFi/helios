@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import { addTracking, detectCarrier, itemCost, recordOrder, setStatus, trackingUrl, type Item } from "../lib/api";
-import { fmtCents, parseCents } from "../lib/money";
+import { fmtCents, requireCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, StatusPill, SubteamChip } from "../components/ui";
 
@@ -58,12 +58,12 @@ export function OrdersView({
                   <tr key={i.id} className="border-t border-helios-line">
                     <td className="p-2 text-center"><input type="checkbox" checked={picked.has(i.id)}
                       onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(i.id); else n.delete(i.id); return n; })} /></td>
-                    <td className="p-2"><b>{i.title}</b><div className="text-xs text-helios-dim"><span className="font-mono">{i.code}</span>{i.quantity !== null ? ` · qty ${i.quantity}` : ""}{i.notes ? ` · ${i.notes.slice(0, 60)}` : ""}</div></td>
+                    <td className="p-2"><b>{i.title}</b><div className="text-xs text-helios-dim"><span className="font-mono">{i.code}</span>{i.quantity !== null ? ` | qty ${i.quantity}` : ""}{i.notes ? ` | ${i.notes.slice(0, 60)}` : ""}</div></td>
                     <td className="p-2"><SubteamChip subteam={sub(i)} /></td>
                     <td className="p-2">{i.vendor ?? ""}</td>
                     <td className="p-2 text-right">{fmtCents(itemCost(i))}</td>
                     <td className="p-2 text-xs">{i.needed_by ?? ""}</td>
-                    <td className="p-2">{i.product_url && <a className="text-asu-gold hover:underline" href={i.product_url} target="_blank" rel="noreferrer">Buy ↗</a>}</td>
+                    <td className="p-2">{i.product_url && <a className="text-asu-gold hover:underline" href={i.product_url} target="_blank" rel="noreferrer">Buy</a>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -80,7 +80,7 @@ export function OrdersView({
             <input type="date" className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" value={order.on} onChange={(e) => setOrder({ ...order, on: e.target.value })} />
             <input className="w-44 rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Member who paid (if any)" value={order.paidBy} onChange={(e) => setOrder({ ...order, paidBy: e.target.value })} />
             <Button disabled={!order.id} onClick={() => void run(`${picked.size} item(s) marked ordered`, async () => {
-              await recordOrder(client, [...picked], order.id, order.payment, order.on || null, parseCents(order.total), order.paidBy);
+              await recordOrder(client, [...picked], order.id, order.payment, order.on || null, requireCents(order.total, "order total"), order.paidBy);
               setPicked(new Set());
             })}>Mark ordered</Button>
           </div>
@@ -100,12 +100,12 @@ export function OrdersView({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <b>{first.vendor ?? "Vendor?"}</b> <span className="font-mono text-xs text-helios-dim">{key}</span>
-                  <div className="text-xs text-helios-dim">Ordered {first.ordered_at ?? "?"} · {group.length} item(s) · {fmtCents(group.reduce((s, i) => s + itemCost(i), 0))}</div>
+                  <div className="text-xs text-helios-dim">Ordered {first.ordered_at ?? "?"} | {group.length} item(s) | {fmtCents(group.reduce((s, i) => s + itemCost(i), 0))}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusPill status={first.status} />
                   {first.tracking_number && (link
-                    ? <a className="text-xs text-asu-gold hover:underline" href={link} target="_blank" rel="noreferrer">{first.carrier} {first.tracking_number} ↗</a>
+                    ? <a className="text-xs text-asu-gold hover:underline" href={link} target="_blank" rel="noreferrer">{first.carrier} {first.tracking_number}</a>
                     : <span className="text-xs">{first.carrier} {first.tracking_number}</span>)}
                   {first.est_delivery && <span className="text-xs text-helios-info">ETA {first.est_delivery}</span>}
                 </div>

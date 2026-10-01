@@ -34,10 +34,10 @@ function ProcessMap({ steps, prefix, branches }: { steps: Step[]; prefix: string
             </button>
             {branches?.[s.id]?.map((b) => (
               <button key={b} onClick={() => jump(b.toLowerCase().replace(/[^a-z]+/g, "-"))}
-                className={`w-[132px] rounded-md border border-dashed px-2 py-1 text-left text-[11px] text-helios-dim hover:border-asu-gold ${TONE.side}`}>↳ {b}</button>
+                className={`w-[132px] rounded-md border border-dashed px-2 py-1 text-left text-[11px] text-helios-dim hover:border-asu-gold ${TONE.side}`}>&gt; {b}</button>
             ))}
           </div>
-          {i < steps.length - 1 && <div className="mx-1 mt-6 text-helios-muted" aria-hidden>→</div>}
+          {i < steps.length - 1 && <div className="mx-1 mt-6 text-helios-muted" aria-hidden>&gt;</div>}
         </div>
       ))}
     </div>
@@ -49,10 +49,10 @@ function StepCard({ s, n, prefix, go }: { s: Step; n: number; prefix: string; go
     <div id={`${prefix}-${s.id}`} className={`scroll-mt-4 rounded-lg border p-4 ${TONE[s.tone ?? "plan"]}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-wider text-helios-dim">Step {n} · {s.who}</div>
+          <div className="text-[11px] font-bold uppercase tracking-wider text-helios-dim">Step {n} | {s.who}</div>
           <div className="text-base font-semibold">{s.title}{s.tag && <span className="ml-2 text-sm font-normal text-helios-dim">({s.tag})</span>}</div>
         </div>
-        {s.page && <button className="rounded-md border border-asu-gold px-3 py-1 text-sm font-semibold text-asu-gold hover:bg-asu-gold/10" onClick={() => go(s.page![0])}>{s.page[1]} →</button>}
+        {s.page && <button className="rounded-md border border-asu-gold px-3 py-1 text-sm font-semibold text-asu-gold hover:bg-asu-gold/10" onClick={() => go(s.page![0])}>{s.page[1]}</button>}
       </div>
       <div className="mt-2 space-y-1 text-sm leading-relaxed">{s.what}</div>
     </div>
@@ -99,7 +99,7 @@ const REIMB_STEPS: Step[] = [
   { id: "buy", title: "Buy it yourself", tone: "plan", who: "You",
     what: <p>Only when it's urgent and an exec has said OK (for example on a competition trip). Keep the receipt: a photo is fine.</p> },
   { id: "ask", title: "Get reimbursed", tone: "you", who: "You",
-    what: <p>Purchasing → <b>Get reimbursed</b>: the amount, what it was for, your subteam, and the receipt (photo or PDF). The execs are notified. Only you and the execs can see it.</p>,
+    what: <p>Agora &gt; <b>Get reimbursed</b>: the amount, what it was for, your subteam, and the receipt (photo or PDF). The execs are notified. Only you and the execs can see it.</p>,
     page: ["myreimb", "Open Get reimbursed"] },
   { id: "check", title: "An exec checks it", tone: "exec", who: "Execs",
     what: <p>They look at the receipt and approve it or decline it with a reason. Until then you can add more receipts or withdraw it.</p> },
@@ -138,11 +138,11 @@ export function MemberGuide({ go }: { go: Go }) {
       <div className="flex flex-col gap-3">{REIMB_STEPS.map((s, i) => <StepCard key={s.id} s={s} n={i + 1} prefix={p} go={go} />)}</div>
 
       <Extra id="budget" prefix={p} title="Your subteam's budget">
-        <p>Purchasing → Budgets shows <b>your subteam only</b>. Nobody else's budget is visible to you, and yours isn't visible to other subteams.</p>
+        <p>Agora &gt; Budgets shows <b>your subteam only</b>. Nobody else's budget is visible to you, and yours isn't visible to other subteams.</p>
         <p><b>Budget</b>: what you were given this season. <b>Spent</b>: charged already. <b>Committed</b>: approved or ordered, not charged yet.
-          <b> Planned</b>: parts still Not ready or Ready. <b>Remaining</b> = Budget − Spent − Committed. <b>After planned</b> = Remaining − Planned: if it's negative, the parts you plan to buy won't fit.</p>
+          <b> Planned</b>: parts still Not ready or Ready. <b>Remaining</b> = Budget - Spent - Committed. <b>After planned</b> = Remaining - Planned: if it's negative, the parts you plan to buy won't fit.</p>
         <p>Click a line to see every part and charge in it.</p>
-        <button className="text-asu-gold hover:underline" onClick={() => go("budgets")}>Open Budgets →</button>
+        <button className="text-asu-gold hover:underline" onClick={() => go("budgets")}>Open Budgets</button>
       </Extra>
       <Extra id="tips" prefix={p} title="Tips">
         <p>Everyone can see the whole parts list, so check another subteam isn't already buying the same thing.</p>
@@ -158,24 +158,24 @@ export function MemberGuide({ go }: { go: Go }) {
 const WEEK_STEPS: Step[] = [
   { id: "download", title: "Download the exports", tone: "plan", who: "CFO",
     what: <>
-      <p><b>Chase checking</b>: chase.com → the account → Download account activity → CSV, from the last download date.</p>
+      <p><b>Chase checking</b>: chase.com &gt; the account &gt; Download account activity &gt; CSV, from the last download date.</p>
       <p><b>SAE card</b>: the card's CSV export (PaymentNet or chase.com). If it's a full statement, note its closing date.</p>
-      <p><b>Square</b>: Square Dashboard → Transactions → Export → Transactions CSV. That covers dues, invoices that were paid, and sales.</p>
+      <p><b>Square</b>: Square Dashboard &gt; Transactions &gt; Export &gt; Transactions CSV. That covers dues, invoices that were paid, and sales.</p>
       <p><b>Invoices</b>: a CSV with Vendor, Date, Order #, Total works; or attach PDFs to ledger lines later.</p></> },
   { id: "upload", title: "Upload them", tone: "exec", who: "CFO",
     what: <>
-      <p>Finance → <b>Upload files</b>. Drop each file in. Helios recognises Chase checking, Chase card and Square files; for anything else, pick which column is the date, amount and description.</p>
+      <p>Finance &gt; <b>Upload files</b>. Drop each file in. Helios recognises Chase checking, Chase card and Square files; for anything else, pick which column is the date, amount and description.</p>
       <p>The preview shows what each line will do: <b>new</b>, <b>already in the ledger</b> (skipped, so nothing counts twice), <b>clears a check</b>, or <b>confirms the autopay</b>. Fix categories there if you like, then press Import.</p>
       <p>The same file can't be imported twice.</p></>,
     page: ["import", "Open Upload files"] },
   { id: "tidy", title: "Tidy new lines", tone: "exec", who: "CFO",
     what: <>
-      <p>Ledger → tick <b>Needs attention</b>. For each line: set the category and the subteam split (a shared purchase can be split across cars and subteams).</p>
+      <p>Ledger &gt; tick <b>Needs attention</b>. For each line: set the category and the subteam split (a shared purchase can be split across cars and subteams).</p>
       <p>Charges of <b>$300 or more need an invoice</b> (handbook rule): open the line and attach the PDF or photo.</p></>,
     page: ["ledger", "Open the Ledger"] },
   { id: "balances", title: "Enter this week's balances", tone: "exec", who: "CFO",
     what: <>
-      <p>Weekly balances → click each number and type this week's figure: <b>Chase</b> (from the bank), <b>SAE card available credit</b> (from PaymentNet: it's how pending charges show up), Square, cash box, ASU accounts.</p>
+      <p>Weekly balances &gt; click each number and type this week's figure: <b>Chase</b> (from the bank), <b>SAE card available credit</b> (from PaymentNet: it's how pending charges show up), Square, cash box, ASU accounts.</p>
       <p>Nothing is overwritten: every entry is kept. If the Chase number doesn't match what the ledger computes, the difference shows as "unexplained".</p></>,
     page: ["balances", "Open Weekly balances"] },
   { id: "discrepancies", title: "Clear the discrepancies", tone: "exec", who: "CFO",
@@ -223,7 +223,7 @@ export function ExecGuide({ go }: { go: Go }) {
       <Extra id="rules" prefix={p} title="How the money is counted">
         <p><b>Money counts once, on the statement line where it moved.</b> A card purchase counts on the card. The monthly card payment from Chase is a <i>transfer</i> (it pays for things already counted), never spending. Square payouts into Chase are transfers too: the dues were counted when they were paid into Square.</p>
         <p>Invoices, parts and emails never add money. They're evidence attached to a statement line.</p>
-        <p><b>Available to spend</b> = Chase balance − card owed − pending card charges − checks written but not cashed − reimbursements owed. The bank balance alone overstates it.</p>
+        <p><b>Available to spend</b> = Chase balance - card owed - pending card charges - checks written but not cashed - reimbursements owed. The bank balance alone overstates it.</p>
         <p><b>The card limit</b> is per billing cycle and resets when a statement closes, even though Chase pays the bill about 28 days later.</p>
         <p>A <b>check</b> counts when it's written and clears when it hits the bank.</p>
       </Extra>

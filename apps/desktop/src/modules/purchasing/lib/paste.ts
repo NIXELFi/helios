@@ -73,7 +73,7 @@ export function parseTsv(text: string): string[][] {
 
 /** Parse a CSV file (Airtable, bank and Square exports). */
 export function parseCsv(text: string): string[][] {
-  return parseDelimited(text.replace(/^﻿/, ""), ",");
+  return parseDelimited(text.replace(/^\uFEFF/, ""), ",");
 }
 
 function parseDelimited(text: string, sep: string): string[][] {

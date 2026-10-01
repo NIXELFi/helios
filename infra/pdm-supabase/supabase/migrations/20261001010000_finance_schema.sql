@@ -108,6 +108,10 @@ create table finance.transactions (
   updated_at       timestamptz not null default now()
 );
 create index transactions_account_date on finance.transactions (account_id, date);
+-- one check number is written once per account (pay_reimbursements checks
+-- first; this catches two execs paying at the same moment)
+create unique index transactions_manual_check_number on finance.transactions (account_id, reference)
+  where kind = 'check' and source = 'manual' and reference is not null;
 
 -- Cost splitting: one or more shares per transaction, summing to its amount.
 create table finance.txn_allocations (
@@ -338,6 +342,38 @@ create policy reimbursements_update on finance.reimbursements for update to auth
 create policy reimbursements_delete on finance.reimbursements for delete to authenticated
   using (finance.can_edit());
 
+-- Deciding and paying go through decide_reimbursement() and
+-- pay_reimbursements(), which check who is deciding. A direct write (the
+-- exec's edit form) may fix a name, amount or reason, but can't move a
+-- request to owed or paid, and nobody can write to their own request.
+create or replace function finance.guard_reimbursement_writes()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if current_user <> 'authenticated' then return coalesce(new, old); end if;   -- the RPCs (definer) and the service role
+  if tg_op = 'INSERT' then
+    if new.user_id = auth.uid() then
+      raise exception 'ask for your own reimbursement under Get reimbursed' using errcode = '42501';
+    end if;
+    if new.status not in ('owed', 'requested') then
+      raise exception 'a new reimbursement is owed or requested' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  if old.user_id = auth.uid() then
+    raise exception 'another exec has to handle your own reimbursement' using errcode = '42501';
+  end if;
+  if tg_op = 'UPDATE' and (new.status is distinct from old.status or new.user_id is distinct from old.user_id
+      or new.decided_by is distinct from old.decided_by or new.check_txn_id is distinct from old.check_txn_id) then
+    raise exception 'approve, decline and pay with the buttons, not by editing the row' using errcode = '42501';
+  end if;
+  if tg_op = 'UPDATE' and old.status = 'paid' and new.amount_cents is distinct from old.amount_cents then
+    raise exception 'a paid reimbursement''s amount can''t change' using errcode = '42501';
+  end if;
+  return coalesce(new, old);
+end; $$;
+create trigger reimbursements_guard before insert or update or delete on finance.reimbursements
+  for each row execute function finance.guard_reimbursement_writes();
+
 -- Can the caller read (or, p_write, add/remove) receipts for this reimbursement?
 -- Owners may change receipts only while the request is still being reviewed.
 create or replace function finance.receipt_access(p_reimbursement bigint, p_write boolean)
@@ -508,6 +544,9 @@ begin
   if not finance.can_edit() then raise exception 'only execs edit the ledger' using errcode = '42501'; end if;
   select abs(amount_cents), kind into v_amount, v_kind from finance.transactions where id = p_txn for update;
   if not found then raise exception 'no such transaction' using errcode = 'P0002'; end if;
+  if exists (select 1 from jsonb_array_elements(coalesce(p_allocations, '[]')) a where (a ->> 'amount_cents')::bigint < 0) then
+    raise exception 'each share is a positive amount' using errcode = '22023';
+  end if;
   select coalesce(sum((a ->> 'amount_cents')::bigint), 0) into v_sum from jsonb_array_elements(coalesce(p_allocations, '[]')) a;
   if jsonb_array_length(coalesce(p_allocations, '[]')) > 0 and v_kind <> 'transfer' and v_sum <> v_amount then
     raise exception 'the split must add up to $%; it adds up to $%',
@@ -515,7 +554,7 @@ begin
   end if;
   delete from finance.txn_allocations where txn_id = p_txn;
   insert into finance.txn_allocations (txn_id, project_id, subteam_id, amount_cents)
-  select p_txn, nullif(a ->> 'project_id', '')::uuid, (a ->> 'subteam_id')::uuid, abs((a ->> 'amount_cents')::bigint)
+  select p_txn, nullif(a ->> 'project_id', '')::uuid, (a ->> 'subteam_id')::uuid, (a ->> 'amount_cents')::bigint
   from jsonb_array_elements(coalesce(p_allocations, '[]')) a;
   update finance.transactions set allocation_basis = case when jsonb_array_length(coalesce(p_allocations, '[]')) > 0
     then coalesce(p_basis, 'manual') else '' end where id = p_txn;
@@ -577,7 +616,9 @@ language sql stable security definer set search_path = '' as $$
   -- ledger spending: charges count positive, refunds and card credits negative, transfers never
   select al.project_id, al.subteam_id, 'spent',
          case when t.amount_cents > 0 then -al.amount_cents else al.amount_cents end,
-         'ledger', coalesce(t.reference, ''), t.date, coalesce(nullif(t.vendor, ''), t.description), t.id, null::uuid
+         'ledger', coalesce(t.reference, ''), t.date,
+         -- a check's memo can name the person paid back; show only "Check"
+         coalesce(nullif(t.vendor, ''), case when t.kind = 'check' then 'Check' else t.description end), t.id, null::uuid
   from finance.transactions t
   join finance.txn_allocations al on al.txn_id = t.id
   where t.status = 'posted' and t.kind in ('charge', 'check', 'withdrawal', 'fee', 'credit')
