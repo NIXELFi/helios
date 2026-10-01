@@ -18,8 +18,9 @@ def idelchik_phi(a):
 def R_idel(dout, ang, dt=0.020):
     s = (dt / dout) ** 2; return (1 - s * s) - idelchik_phi(ang) * (1 - s) ** 2
 ETA_REL = 0.62 * (1 - (0.020 / 0.038) ** 4) / R_idel(0.038, 3.2)   # keeps the car-calibrated as-built recovery
-def make_cfg(V=V0, lenfac=1.0, dout=0.038, ang=3.2, cd=None):
-    name = f"V{V*1e3:.2f}_L{lenfac:.2f}_D{dout*1e3:.0f}_A{ang:.1f}" + (f"_cd{cd:.3f}" if cd else "")
+def make_cfg(V=V0, lenfac=1.0, dout=0.038, ang=3.2, cd=None, R=None):
+    """R: impose the venturi pressure recovery directly (G4); otherwise it follows from (dout, ang) via Idelchik."""
+    name = f"V{V*1e3:.2f}_L{lenfac:.2f}_D{dout*1e3:.0f}_A{ang:.1f}" + (f"_cd{cd:.3f}" if cd else "") + (f"_R{R:.2f}" if R is not None else "")
     path = os.path.join(CFGD, name + ".json")
     if os.path.exists(path): return name, path
     d = json.load(open(BASE))
@@ -34,7 +35,7 @@ def make_cfg(V=V0, lenfac=1.0, dout=0.038, ang=3.2, cd=None):
     vol = sum(math.pi / 12 * (x1 - x0) * (a * a + a * b + b * b) for (x0, a), (x1, b) in zip(newp, newp[1:]))
     d["plenum"]["diameter_profile"] = newp; d["plenum"]["volume"] = vol; d["plenum"]["length"] = newp[-1][0]
     d["restrictor"]["outlet_diameter"] = dout; d["restrictor"]["diverging_half_angle"] = ang
-    s = (0.020 / dout) ** 2; R = ETA_REL * R_idel(dout, ang)
+    s = (0.020 / dout) ** 2; R = ETA_REL * R_idel(dout, ang) if R is None else R
     ph["restrictor_diffuser_efficiency"] = round(R / (1 - s * s), 5)
     if cd: d["restrictor"]["discharge_coefficient"] = cd
     d["name"] = "intake study " + name
@@ -43,24 +44,30 @@ def jobs():
     J = []
     rpm_c = list(range(4000, 12501, 500)); rpm_f = rpm_c   # 500 rpm steps: the 160-cell plenum costs ~5x per point
     ext_f = sorted(set(range(-190, 161, 25)) | {0}); ext_c = [-140, -40, 60, 160]
-    for V in (1.44, 3.5, 2.0, 2.75, 1.0, 0.75, 0.5):                       # G1 static grid (as-built + big plenums first)
-        n, p = make_cfg(V=V * 1e-3)
-        J += [("G1", n, p, e, r) for e in ext_f for r in rpm_f]
-    for V in (0.75, 1.44, 2.75):                                            # G2 plenum geometry
-        for lf in (0.5, 2.0):
-            n, p = make_cfg(V=V * 1e-3, lenfac=lf)
-            J += [("G2", n, p, e, r) for e in ext_c for r in rpm_c]
+    G1 = lambda Vs: [("G1", *make_cfg(V=V * 1e-3), e, r) for V in Vs for e in ext_f for r in rpm_f]
+    J += G1((1.44, 3.5))                                                    # G1 static grid, as-built + biggest plenum first
+    # G4 (Nick 2026-09-30: the restrictor must get much shorter to package): torque vs venturi pressure recovery R.
+    # In the model the diffuser acts only through R, so any short geometry maps onto this curve (restrictor_short.py).
+    # As-built R = 0.572; 0 = no diffuser (sudden dump). Half-angles are capped at 8 deg (flow separates beyond).
+    for V in (1.44, 3.5):
+        for Rv in (0.0, 0.15, 0.30, 0.40, 0.48, 0.572):
+            J += [("G4", *make_cfg(V=V * 1e-3, R=Rv), 0, r) for r in rpm_c]
+    J += G1((2.0, 2.75, 1.0, 0.75, 0.5))
     for dout in (0.030, 0.034, 0.038, 0.044, 0.050):                        # G3 restrictor
         for ang in (3.2, 6.0, 8.0):
             n, p = make_cfg(dout=dout, ang=ang)
-            J += [("G3", n, p, e, r) for e in (0, 100) for r in rpm_c]
+            J += [("G3", n, p, 0, r) for r in rpm_c]     # as-built runner only (runners can't grow)
     for dout in (0.030, 0.038, 0.050):                                      # G3b restrictor x big plenum (Nick: "we can go bigger plenum")
         for ang in (3.2, 8.0):
             n, p = make_cfg(V=2.75e-3, dout=dout, ang=ang)
             J += [("G3", n, p, 0, r) for r in rpm_c]
     for cd in (0.93, 0.97):
         n, p = make_cfg(cd=cd)
-        J += [("G3", n, p, e, r) for e in (0, 100) for r in rpm_c]
+        J += [("G3", n, p, 0, r) for r in rpm_c]
+    for V in (0.75, 1.44, 2.75):                                            # G2 plenum geometry
+        for lf in (0.5, 2.0):
+            n, p = make_cfg(V=V * 1e-3, lenfac=lf)
+            J += [("G2", n, p, e, r) for e in ext_c for r in rpm_c]
     return J
 def done():
     s = set()

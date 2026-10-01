@@ -13,6 +13,7 @@ def load():
     pr = d.cfg.str.extract(r"V([\d.]+)_L([\d.]+)_D(\d+)_A([\d.]+)(?:_cd([\d.]+))?")
     d["V"] = pr[0].astype(float); d["lf"] = pr[1].astype(float); d["dout"] = pr[2].astype(float)
     d["ang"] = pr[3].astype(float); d["cd"] = pr[4].astype(float).fillna(0.95)
+    d["R"] = d.cfg.str.extract(r"_R([\d.]+)")[0].astype(float)
     return d
 
 def today():

@@ -22,7 +22,7 @@ def log(msg):
 def progress():
     n = sum(1 for _ in open(os.path.join(H, "results_c160.ndjson"))) if os.path.exists(os.path.join(H, "results_c160.ndjson")) else 0
     t = sum(1 for _ in open(os.path.join(H, "tipin_c160.ndjson"))) if os.path.exists(os.path.join(H, "tipin_c160.ndjson")) else 0
-    s = f"{datetime.datetime.now():%Y-%m-%d %H:%M} grid rows {n} (of 3168), tip-in rows {t}/92\n"
+    s = f"{datetime.datetime.now():%Y-%m-%d %H:%M} grid rows {n} (of 3078), tip-in rows {t}/92\n"
     open(os.path.join(H, "progress.txt"), "w").write(s)
     return s.strip()
 
