@@ -27,6 +27,33 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agora** (purchasing; a sidebar module next to PM, behind the same access gate). A shared parts list per
+  car (SDM27 / SDM27e) and subteam that works like a spreadsheet: type in rows
+  or paste a Mouser / Digikey cart straight in. Any member can request parts;
+  every request names who entered it and needs two exec approvals before it is
+  bought. Approval cards show each budget line before and after. Execs record
+  orders (one order can cover many parts; shared parts split across cars and
+  subteams) and tracking; the delivery person is told when parts ship and land.
+  Budgets page shows budget, spent, committed and planned per budget line, and
+  members only see their own subteam's. Desktop notifications for Agora
+  can be turned off in Settings.
+- **Everyone sees the whole parts list** (as in Airtable), but only their own
+  subteam's budget, and adds or edits parts only for their own subteam.
+- **Get reimbursed**: anyone on the team can ask to be paid back for something
+  they bought, with photos or PDFs of the receipts. Execs are told who asked;
+  the requester is told when it's approved, declined or paid.
+- **Finance (execs only)** inside Agora: an Overview of what the team can
+  actually spend (bank balance minus card owed, uncashed checks and
+  reimbursements owed), SAE card credit used this cycle, weekly balances for
+  every account with history, the full ledger with running balances, subteam
+  splits and attached invoices, reimbursements per person with pay-by-check,
+  a discrepancy list, and accounts. Exports to CSV.
+- **Uploads**: execs upload Chase checking and card statement PDFs (each is checked against its own printed totals before anything is saved), Chase, Square and invoice CSVs (preview first; duplicates, cleared checks and card autopays are recognised; a file imports once). Anyone can upload an Airtable CSV into their subteam's parts tab. Invoice files attach to ledger lines.
+- **Budget breakdown**: click a budget line to see every part and charge in it.
+- **Guides**: "How it works" for everyone and an exec-only guide, each with a clickable process map.
+
 ## [5.14.0] - 2026-09-30
 
 ### Added
