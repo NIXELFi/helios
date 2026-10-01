@@ -567,27 +567,49 @@ begin
     then coalesce(p_basis, 'manual') else '' end where id = p_txn;
 end; $$;
 
+-- A charge's subteam split, built from the parts linked to it (weighted by
+-- each part's cost and its car/subteam percentages). Used while the split
+-- is still one Helios made from parts; a split an exec entered is left alone.
+create or replace function finance.split_from_parts(p_txn bigint)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_amount bigint; v_kind text; v_basis text;
+begin
+  select abs(amount_cents), kind, allocation_basis into v_amount, v_kind, v_basis from finance.transactions where id = p_txn;
+  if not found or v_kind = 'transfer' then return; end if;
+  if exists (select 1 from finance.txn_allocations where txn_id = p_txn) and v_basis not like 'from part%' then return; end if;
+  delete from finance.txn_allocations where txn_id = p_txn;
+  with w as (
+    select a.project_id, a.subteam_id, sum(greatest(purchasing.item_cost(i), 1) * a.percent) as weight
+    from purchasing.items i join purchasing.item_allocations a on a.item_id = i.id
+    where i.finance_txn_id = p_txn
+    group by a.project_id, a.subteam_id
+  ), r as (
+    select project_id, subteam_id, round(v_amount * weight / sum(weight) over ())::bigint as share,
+           row_number() over (order by subteam_id, project_id) as n, count(*) over () as cnt
+    from w
+  )
+  insert into finance.txn_allocations (txn_id, project_id, subteam_id, amount_cents)
+  select p_txn, project_id, subteam_id,
+         case when n = cnt   -- the last share takes the rounding, so the split adds up exactly
+              then v_amount - coalesce(sum(share) over (order by n rows between unbounded preceding and 1 preceding), 0)
+              else share end
+  from r;
+  update finance.transactions set allocation_basis = coalesce(
+    'from parts ' || (select string_agg(code, ', ' order by code) from purchasing.items where finance_txn_id = p_txn), '')
+  where id = p_txn;
+end; $$;
+
 -- Link a parts-list item to the statement line that paid for it (null to
--- unlink). A received item that is linked becomes RECONCILED.
+-- unlink). A received item that is linked becomes RECONCILED. The charge it
+-- leaves and the charge it joins have their parts-based splits rebuilt, so
+-- the money counts once, toward the right subteams.
 create or replace function finance.link_item(p_item uuid, p_txn bigint)
 returns void language plpgsql security definer set search_path = '' as $$
+declare v_old bigint;
 begin
   if not finance.can_edit() then raise exception 'only execs edit the ledger' using errcode = '42501'; end if;
-  -- A charge with no split yet takes the item's car and subteam, so the
-  -- money doesn't drop out of every budget once the item stops counting as a part.
-  if p_txn is not null and not exists (select 1 from finance.txn_allocations where txn_id = p_txn)
-     and exists (select 1 from finance.transactions where id = p_txn and kind <> 'transfer') then
-    insert into finance.txn_allocations (txn_id, project_id, subteam_id, amount_cents)
-    select p_txn, a.project_id, a.subteam_id,
-           case when row_number() over w = count(*) over (partition by a.item_id)
-                then abs(t.amount_cents) - coalesce(sum(round(abs(t.amount_cents) * a.percent / 100.0)::bigint) over (w rows between unbounded preceding and 1 preceding), 0)
-                else round(abs(t.amount_cents) * a.percent / 100.0)::bigint end
-    from purchasing.item_allocations a cross join finance.transactions t
-    where a.item_id = p_item and t.id = p_txn
-    window w as (partition by a.item_id order by a.subteam_id, a.project_id);
-    update finance.transactions set allocation_basis = 'from part ' || (select code from purchasing.items where id = p_item)
-    where id = p_txn and exists (select 1 from finance.txn_allocations where txn_id = p_txn);
-  end if;
+  select finance_txn_id into v_old from purchasing.items where id = p_item for update;
+  if not found then raise exception 'no such item' using errcode = 'P0002'; end if;
   update purchasing.items set
     finance_txn_id = p_txn,
     match_method = case when p_txn is null then 'rejected' else 'manual' end,
@@ -595,7 +617,8 @@ begin
                   when p_txn is null and status = 'RECONCILED' then 'RECEIVED' else status end,
     reconciled_at = case when p_txn is not null and status = 'RECEIVED' then now() else reconciled_at end
   where id = p_item;
-  if not found then raise exception 'no such item' using errcode = 'P0002'; end if;
+  if v_old is not null and v_old is distinct from p_txn then perform finance.split_from_parts(v_old); end if;
+  if p_txn is not null then perform finance.split_from_parts(p_txn); end if;
 end; $$;
 
 -- 6. Budgets from the ledger ---------------------------------------------------------------

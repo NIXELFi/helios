@@ -255,6 +255,32 @@ describe("finance", () => {
     expect(rows.find((r) => r.name === "Data AQ")).toMatchObject({ spent_cents: 5003 });
   });
 
+  it("a charge paying several parts is split across their subteams, and unlinking takes a part back out", async () => {
+    const { card } = await accounts();
+    const cfo = await person("cfo", "cfo");
+    const { data: d } = await cfo.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "ADC", total_estimate_cents: 2000 }] });
+    const { data: e } = await cfo.p.rpc("add_items", { p_project: ic, p_subteam: eng, p_rows: [{ title: "Injector", total_estimate_cents: 8000 }] });
+    const t = (await fin().from("transactions").insert({ account_id: card, date: "2026-09-10", amount_cents: -10001, kind: "charge" }).select("id").single()).data!;
+    const split = async (id: number) => ((await fin().from("txn_allocations").select("subteam_id,amount_cents").eq("txn_id", id)).data ?? [])
+      .sort((x, y) => x.amount_cents - y.amount_cents);
+    await cfo.f.rpc("link_item", { p_item: d[0], p_txn: t.id });
+    await cfo.f.rpc("link_item", { p_item: e[0], p_txn: t.id });
+    expect(await split(t.id)).toEqual([{ subteam_id: daq, amount_cents: 2000 }, { subteam_id: eng, amount_cents: 8001 }]);
+
+    // linked to the wrong charge by mistake: unlink and link elsewhere
+    const right = (await fin().from("transactions").insert({ account_id: card, date: "2026-09-11", amount_cents: -8000, kind: "charge" }).select("id").single()).data!;
+    await cfo.f.rpc("link_item", { p_item: e[0], p_txn: right.id });
+    expect(await split(t.id)).toEqual([{ subteam_id: daq, amount_cents: 10001 }]);
+    expect(await split(right.id)).toEqual([{ subteam_id: eng, amount_cents: 8000 }]);
+    await cfo.f.rpc("link_item", { p_item: e[0], p_txn: null });
+    expect(await split(right.id)).toEqual([]);
+
+    // a split an exec typed in is never overwritten
+    await cfo.f.rpc("set_allocations", { p_txn: right.id, p_allocations: [{ project_id: ic, subteam_id: daq, amount_cents: 8000 }] });
+    await cfo.f.rpc("link_item", { p_item: e[0], p_txn: right.id });
+    expect(await split(right.id)).toEqual([{ subteam_id: daq, amount_cents: 8000 }]);
+  });
+
   it("a split's shares are positive", async () => {
     const { card } = await accounts();
     const cfo = await person("cfo", "cfo");
