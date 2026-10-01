@@ -366,8 +366,9 @@ begin
       or new.decided_by is distinct from old.decided_by or new.check_txn_id is distinct from old.check_txn_id) then
     raise exception 'approve, decline and pay with the buttons, not by editing the row' using errcode = '42501';
   end if;
-  if tg_op = 'UPDATE' and old.status = 'paid' and new.amount_cents is distinct from old.amount_cents then
-    raise exception 'a paid reimbursement''s amount can''t change' using errcode = '42501';
+  if tg_op = 'UPDATE' and old.status = 'paid' and (new.amount_cents is distinct from old.amount_cents
+      or new.paid_date is distinct from old.paid_date or new.check_number is distinct from old.check_number) then
+    raise exception 'a paid reimbursement''s amount and check can''t change' using errcode = '42501';
   end if;
   return coalesce(new, old);
 end; $$;
@@ -501,6 +502,12 @@ begin
   if coalesce(array_length(p_ids, 1), 0) = 0 then raise exception 'pick at least one' using errcode = '22023'; end if;
   -- lock the rows so two execs paying at once can't both write a check
   perform 1 from finance.reimbursements where id = any (p_ids) for update;
+  if (select count(*) from finance.reimbursements where id = any (p_ids)) <> (select count(distinct x) from unnest(p_ids) x) then
+    raise exception 'some of those reimbursements don''t exist' using errcode = 'P0002';
+  end if;
+  if exists (select 1 from finance.reimbursements where id = any (p_ids) and user_id = auth.uid()) then
+    raise exception 'another exec has to pay your own reimbursement' using errcode = '42501';
+  end if;
   if exists (select 1 from finance.reimbursements where id = any (p_ids) and status in ('requested', 'denied')) then
     raise exception 'approve the requests before paying them' using errcode = '22023';
   end if;

@@ -122,14 +122,21 @@ export const AIRTABLE_STATUS: Record<string, string> = {
   ordered: "ORDERED", received: "RECEIVED", "already have": "HAVE", have: "HAVE",
 };
 
+/** A real calendar day (2026-02-30 isn't), or undefined so one bad cell can't sink the whole paste. */
+function realDay(y: string, mo: string, d: string): string | undefined {
+  const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  const t = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === iso ? iso : undefined;
+}
+
 function parseDate(s: string): string | undefined {
   const t = s.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return realDay(iso[1]!, iso[2]!, iso[3]!);
   const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);  // US m/d/y
   if (m) {
     const [, mo = "", d = "", yr = ""] = m;
-    const y = yr.length === 2 ? `20${yr}` : yr;
-    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    return realDay(yr.length === 2 ? `20${yr}` : yr, mo, d);
   }
   return undefined;
 }
@@ -143,16 +150,22 @@ export function toRows(matrix: string[][], mapping: (PasteField | null)[], defau
     if (!o.title?.trim()) continue;
     const qty = o.quantity ? parseFloat(o.quantity.replace(/,/g, "")) : NaN;
     const row: NewRow = { title: o.title.trim() };
-    if (Number.isFinite(qty)) row.quantity = qty;
-    const unit = parseCents(o.unit_price); if (unit !== null) row.unit_price_cents = unit;
+    // The server refuses a zero/negative quantity or a negative price for the
+    // whole batch, so such a cell is left out and noted on its row instead.
+    const leftOut: string[] = [];
+    if (Number.isFinite(qty)) { if (qty > 0) row.quantity = qty; else leftOut.push(`quantity ${o.quantity!.trim()}`); }
+    const unit = parseCents(o.unit_price);
+    if (unit !== null && unit < 0) leftOut.push(`unit price ${o.unit_price!.trim()}`); else if (unit !== null) row.unit_price_cents = unit;
     const tax = parseCents(o.tax_shipping); if (tax !== null) row.tax_shipping_cents = tax;
-    const total = parseCents(o.total); if (total !== null) row.total_estimate_cents = total;
+    const total = parseCents(o.total);
+    if (total !== null && total < 0) leftOut.push(`total ${o.total!.trim()}`); else if (total !== null) row.total_estimate_cents = total;
     const vendor = (o.vendor ?? "").trim() || defaultVendor.trim(); if (vendor) row.vendor = vendor;
     if (o.part_number) row.part_number = o.part_number;
     if (o.product_url) row.product_url = o.product_url;
     if (o.priority) row.priority = ({ high: "HIGH", medium: "Medium", low: "Low" } as Record<string, string>)[o.priority.trim().toLowerCase()];
     if (o.needed_by) row.needed_by = parseDate(o.needed_by);
-    if (o.notes) row.notes = o.notes;
+    const note = leftOut.length ? `Pasted ${leftOut.join(", ")} left out: check it.` : "";
+    if (o.notes || note) row.notes = [o.notes, note].filter(Boolean).join(" ");
     if (o.status) { const s = AIRTABLE_STATUS[o.status.trim().toLowerCase()]; if (s) row.status = s; }
     out.push(row);
   }

@@ -228,6 +228,12 @@ describe("finance", () => {
     expect((await cfo.f.from("reimbursements").update({ amount_cents: 150 }).eq("id", other!.id)).error).toBeNull();
     expect((await cfo.f.from("reimbursements").update({ status: "paid" }).eq("id", other!.id)).error?.message).toMatch(/buttons/);
     expect((await cfo.f.from("reimbursements").insert({ person_name: "Sam", amount_cents: 1, status: "paid" })).error).not.toBeNull();
+    // approved by someone else, it still can't be paid by its owner
+    const pres = await person("pres", "president");
+    const { data: own2 } = await cfo.f.rpc("request_reimbursement", { p_amount_cents: 500, p_reason: "tape" });
+    expect((await pres.f.rpc("decide_reimbursement", { p_id: own2, p_decision: "approve" })).error).toBeNull();
+    expect((await cfo.f.rpc("pay_reimbursements", { p_ids: [own2] })).error?.message).toMatch(/another exec has to pay/);
+    expect((await pres.f.rpc("pay_reimbursements", { p_ids: [987654] })).error?.message).toMatch(/don't exist/);
     // the withdraw RPC still works for the owner
     expect((await cfo.f.rpc("withdraw_reimbursement", { p_id: own })).error).toBeNull();
   });

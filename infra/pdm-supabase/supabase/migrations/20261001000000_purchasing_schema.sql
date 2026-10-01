@@ -621,6 +621,7 @@ begin
              and x.status not in ('APPROVED', 'ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED')) then
     raise exception 'only approved items can be ordered' using errcode = '42501';
   end if;
+  if p_total_cents < 0 then raise exception 'an order total can''t be negative' using errcode = '22023'; end if;
   select coalesce(sum(greatest(purchasing.item_cost(x), 1)), 0), count(*) into v_sum, n
     from purchasing.items x where x.id = any (p_ids);
   v_left := p_total_cents;

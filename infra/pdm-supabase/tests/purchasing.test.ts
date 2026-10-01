@@ -167,6 +167,8 @@ describe("purchasing", () => {
         { title: "A", total_estimate_cents: 3000 }, { title: "B", total_estimate_cents: 1000 }],
     });
     for (const id of ids!) await approveTwice(id);
+    expect((await cfo.client.rpc("record_order", { p_ids: ids, p_order_id: "1", p_payment: "card", p_total_cents: -500 })).error?.message)
+      .toMatch(/can't be negative/);
     const { error: orderErr } = await cfo.client.rpc("record_order", {
       p_ids: ids, p_order_id: "50112233", p_payment: "Team card 0000", p_total_cents: 5639,
     });

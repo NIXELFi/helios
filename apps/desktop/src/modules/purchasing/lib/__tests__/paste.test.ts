@@ -26,6 +26,15 @@ describe("purchasing paste", () => {
     expect(toRows(m, ["title", "quantity"])).toHaveLength(1);
   });
 
+  it("leaves out cells the server would refuse, and says so on the row", () => {
+    const rows = toRows([["Bolt", "0", "-1.00", "2/30/26"]], ["title", "quantity", "unit_price", "needed_by"]);
+    expect(rows[0]).toMatchObject({ title: "Bolt" });
+    expect(rows[0]!.quantity).toBeUndefined();
+    expect(rows[0]!.unit_price_cents).toBeUndefined();
+    expect(rows[0]!.needed_by).toBeUndefined();
+    expect(rows[0]!.notes).toMatch(/quantity 0, unit price -1.00 left out/);
+  });
+
   it("parses money the way people type it", () => {
     expect(parseCents("$1,234.56")).toBe(123456);
     expect(parseCents("(3.00)")).toBe(-300);
