@@ -44,9 +44,7 @@ import type { ReportKind } from "./shell/report/types";
 const VaultModule = lazy(() => import("./modules/vault").then((m) => ({ default: m.VaultModule })));
 const CfdModule = lazy(() => import("./modules/cfd").then((m) => ({ default: m.CfdModule })));
 const PmModule = lazy(() => import("./modules/pm").then((m) => ({ default: m.PmModule })));
-const PurchasingModule = lazy(() =>
-  import("./modules/purchasing").then((m) => ({ default: m.PurchasingModule })),
-);
+const AgoraModule = lazy(() => import("./modules/purchasing").then((m) => ({ default: m.AgoraModule })));
 const GamesModule = lazy(() => import("./modules/games").then((m) => ({ default: m.GamesModule })));
 const SimModule = lazy(() => import("./modules/sim").then((m) => ({ default: m.SimModule })));
 const AmethystModule = lazy(() =>
@@ -197,7 +195,7 @@ function HeliosShell() {
   // gate, RLS is the real enforcement.
   const { member: orgMember, canManageOrg, recheck: recheckOrgAccess } = useOrgAccess();
   const noOrgAccess = user !== null && orgMember === false;
-  // Desktop notifications for purchasing (a request to approve, approved,
+  // Desktop notifications for Agora (a request to approve, approved,
   // shipped, delivered to your place) whatever module is open.
   usePurchasingAlerts();
 
@@ -234,7 +232,7 @@ function HeliosShell() {
       // Settings → General → "Open Helios on". "Last used" falls back to PM
       // when the remembered module is gated (org-only) or unknown.
       const wanted = prefs.landing === "last" ? prefs.lastModule : prefs.landing;
-      const openable = new Set<ModuleId>(["pm", "purchasing", "logs", "vault", "cfd", "sim", "games", "amethyst", "marketplace"]);
+      const openable = new Set<ModuleId>(["pm", "agora", "logs", "vault", "cfd", "sim", "games", "amethyst", "marketplace"]);
       home = wanted && openable.has(wanted as ModuleId) ? (wanted as ModuleId) : "pm";
     }
     setLanded(true);
@@ -398,14 +396,14 @@ function HeliosShell() {
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
     if (vaultEnabled && pmEnabled && gamesEnabled) return;
-    const bounced = active === "vault" || active === "pm" || active === "purchasing" || active === "games";
+    const bounced = active === "vault" || active === "pm" || active === "agora" || active === "games";
     if (bounced) setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("vault") && !prev.has("pm") && !prev.has("purchasing") && !prev.has("games") && (!bounced || prev.has("logs"))) return prev;
+      if (!prev.has("vault") && !prev.has("pm") && !prev.has("agora") && !prev.has("games") && (!bounced || prev.has("logs"))) return prev;
       const next = new Set(prev);
       next.delete("vault");
       next.delete("pm");
-      next.delete("purchasing");
+      next.delete("agora");
       next.delete("games");
       if (bounced) next.add("logs");
       return next;
@@ -435,7 +433,7 @@ function HeliosShell() {
     if (
       (id === "vault" && !vaultEnabled) ||
       (id === "pm" && !pmEnabled) ||
-      (id === "purchasing" && !pmEnabled) ||
+      (id === "agora" && !pmEnabled) ||
       (id === "games" && !gamesEnabled)
     ) {
       // While auth is still resolving we don't yet know if this is a returning
@@ -521,6 +519,7 @@ function HeliosShell() {
   const vaultEl = useMemo(() => <VaultModule />, []);
   const cfdEl = useMemo(() => <CfdModule key={themeVersion} />, [themeVersion]);
   const pmEl = useMemo(() => <PmModule />, []);
+  const agoraEl = useMemo(() => <AgoraModule />, []);
   const simEl = useMemo(() => <SimModule active={simActive} />, [simActive]);
   const gamesEl = useMemo(() => <GamesModule paused={!gamesActive} />, [gamesActive]);
   const amethystEl = useMemo(() => <AmethystModule />, []);
@@ -533,7 +532,7 @@ function HeliosShell() {
     vault: "Vault",
     cfd: "CFD",
     pm: "PM",
-    purchasing: "Purchasing",
+    agora: "Agora",
     sim: "Sim",
     games: "Games",
     amethyst: "Amethyst",
@@ -601,7 +600,7 @@ function HeliosShell() {
             walls, so show the waiting-room screen for whichever of them is
             active (and skip mounting them entirely — no doomed queries). */}
         {noOrgAccess &&
-          (active === "vault" || active === "pm" || active === "purchasing" || active === "games" ||
+          (active === "vault" || active === "pm" || active === "agora" || active === "games" ||
             active === "marketplace" || active === "org") && (
           <div className="absolute inset-0">
             <NoAccessScreen
@@ -626,16 +625,12 @@ function HeliosShell() {
             {pmEl}
           </ModulePane>
         )}
-        {visited.has("purchasing") && pmEnabled && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "purchasing" ? "" : "hidden")}>
-            <ErrorBoundary label="Purchasing" compact>
-              <Suspense fallback={<ModuleLoading id="purchasing" label="Purchasing" />}>
-                <ModuleActivityProvider active={active === "purchasing"}>
-                  <PurchasingModule active={active === "purchasing"} />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+        {/* Agora: parts list, approvals, orders, budgets, reimbursements, and
+            the exec-only Finance pages. Same gate and container as PM. */}
+        {visited.has("agora") && pmEnabled && !noOrgAccess && (
+          <ModulePane id="agora" label="Agora" isActive={active === "agora"}>
+            {agoraEl}
+          </ModulePane>
         )}
         {/* Sim: the driver-in-loop simulator's launcher and run archive.
             Ungated like Amethyst -- it reads run files this machine already

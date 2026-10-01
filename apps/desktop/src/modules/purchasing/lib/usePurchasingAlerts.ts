@@ -45,7 +45,7 @@ export function usePurchasingAlerts(): number {
       const newest = rows[0]?.id ?? 0;
       if (lastSeen.current !== null) {
         for (const n of rows.filter((r) => r.id > lastSeen.current!).slice(0, 3).reverse()) {
-          void osNotify("purchasing", "Purchasing", n.message);
+          void osNotify("agora", "Agora", n.message);
         }
       }
       lastSeen.current = Math.max(lastSeen.current ?? 0, newest);

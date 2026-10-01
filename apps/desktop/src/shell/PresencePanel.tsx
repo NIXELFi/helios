@@ -9,7 +9,7 @@ const MODULE_LABEL: Record<ModuleId, string> = {
   vault: "Vault",
   cfd: "CFD",
   pm: "PM",
-  purchasing: "Purchasing",
+  agora: "Agora",
   sim: "Sim",
   games: "Games",
   amethyst: "Amethyst",

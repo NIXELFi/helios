@@ -1,1 +1,1 @@
-export { PurchasingModule } from "./PurchasingModule";
+export { AgoraModule } from "./PurchasingModule";

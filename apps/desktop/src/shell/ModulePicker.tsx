@@ -24,7 +24,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "purchasing" | "sim" | "games" | "amethyst" | "marketplace" | "org";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "agora" | "sim" | "games" | "amethyst" | "marketplace" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -33,7 +33,7 @@ export const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   vault: IconArchive,
   cfd: IconWind,
   pm: IconClipboardList,
-  purchasing: IconShoppingCart,
+  agora: IconShoppingCart,
   sim: IconSteeringWheel,
   games: IconDeviceGamepad2,
   amethyst: IconDiamond,
@@ -259,16 +259,16 @@ export function ModulePicker(props: Props) {
           disabled={pmDisabled}
           disabledTitle="Sign in to use PM"
         />
-        {/* Purchasing: parts requests, approvals, orders, budgets. Same gate as
+        {/* Agora: parts requests, approvals, orders, budgets. Same gate as
             PM (RLS-protected purchasing.* tables). */}
         <NavButton
-          label="Purchasing"
-          Icon={MODULE_ICON.purchasing}
+          label="Agora"
+          Icon={MODULE_ICON.agora}
           collapsed={collapsed}
-          active={active === "purchasing"}
-          onClick={() => onSelect("purchasing")}
+          active={active === "agora"}
+          onClick={() => onSelect("agora")}
           disabled={pmDisabled}
-          disabledTitle="Sign in to use Purchasing"
+          disabledTitle="Sign in to use Agora"
         />
         <NavButton
           label="Logs"

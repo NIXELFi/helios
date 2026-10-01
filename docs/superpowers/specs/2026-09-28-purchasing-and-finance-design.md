@@ -219,7 +219,7 @@ New schema `finance`, readable only with `finance.view`:
 
 ## UI
 
-A new **Purchasing** module in the sidebar next to PM, with the PM look:
+A new **Agora** module (purchasing) in the sidebar next to PM, mounted and gated the same way, with the PM look:
 Parts (subteam tabs) · Approvals · Orders & tracking · Budgets · Get
 reimbursed · Inbox. Execs also get a **Finance · execs only** section in the
 same module's sidebar: Overview (Available, bank, card owed, uncashed checks,

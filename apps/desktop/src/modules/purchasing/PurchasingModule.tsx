@@ -4,6 +4,7 @@ import {
   IconAlertTriangle, IconBook2, IconCloudUpload, IconMap2, IconReceipt2, IconScale, IconTable, IconTruckDelivery, type TablerIcon,
 } from "@tabler/icons-react";
 import { useHeliosAuth, userDisplayName } from "../../auth/AuthShell";
+import { useModuleLive } from "../../shell/module-activity";
 import { can } from "./lib/api";
 import { usePurchasing } from "./lib/usePurchasing";
 import { Flash } from "./components/ui";
@@ -49,14 +50,16 @@ const SUBTITLE: Record<View, string> = {
 };
 
 /**
- * Purchasing and finance: the parts list that replaces the Airtable cost
+ * Agora (purchasing and finance): the parts list that replaces the Airtable cost
  * tracker, exec approvals, orders and tracking, per-subteam budgets,
  * reimbursement requests, and (execs only) the ledger. Every rule is enforced
  * by the purchasing and finance schemas' RPCs and RLS; this UI only decides
  * which controls to offer.
  */
-export function PurchasingModule({ active }: { active: boolean }) {
+export function AgoraModule() {
   const { client, user } = useHeliosAuth();
+  // On screen in a visible window? Like PM, a backgrounded Agora stops polling.
+  const active = useModuleLive();
   const { data, loading, error, reload } = usePurchasing(client, active);
   const financeExec = can(data.caps, "finance.view");
   const fin = useFinance(client, active, financeExec);
@@ -127,7 +130,7 @@ export function PurchasingModule({ active }: { active: boolean }) {
   const [partFocus, setPartFocus] = useState<{ q: string; n: number } | null>(null);
   const openPart = useCallback((code: string) => { setPartFocus((f) => ({ q: code, n: (f?.n ?? 0) + 1 })); setView("parts"); }, []);
 
-  if (!client) return <div className="grid h-full place-items-center text-helios-dim">Sign in to use Purchasing.</div>;
+  if (!client) return <div className="grid h-full place-items-center text-helios-dim">Sign in to use Agora.</div>;
 
   const fp: FinanceProps = {
     client, fin: fin.data, pur: data, reload: reloadAll, flash, me: userDisplayName(user) || user?.email || "exec", openTxn,
@@ -144,7 +147,7 @@ export function PurchasingModule({ active }: { active: boolean }) {
   return (
     <div className="flex h-full min-h-0 bg-helios-base text-helios-text">
       <aside className="flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-helios-line bg-helios-panel/60 p-3">
-        <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.18em] text-helios-muted">Purchasing</div>
+        <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.18em] text-helios-muted">Agora</div>
         {nav.filter((n) => n.show).map(({ id, label: l, Icon, count }) => navButton(id, l, Icon, count))}
         {financeExec && (
           <>

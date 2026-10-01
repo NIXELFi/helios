@@ -185,7 +185,7 @@ function AddForm({ client, reload, flash, done }: Pick<FinanceProps, "client" | 
   return (
     <Card className="flex flex-col gap-2">
       <b>Money owed to someone</b>
-      <p className="text-xs text-helios-dim">For people who paid for the team (e.g. a hotel on a competition trip). Members can also ask themselves from Purchasing → Get reimbursed.</p>
+      <p className="text-xs text-helios-dim">For people who paid for the team (e.g. a hotel on a competition trip). Members can also ask themselves from Agora, under Get reimbursed.</p>
       <div className="flex flex-wrap gap-2">
         <input className={input} placeholder="Person" value={f.person} onChange={(e) => setF({ ...f, person: e.target.value })} />
         <input className={`${input} w-28`} placeholder="Amount $" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />

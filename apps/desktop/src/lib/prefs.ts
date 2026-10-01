@@ -17,7 +17,7 @@ const PREFS_VERSION = 1;
 
 export type LandingPref = "pm" | "logs" | "last";
 export type ThemePref = "system" | "dark" | "light";
-export type NotificationSource = "vault" | "updates" | "purchasing";
+export type NotificationSource = "vault" | "updates" | "agora";
 
 export interface QuietHours {
   enabled: boolean;
@@ -42,8 +42,8 @@ export interface Prefs {
     enabled: boolean;
     vault: boolean;
     updates: boolean;
-    /** Purchase requests, approvals, shipments and deliveries. */
-    purchasing: boolean;
+    /** Agora: purchase requests, approvals, shipments and deliveries. */
+    agora: boolean;
     quiet: QuietHours;
   };
 }
@@ -58,7 +58,7 @@ export const DEFAULT_PREFS: Prefs = {
     enabled: true,
     vault: true,
     updates: true,
-    purchasing: true,
+    agora: true,
     quiet: { enabled: false, start: "22:00", end: "07:00" },
   },
 };
@@ -87,7 +87,7 @@ export function sanitize(raw: unknown): Prefs {
       enabled: bool(n.enabled, d.notifications.enabled),
       vault: bool(n.vault, d.notifications.vault),
       updates: bool(n.updates, d.notifications.updates),
-      purchasing: bool(n.purchasing, d.notifications.purchasing),
+      agora: bool(n.agora, d.notifications.agora),
       quiet: {
         enabled: bool(q.enabled, d.notifications.quiet.enabled),
         start: typeof q.start === "string" && HHMM.test(q.start) ? q.start : d.notifications.quiet.start,
