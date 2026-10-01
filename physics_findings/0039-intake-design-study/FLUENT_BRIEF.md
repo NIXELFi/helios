@@ -6,15 +6,15 @@ Goal: Fluent and the 1D engine model should agree on two restrictor numbers. Flu
 
 - **Angles** are half-angles (wall to centreline). 5° half = 10° included.
 - **Throat** is 20 mm.
-- **Ambient:** p0 = 97 kPa total (Phoenix baro, range 96.8-97.8), T0 = 300 K, air as an ideal gas.
-- **Ideal choked flow** through the throat at those conditions is 0.0711 kg/s. The model uses Cd 0.95, giving 0.0675 kg/s.
+- **Ambient:** p0 = 97.3 kPa total, T0 = 305 K, air as an ideal gas. These are the 1D model's own `p_ambient` / `T_ambient`. (Corrected 2026-09-30: an earlier version of this brief said 97 kPa / 300 K.)
+- **Ideal choked flow** through the throat at those conditions is 0.0707 kg/s. The model uses Cd 0.95, giving 0.0672 kg/s.
 - **Runner lengths** are measured from the head flange (engine/port excluded; today's runner = 248 mm).
 
 ## 1. The two numbers the 1D model consumes (highest priority)
 
 For each geometry, sweep outlet (plenum) static pressure from about 0.55 to 0.99 of p0 and report mass flow, so the whole curve from unchoked to choked is captured.
 
-1. **Throat discharge coefficient, Cd** = choked mass flow / 0.0711 kg/s (ideal isentropic choked flow at p0, T0).
+1. **Throat discharge coefficient, Cd** = choked mass flow / ideal isentropic choked flow at p0, T0 (0.0707 kg/s at 97.3 kPa, 305 K).
    - The model assumes **0.95**.
    - Each 0.01 of Cd is worth about 0.3 % torque at 10.5-12.5k.
 2. **Diffuser pressure recovery, R** = (p_plenum - p_throat) / (p0 - p_throat), static pressures, taken where the flow is just unchoked.
@@ -60,3 +60,28 @@ The 1D tip-in runs say a 2.75 L plenum loses about 37 ms of full torque per clos
 
 - **1D recommendation now:** VRLI 198 -> 298 mm runners in today's 1.44 L plenum volume, restrictor B, radiused converging side, fastest packageable actuator. Details in `finding.md` (this folder).
 - **Existing Fluent tooling:** `Downloads/restrictor_opt` has a 2D-axisymmetric Fluent pipeline that already reports throat Cd; its `data/restrictor_maps/*.csv` are in a usable format.
+
+## Addendum (2026-09-30): answers to the Fluent agent's questions
+
+1. **Geometry A.** The model knows only: 36 mm inlet, 8° half-angle converging, 20 mm throat, 3.2° half-angle diffuser to 38 mm, 228 mm overall.
+   - The converging cone (56.9 mm) plus the diffuser (160.9 mm) leave about 10 mm for the throat land and blends.
+   - The as-built blend radii are not measured. Use a 10 mm land including blends, and run a sharp-vs-blended sensitivity on Cd.
+   - The 32 mm throttle bore sits upstream of the 36 mm inlet.
+2. **B-E converging side.** The 1D model has no converging geometry, only Cd; the length tables assume 25 mm converging plus 5 mm land.
+   - Use one fixed nozzle for B-E so that only the diffuser varies: 30° half-angle cone, 20 mm blend radius into the throat, 5 mm land.
+   - Treat the converging side as its own sub-study (cone 12/20/30°, blend 10/20 mm) and report Cd.
+3. **Roughness.** The 1D friction term is smooth-wall (lambda = 0.014 at Re ~3e5). 60 um on 20 mm (eps/D = 0.003) roughly doubles it, which favours short diffusers further. Bracket A and B with smooth and 60 um walls.
+4. **Where p_plenum is taken.** It is the static pressure at the diffuser exit plane: the venturi boundary fills the plenum's first cell, whose area is the diffuser outlet area. R = eta x (1 - sigma^2), with sigma = throat area / outlet area and eta = 0.62 (car-fitted).
+   - A straight outlet pipe at exit diameter is the right domain for comparing R.
+   - The plenum dump is a separate case (section 3).
+5. **Objective.** Mass flow at the engine's operating back-pressure is the right objective; it weighs Cd and R correctly.
+   - Sensitivity at 10.5-12.5k: about +0.3 % torque per +0.01 Cd and about +0.2 % per +0.01 R.
+   - 1D operating points, baseline: mean p_plenum/p0 = 0.90-0.97 at 10.5-12.5k, with mdot = 0.051-0.057 kg/s (72-81 % of ideal choked).
+   - 1D operating points, new intake: p_plenum/p0 = 0.91-0.94, mdot = 0.055-0.058 kg/s.
+   - Weight p_out/p0 = 0.85-0.95.
+   - VE (plenum-referenced) is about 0.90 at 10.5-12.5k. The model stops at 12.5k, so use 10.5 / 11.5 / 12.5k.
+
+**The absolute recovery gap is the main thing to reconcile.** Clean-pipe CFD gives R of about 0.8 for a near-A geometry. Idelchik alone gives 0.87 for A. The 1D model's 0.572 is that 0.87 times a car-fitted factor of 0.657, from MAP-based intake pressure drop (findings 0036 and 0038).
+- Either the installation loses about a third of the recovery (throttle body, dump, pulsation), or the fit absorbed another model error.
+- A clean R of 0.8 on the car would be worth about +4 % at the top end, more than any other knob in 0039. The throttle-body, plenum-dump and pulsating-outlet cases in section 3 are therefore the highest-value runs.
+- Until then, transfer CFD results as ratios: R_1D(geometry) = 0.572 x R_CFD(geometry) / R_CFD(A).
