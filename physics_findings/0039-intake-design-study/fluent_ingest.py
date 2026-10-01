@@ -89,6 +89,9 @@ def main():
                     with ThreadPoolExecutor(study.THREADS) as ex: cache[key] = list(ex.map(run, [(cfgp, r, 0) for r in rpms]))
                     json.dump(cache, open(cachef, "w"))
                 res[(mode, g)] = np.array(cache[key])
+            for g in T.index:                                   # the table always lists every geometry already simulated
+                k2 = f"{mode}|{g}|{round(float(min(T[col_cd][g], 0.99)), 3)}|{round(float(T[col_r][g]), 4)}"
+                if k2 in cache: res[(mode, g)] = np.array(cache[k2])
         R_ = np.array(rpms, float); base = res[("ratio", "A")]
         band = lambda Tq, lo, hi: (np.trapezoid(Tq[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) / np.trapezoid(base[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) - 1) * 100
         E = pd.DataFrame([dict(mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])

@@ -211,6 +211,6 @@ Bore finish is worth about 1.8 % at the top end on the short restrictor, more th
 | **F: 4.0° diffuser, short nozzle** | **154 mm** | 0.978 | 0.726 | **+0.2 %** | +0.1 % |
 | B: 5.5° diffuser, short nozzle | 120 mm | 0.974 | 0.679 | -0.8 % | -0.6 % |
 
-A 154 mm restrictor (4.0° half-angle to 38 mm, short nozzle) matches today's at 74 mm shorter. The stall boundary lies between 4.0° and 5.0°; G (4.5°, about 140 mm) is pending.
+A 154 mm restrictor (4.0° half-angle to 38 mm, short nozzle) matches today's at 74 mm shorter. **G (4.5°, 140 mm) also stays attached at every unchoked point: Cd 0.977, R 0.712, -0.2 % top end and -0.1 % on 6-12k vs today.** The stall boundary lies between 4.5° and 5.5° (38 mm exit); while attached, R falls about 0.016 per half degree.
 
 A licence outage on 2026-10-01 truncated the A_SHARP and N_12_20 sweeps (their header Cd values were invalid; both files were deleted). `fluent_ingest.py` now skips any sweep without a choked plateau.
