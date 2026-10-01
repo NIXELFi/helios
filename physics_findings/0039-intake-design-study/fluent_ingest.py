@@ -34,7 +34,13 @@ def load(f):
     # The 1D model's p_plenum is static pressure at the DIFFUSER EXIT PLANE. The CFD tailpipe (p_out) mixes out the exit
     # profile and gains static pressure a plenum never sees, most of all behind short, separated diffusers.
     x["pr"] = x["p_exit_plane_over_p0"] if "p_exit_plane_over_p0" in x else x["p_out_over_p0"]
+    x = x[np.isfinite(x.mdot_kg_s) & np.isfinite(x.pr)]                 # a sweep cut short (e.g. licence drop) leaves NaN rows
     return x.sort_values("pr")
+
+def complete(x):
+    """A usable sweep reaches the choked plateau: >= 12 valid points and the top three mass flows within 0.5 %."""
+    m = np.sort(x.mdot_kg_s.values)
+    return len(x) >= 12 and (m[-1] - m[-3]) / m[-1] < 0.005
 
 def fit(x):
     choked = x.mdot_kg_s.max(); cd0 = choked / IDEAL
@@ -50,6 +56,8 @@ def main():
     rows = []
     for f in sorted(glob.glob(os.path.join(MAPS, "brief_*.csv"))):
         name = re.sub(r"^brief_|\.csv$", "", os.path.basename(f)); x = load(f)
+        if not complete(x):
+            print(f"SKIP {name}: incomplete sweep ({len(x)} valid points, never reached the choked plateau); its header Cd is not valid"); continue
         rows.append(dict(geometry=name, points=len(x), **fit(x)))
     if not rows:
         print("no brief_*.csv in", MAPS); return

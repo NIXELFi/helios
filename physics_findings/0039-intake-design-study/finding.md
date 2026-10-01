@@ -201,3 +201,16 @@ Torque columns use the ratio transfer to the car-fitted level: R_1D = 0.572 x R_
 | B (120 mm) | smooth | 0.989 | 0.757 | +1.0 % | +0.7 % |
 
 Bore finish is worth about 1.8 % at the top end on the short restrictor, more than the length trade. A smooth 120 mm restrictor beats today's rough 228 mm one. The real bore finish is unmeasured: measure it, or smooth it and re-dyno.
+
+**Stall boundary (Fluent A_NOZ and F, 2026-10-01).** Both use the short 30° + 20 mm-blend nozzle and stay attached across the engine's operating range.
+
+| geometry | length | Cd | R (fit) | top end vs today | 6-12k vs today |
+|---|---|---|---|---|---|
+| A: as-built | 228 mm | 0.974 | 0.724 | 0 | 0 |
+| A_NOZ: 3.2° diffuser, short nozzle | 186 mm | 0.979 | 0.745 | +0.5 % | +0.4 % |
+| **F: 4.0° diffuser, short nozzle** | **154 mm** | 0.978 | 0.726 | **+0.2 %** | +0.1 % |
+| B: 5.5° diffuser, short nozzle | 120 mm | 0.974 | 0.679 | -0.8 % | -0.6 % |
+
+A 154 mm restrictor (4.0° half-angle to 38 mm, short nozzle) matches today's at 74 mm shorter. The stall boundary lies between 4.0° and 5.0°; G (4.5°, about 140 mm) is pending.
+
+A licence outage on 2026-10-01 truncated the A_SHARP and N_12_20 sweeps (their header Cd values were invalid; both files were deleted). `fluent_ingest.py` now skips any sweep without a choked plateau.
