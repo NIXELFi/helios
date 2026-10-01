@@ -1,0 +1,12 @@
+{"rpm": 4000, "ve": 0.86083, "bt": 44.6357, "imep": 10.4492, "spread": 0.00018, "p_plenum_end": 96054, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 4500, "ve": 0.87201, "bt": 46.3312, "imep": 10.8819, "spread": 0.00175, "p_plenum_end": 96313, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 5000, "ve": 0.79106, "bt": 43.8039, "imep": 10.43, "spread": 0.00016, "p_plenum_end": 95955, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 5500, "ve": 0.84983, "bt": 46.4103, "imep": 11.0552, "spread": 3e-05, "p_plenum_end": 95313, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 6000, "ve": 0.90643, "bt": 46.3532, "imep": 11.1227, "spread": 5e-05, "p_plenum_end": 94320, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 6500, "ve": 0.96736, "bt": 50.8885, "imep": 12.1539, "spread": 9e-05, "p_plenum_end": 93898, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 7000, "ve": 0.94593, "bt": 49.5537, "imep": 11.955, "spread": 0.00017, "p_plenum_end": 93378, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 7500, "ve": 0.94362, "bt": 49.2073, "imep": 11.9641, "spread": 7e-05, "p_plenum_end": 92505, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 8000, "ve": 0.92991, "bt": 49.441, "imep": 12.0956, "spread": 5e-05, "p_plenum_end": 90087, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 8500, "ve": 0.95261, "bt": 50.3211, "imep": 12.3634, "spread": 7e-05, "p_plenum_end": 87995, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 9000, "ve": 0.99583, "bt": 51.0122, "imep": 12.5923, "spread": 0.0011, "p_plenum_end": 84036, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
+{"rpm": 9500, "ve": 0.97923, "bt": 48.8335, "imep": 12.2203, "spread": 6e-05, "p_plenum_end": 83047, "cycles": 20, "grid": "G3", "cfg": "V1.44_L1.00_D38_A3.2_cd0.850", "ext": 0, "cd": 0.85}
