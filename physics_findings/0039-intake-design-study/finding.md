@@ -214,3 +214,5 @@ Bore finish is worth about 1.8 % at the top end on the short restrictor, more th
 A 154 mm restrictor (4.0° half-angle to 38 mm, short nozzle) matches today's at 74 mm shorter. **G (4.5°, 140 mm) also stays attached at every unchoked point: Cd 0.977, R 0.712, -0.2 % top end and -0.1 % on 6-12k vs today.** The stall boundary lies between 4.5° and 5.5° (38 mm exit); while attached, R falls about 0.016 per half degree.
 
 A licence outage on 2026-10-01 truncated the A_SHARP and N_12_20 sweeps (their header Cd values were invalid; both files were deleted). `fluent_ingest.py` now skips any sweep without a choked plateau.
+
+**Intermediate roughness (Fluent A_KS20 / B_KS20, 20 um sand grain).** Going from 60 um to 20 um recovers about 60 % of the smooth-wall gain in R and about 70 % of the gain in Cd; the short restrictor B at 20 um matches today's A at 60 um. Engine numbers are in `charts/fluent/fluent_engine.csv`.
