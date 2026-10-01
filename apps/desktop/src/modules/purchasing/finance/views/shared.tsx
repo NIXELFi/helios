@@ -32,8 +32,12 @@ export function whereLabel(pur: PurchasingData) {
 
 export const shortDate = (d: string | null) => {
   if (!d) return "";
+  const fmt = { month: "short", day: "numeric", year: "2-digit" } as const;
+  // A timestamp (created_at, imported_at) is shown on the local calendar day;
+  // a plain date ("2026-09-30") is already a calendar day.
+  if (d.length > 10) { const t = new Date(d); if (!Number.isNaN(t.getTime())) return t.toLocaleDateString("en-US", fmt); }
   const [y, m, day] = d.slice(0, 10).split("-").map(Number);
-  return new Date(y!, (m ?? 1) - 1, day ?? 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+  return new Date(y!, (m ?? 1) - 1, day ?? 1).toLocaleDateString("en-US", fmt);
 };
 
 export const accountLabel = (a: Account | undefined) => (a ? `${a.name}${a.last4 && !a.name.includes(a.last4) ? ` ...${a.last4}` : ""}` : "?");

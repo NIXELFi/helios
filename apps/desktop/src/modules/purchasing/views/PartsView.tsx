@@ -102,8 +102,14 @@ export function PartsView({
 
   const canEdit = (i: Item) =>
     exec || ((i.status === "PLANNED" || i.status === "READY") && i.item_allocations.some((a) => can(caps, "purchasing.request", a.subteam_id)));
+  const POST_APPROVAL = new Set<Status>(["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED", "RECEIVED", "RECONCILED"]);
   const statusOptions = (i: Item): Status[] => {
-    if (exec) return STATUSES;
+    // Execs may set any status the server allows: APPROVED only comes from two
+    // approvals, and nothing unapproved can jump to ordered/shipped/received.
+    if (exec) {
+      const approved = POST_APPROVAL.has(i.status) || i.status === "APPROVED";
+      return STATUSES.filter((s) => s === i.status || (s !== "APPROVED" && (approved || !POST_APPROVAL.has(s))));
+    }
     if (!i.item_allocations.some((a) => can(caps, "purchasing.request", a.subteam_id))) return [i.status];
     return [i.status, ...(REQUESTER_MOVES[i.status] ?? [])];
   };

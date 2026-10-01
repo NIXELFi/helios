@@ -181,6 +181,7 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
     await attempt(flash, reload, "Saved.", () => updateTxn(client, t.id, fields));
   }
   async function saveSplit() {
+    if (split.some((a) => a.amount_cents <= 0)) { flash("Give every share an amount, or remove it.", true); return; }
     const rows = split.filter((a) => a.subteam_id && a.amount_cents > 0);
     await attempt(flash, reload, rows.length ? "Split saved." : "Split cleared.", () => setAllocations(client, t.id, rows));
   }
