@@ -4,7 +4,7 @@ import { Button, Card } from "../../components/ui";
 import { addBalance } from "../api";
 import { closingsByCard } from "../compute";
 import { cardHeadroom, cardOwed, projectedBankBalance, reconcile, type Account, type BalanceEntry, type ReconRow } from "../ledger";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { Badge, Bar, Sparkline, accountLabel, attempt, input, shortDate, type FinanceProps } from "./shared";
 
 const KIND_NOTE: Record<Account["kind"], string> = {

@@ -75,4 +75,15 @@ describe("statement PDFs", () => {
       ["2026-08-26", 50000, "DEPOSIT", null], ["2026-08-24", -41250, "WITHDRAWAL", null], ["2026-08-28", -25000, "CHECK_PAID", "1043"],
     ]);
   });
+
+  it("same-day, same-amount lines without a bank reference get different keys", () => {
+    const line = (description: string) => ({ date: "2026-09-02", section: "deposit" as const, amount_cents: 5000, description, detail: "", check_number: null });
+    const st = { period_start: "2026-09-01", period_end: "2026-09-30", last4: "0001", opening_cents: 0, ending_cents: 10000,
+      totals: { deposit: 10000, withdrawal: 0, check: 0 }, lines: [line("Zelle From Alex Doe"), line("Zelle From Sam Roe")], daily_balances: [] as [string, number][] };
+    const keys = checkingLines(st).map((l) => l.external_id);
+    expect(new Set(keys).size).toBe(2);
+    const card = { closing_date: "2026-09-25", last4: "0000", cardholder: "", cycle_limit_cents: null, net_charges_cents: 2000, purchases_cents: 2000,
+      credits_cents: 0, lines: [1, 2].map(() => ({ post_date: "2026-09-10", txn_date: "2026-09-09", reference: "123", description: "PARKING", amount_cents: 1000, section: "Purchasing", extra: "" })) };
+    expect(new Set(cardLines(card).map((l) => l.external_id)).size).toBe(2);
+  });
 });

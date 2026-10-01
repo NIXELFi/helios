@@ -223,7 +223,9 @@ interface Decision { kind: TxnKind; category: string; vendor: string | null; des
 
 export function classifyChecking(l: Line, rules: VendorRule[]): Decision {
   const d = l.description;
-  if (/autopay|comm card|payment to chase card|chase credit crd|epay/i.test(d) && l.amount_cents < 0)
+  // Only the card's own payment ("CO Entry Descr:Comm Card"). Any other
+  // autopay (a subscription) is ordinary spending: it can be cancelled.
+  if (/comm card|payment to chase card|chase credit crd/i.test(d) && l.amount_cents < 0)
     return { kind: "transfer", category: "Transfer: card payment", vendor: "Chase card autopay", description: "SAE card autopay", review: "", transfer: "card" };
   if (/square/i.test(d) && l.amount_cents > 0)
     return { kind: "transfer", category: "Transfer: between accounts", vendor: "Square", description: "Square payout (dues and sales held in Square)", review: "", transfer: "square" };
@@ -351,10 +353,13 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     plan.lines.push(planned);
   }
 
-  // Chase checking: the bank's own end-of-day balance, for reconciliation
+  // Chase checking: the bank's own end-of-day balance, for reconciliation.
+  // The day's last row holds it: Chase lists newest first, some banks oldest first.
   if (format === "chase-checking" || format === "generic") {
     const byDay = new Map<string, number>();
-    for (const l of lines) if (l.balance_cents !== null && !byDay.has(l.date)) byDay.set(l.date, l.balance_cents); // newest row first
+    const dated = lines.filter((l) => l.balance_cents !== null);
+    const oldestFirst = listedOldestFirst(dated);
+    for (const l of oldestFirst ? [...dated].reverse() : dated) if (!byDay.has(l.date)) byDay.set(l.date, l.balance_cents!);
     for (const [as_of, balance_cents] of byDay) {
       plan.balances.push({ account_id: account.id, as_of, balance_cents, note: `End of day balance from ${o.fileName}`, source_key: `bank-balance:${account.id}:${as_of}` });
     }
@@ -370,7 +375,15 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
       purchases_cents: purchases, credits_cents: purchases - spend };
     const group = `autopay:${account.last4 ?? account.id}:${closing}`;
     const checking = o.accounts.find((a) => a.id === account.paid_from_account_id);
-    if (checking && spend > 0 && !o.existing.some((t) => t.transfer_group === group)) {
+    // the checking statement may already show this statement's payment (uploaded
+    // first): then the card just needs its side of that payment, not an expected one
+    const paid = checking && spend > 0 ? paymentAlreadyIn(o.existing, checking.id, account.id, closing, spend) : null;
+    if (paid) {
+      plan.extra.push({ account_id: account.id, date: paid.date, post_date: paid.date, cleared_date: paid.date, amount_cents: -paid.amount_cents,
+        description: `Card payment for statement closing ${closing}`, vendor: "Chase card autopay", kind: "transfer", category: "Transfer: card payment",
+        reference: null, status: "posted", transfer_group: paid.transfer_group, needs_review: false, review_note: "", source: format,
+        source_key: `card-payment-pair:${paid.id}`, notes: `Card side of the payment from checking on ${paid.date}` });
+    } else if (checking && spend > 0 && !o.existing.some((t) => t.transfer_group === group)) {
       const due = addDays(closing, 28);
       const base = { date: due, post_date: null, cleared_date: null, description: `Card autopay for statement closing ${closing}`, vendor: "Chase card autopay",
         kind: "transfer" as TxnKind, category: "Transfer: card payment", reference: null, status: "expected" as const, transfer_group: group,
@@ -398,6 +411,34 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     }
   }
   return plan;
+}
+
+/**
+ * Is a bank export listed oldest first? Each row's running balance says so:
+ * oldest first, a row's balance is the one above plus its own amount; newest
+ * first, the row above is this balance plus its own amount. Failing that,
+ * the dates; failing those, newest first (as Chase lists them).
+ */
+export function listedOldestFirst(rows: Pick<Line, "date" | "amount_cents" | "balance_cents">[]): boolean {
+  let up = 0, down = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1]!, cur = rows[i]!;
+    if (cur.balance_cents === prev.balance_cents! + cur.amount_cents) up++;
+    if (prev.balance_cents === cur.balance_cents! + prev.amount_cents) down++;
+  }
+  if (up !== down) return up > down;
+  return rows.length > 1 && rows[0]!.date < rows.at(-1)!.date;
+}
+
+/**
+ * A card payment already on checking, 0-45 days after the statement closed,
+ * with no card side yet: the exact amount first, else the only one in the window.
+ */
+function paymentAlreadyIn(existing: Txn[], checkingId: number, cardId: number, closing: string, spend: number): Txn | null {
+  const waiting = existing.filter((t) => t.account_id === checkingId && t.kind === "transfer" && t.status === "posted"
+    && t.amount_cents < 0 && t.transfer_group?.startsWith("card-payment:") && t.date >= closing && days(t.date, closing) <= 45
+    && !existing.some((x) => x.account_id === cardId && x.transfer_group === t.transfer_group));
+  return waiting.find((t) => t.amount_cents === -spend) ?? (waiting.length === 1 ? waiting[0]! : null);
 }
 
 // ------------------------------------------------------------ invoices

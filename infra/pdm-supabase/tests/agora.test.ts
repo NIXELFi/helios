@@ -38,6 +38,7 @@ async function reset(): Promise<void> {
   await pur().from("budget_lines").delete().neq("id", NIL);
   await pur().from("seasons").delete().neq("id", NIL);
   await pur().from("notifications").delete().gte("id", 0);
+  await pur().from("car_subteams").delete().neq("project_id", NIL);
   await all("imports");
   await all("reimbursement_receipts");
   await all("reimbursements");
@@ -163,6 +164,69 @@ describe("agora follow-ups", () => {
       item_allocations: [{ project_id: ic, subteam_id: daq }] });
   });
 
+  it("won't mark a reimbursement paid that has no amount", async () => {
+    await fin().from("accounts").insert({ name: "Chase Checking", kind: "checking", last4: "0001" });
+    const cfo = await person("cfo", "executive");
+    const { data: r } = await cfo.f.from("reimbursements").insert({ person_name: "Demo Member", reason: "Gloves" }).select("id").single();
+    for (const method of ["check", "cash_box", "bank_cash"]) {
+      const { error } = await cfo.f.rpc("record_reimbursement_payment",
+        { p_ids: [r!.id], p_method: method, p_paid_date: null, p_check_number: "101", p_add_to_ledger: true });
+      expect(error?.message).toMatch(/amount first/);
+    }
+    expect((await fin().from("reimbursements").select("status").eq("id", r!.id).single()).data!.status).toBe("owed");
+  });
+
+  it("an order recorded by mistake can be undone; recording it again keeps what was there", async () => {
+    const cfo = await person("cfo", "executive");
+    const chief = await person("chief", "executive");
+    const member = await person("member", "engineer", daq);
+    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_ready: true, p_rows: [{ title: "ADC", quantity: 1, unit_price_cents: 900 }] });
+    const id = (ids as string[])[0]!;
+    for (const exec of [cfo, chief]) await exec.p.rpc("decide", { p_id: id, p_decision: "approve" });
+    await cfo.p.rpc("record_order", { p_ids: [id], p_order_id: "W1", p_payment: "Own card", p_total_cents: 950, p_paid_by: "Demo Member" });
+    // again, to correct the total: "member who paid" isn't wiped
+    await cfo.p.rpc("record_order", { p_ids: [id], p_order_id: "", p_payment: "", p_total_cents: 975, p_paid_by: "" });
+    expect((await pur().from("items").select("paid_by,vendor_order_id,actual_total_cents").eq("id", id).single()).data)
+      .toEqual({ paid_by: "Demo Member", vendor_order_id: "W1", actual_total_cents: 975 });
+
+    expect((await member.p.rpc("undo_order", { p_ids: [id] })).error).not.toBeNull();
+    expect((await cfo.p.rpc("undo_order", { p_ids: [id] })).error).toBeNull();
+    expect((await pur().from("items").select("status,vendor_order_id,actual_total_cents,paid_by").eq("id", id).single()).data)
+      .toEqual({ status: "APPROVED", vendor_order_id: null, actual_total_cents: null, paid_by: "" });
+    // still approved, so it can be ordered again; once received it can't be undone
+    expect((await cfo.p.rpc("record_order", { p_ids: [id], p_order_id: "W2", p_payment: "SAE card" })).error).toBeNull();
+    await member.p.rpc("set_status", { p_ids: [id], p_status: "RECEIVED" });
+    expect((await cfo.p.rpc("undo_order", { p_ids: [id] })).error?.message).toMatch(/not yet received/);
+  });
+
+  it("an account can be deleted while nothing is recorded against it, and its type changed", async () => {
+    const cfo = await person("cfo", "executive");
+    const { data: a } = await cfo.f.from("accounts").insert({ name: "EV Dean's Funding", kind: "holding" }).select("id").single();
+    expect((await cfo.f.from("accounts").update({ kind: "university" }).eq("id", a!.id)).error).toBeNull();
+    const { data: b } = await cfo.f.from("accounts").insert({ name: "Chase Checking", kind: "checking" }).select("id").single();
+    await fin().from("transactions").insert({ account_id: b!.id, date: "2026-09-01", amount_cents: -100, kind: "withdrawal" });
+    expect((await cfo.f.rpc("delete_account", { p_id: b!.id })).error?.message).toMatch(/1 ledger lines/);
+    expect((await cfo.f.rpc("delete_account", { p_id: a!.id })).error).toBeNull();
+    expect((await fin().from("accounts").select("name")).data).toEqual([{ name: "Chase Checking" }]);
+  });
+
+  it("each car has its own subteams; members add parts only to theirs", async () => {
+    const eng = await subteam("Engine", "ENG");
+    const cfo = await person("cfo", "executive");
+    const member = await person("member", "engineer", daq);
+    // before any car is set up, anyone adds as before
+    expect((await member.p.rpc("add_items", { p_project: ev, p_subteam: daq, p_rows: [{ title: "x" }] })).error).toBeNull();
+    // EV now has DAQ (from that part); IC gets Engine from an exec
+    await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: eng, p_on: true });
+    expect((await member.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true })).error).not.toBeNull();
+    expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y" }] })).error?.message).toMatch(/isn't on this car/);
+    await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true });
+    expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y", date_needed_raw: "9/11/2026" }] })).error).toBeNull();
+    expect((await pur().from("items").select("date_needed_raw").eq("title", "y").single()).data!.date_needed_raw).toBe("9/11/2026");
+    const { data: pairs } = await member.p.from("car_subteams").select("project_id,subteam_id");
+    expect(pairs).toHaveLength(3);
+  });
+
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);
@@ -191,9 +255,13 @@ describe("agora follow-ups", () => {
       line_items: [{ id: 1, item_code: "SDM-0042", title: "ADC", status: "RECONCILED", priority: "HIGH", quantity: 2, unit_price_cents: 2360, total_estimate_cents: 4720, vendor: "Mouser", txn_id: 10, payment_account_id: 8, requester_name: "Demo Member" }],
       line_item_allocations: [{ item_id: 1, program: "IC", subteam: "Data AQ", percent: 100 }],
     };
-    const args = { p_data: data, p_cars: { IC: ic, EV: ev }, p_subteams: { "Data AQ": daq } };
+    const args = { p_data: data, p_cars: { IC: ic, EV: ev }, p_subteams: { "Data AQ": daq }, p_season_start: "2026-07-01" };
     expect((await member.f.rpc("restore_ledger", args)).error).not.toBeNull();
     expect((await cfo.f.rpc("restore_ledger", { ...args, p_subteams: {} })).error?.message).toMatch(/Data AQ/);
+    expect((await cfo.f.rpc("restore_ledger", { ...args, p_season_start: null })).error?.message).toMatch(/season started/);
+    // whole-team parts need a car to go under
+    const team = { ...data, line_item_allocations: [{ item_id: 1, program: "Team", subteam: "Data AQ", percent: 100 }] };
+    expect((await cfo.f.rpc("restore_ledger", { ...args, p_data: team })).error?.message).toMatch(/whole-team/);
 
     const { data: r, error } = await cfo.f.rpc("restore_ledger", args);
     expect(error).toBeNull();
@@ -204,7 +272,9 @@ describe("agora follow-ups", () => {
     expect(item).toMatchObject({ code: "SDM-0042", status: "RECONCILED", finance_txn_id: 10, payment_method: "SAE card", item_allocations: [{ subteam_id: daq }] });
     const { data: reimb } = await fin().from("reimbursements").select("id,status,paid_with").order("id");
     expect(reimb).toEqual([{ id: 7, status: "paid", paid_with: "check" }, { id: 9, status: "owed", paid_with: null }]);
-    expect((await pur().from("seasons").select("name,is_current")).data).toEqual([{ name: "2026-27", is_current: true }]);
+    expect((await pur().from("seasons").select("name,is_current,starts_on")).data).toEqual([{ name: "2026-27", is_current: true, starts_on: "2026-07-01" }]);
+    // the car's subteams come from the restored parts and budgets
+    expect((await pur().from("car_subteams").select("project_id,subteam_id")).data).toEqual([{ project_id: ic, subteam_id: daq }]);
     // new rows carry on after the restored ids
     const { data: next } = await fin().from("transactions").insert({ account_id: 1, date: "2026-09-30", amount_cents: -1, kind: "withdrawal" }).select("id").single();
     expect(next!.id).toBe(12);

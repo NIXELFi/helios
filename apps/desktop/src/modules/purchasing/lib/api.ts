@@ -15,6 +15,13 @@ export const STATUSES: Status[] = [
   "DELIVERED", "RECEIVED", "RECONCILED", "DENIED", "CANCELLED", "HAVE",
 ];
 
+/** Bought (or further along): ordered, on its way, here, or matched to its charge. */
+export const ORDERED_STATUSES: ReadonlySet<Status> = new Set(["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED", "RECEIVED", "RECONCILED"]);
+/** Approved, or bought since: what may be ordered or recorded as ordered. */
+export const APPROVED_OR_LATER: ReadonlySet<Status> = new Set<Status>(["APPROVED", ...ORDERED_STATUSES]);
+/** Bought but not here yet. */
+export const ON_THE_WAY: ReadonlySet<Status> = new Set(["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED"]);
+
 export const STATUS_LABEL: Record<Status, string> = {
   PLANNED: "Not ready to order", READY: "Ready to order", APPROVED: "Approved", ORDERED: "Ordered",
   BACKORDERED: "Backordered", SHIPPED: "Shipped", DELIVERED: "Delivered", RECEIVED: "Received",
@@ -172,6 +179,10 @@ export async function recordOrderLines(c: SupabaseClient, lines: { id: string; a
 export async function importItems(c: SupabaseClient, projectId: string, subteamId: string, rows: NewRow[]): Promise<number> {
   return unwrap(await P(c).rpc("import_items", { p_project: projectId, p_subteam: subteamId, p_rows: rows }));
 }
+/** Execs: undo an order recorded by mistake (back to Approved). */
+export async function undoOrder(c: SupabaseClient, ids: string[]): Promise<void> {
+  unwrap(await P(c).rpc("undo_order", { p_ids: ids }));
+}
 export async function addTracking(c: SupabaseClient, ids: string[], trackingNumber: string, carrier: string, eta: string | null): Promise<void> {
   unwrap(await P(c).rpc("add_tracking", { p_ids: ids, p_number: trackingNumber, p_carrier: carrier, p_eta: eta }));
 }
@@ -200,6 +211,27 @@ export function trackingUrl(carrier: string, n: string): string {
     Amazon: `https://track.amazon.com/tracking/${s}`,
   };
   return s && urls[c] ? urls[c] : "";
+}
+
+// ---- which subteams each car has
+
+export interface CarSubteam { project_id: string; subteam_id: string }
+export async function fetchCarSubteams(c: SupabaseClient): Promise<CarSubteam[]> {
+  return unwrap(await P(c).from("car_subteams").select("project_id,subteam_id"));
+}
+/** Execs: put a subteam on a car, or take it off. */
+export async function setCarSubteam(c: SupabaseClient, projectId: string, subteamId: string, on: boolean): Promise<void> {
+  unwrap(await P(c).rpc("set_car_subteam", { p_project: projectId, p_subteam: subteamId, p_on: on }));
+}
+/**
+ * A car's own subteams, in the usual order: the ones set up for it plus any
+ * with parts on it. A car with none set up yet shows every subteam.
+ */
+export function subteamsOfCar(subteams: Subteam[], carSubteams: CarSubteam[], items: Item[], projectId: string | null): Subteam[] {
+  if (!projectId) return subteams;
+  const on = new Set(carSubteams.filter((x) => x.project_id === projectId).map((x) => x.subteam_id));
+  for (const i of items) for (const a of i.item_allocations) if (a.project_id === projectId) on.add(a.subteam_id);
+  return on.size ? subteams.filter((s) => on.has(s.id)) : subteams;
 }
 
 // ---- seasons and budget lines (execs)

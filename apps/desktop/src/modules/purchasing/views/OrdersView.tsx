@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import { addTracking, detectCarrier, itemCost, recordOrder, setStatus, trackingUrl, type Item } from "../lib/api";
-import { today } from "../finance/useFinance";
+import { ON_THE_WAY, addTracking, detectCarrier, itemCost, recordOrder, setStatus, trackingUrl, undoOrder, type Item } from "../lib/api";
+import { today } from "../lib/dates";
 import { fmtCents, requireCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
-import { Button, Card, Empty, StatusPill, SubteamChip } from "../components/ui";
+import { Button, Card, Empty, StatusPill, SubteamChip, useConfirm } from "../components/ui";
 import { OrderDialog } from "../components/OrderDialog";
 
 export function OrdersView({
@@ -17,7 +17,7 @@ export function OrdersView({
 }) {
   const { items, subteams } = data;
   const toOrder = items.filter((i) => i.status === "APPROVED");
-  const moving = items.filter((i) => ["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED"].includes(i.status));
+  const moving = items.filter((i) => ON_THE_WAY.has(i.status));
   const groups = new Map<string, Item[]>();
   for (const i of moving) {
     const key = i.vendor_order_id || `(no order #) ${i.vendor ?? ""} ${i.code}`;
@@ -29,6 +29,7 @@ export function OrdersView({
   const [tracking, setTracking] = useState<Record<string, { number: string; carrier: string; eta: string }>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [cart, setCart] = useState<Item[] | null>(null);
+  const [ask, confirmDialog] = useConfirm();
   const vendorNames = data.vendors.map((v) => v.name);
 
   async function run(label: string, fn: () => Promise<unknown>) {
@@ -39,6 +40,7 @@ export function OrdersView({
 
   return (
     <div className="flex flex-col gap-6">
+      {confirmDialog}
       {message && (
         <Card className="border-asu-gold">
           <div className="flex items-center justify-between">
@@ -142,6 +144,11 @@ export function OrdersView({
                 <Button kind="ghost" onClick={() => void run("Marked delivered. The delivery person was told.", () => setStatus(client, ids, "DELIVERED"))}>Delivered</Button>
                 <Button kind="ghost" onClick={() => void run("Marked received.", () => setStatus(client, ids, "RECEIVED"))}>Received</Button>
                 <Button kind="ghost" onClick={() => setCart(group)}>Costs from the invoice...</Button>
+                <Button kind="danger" onClick={() => void ask({
+                  title: `Undo order ${first.vendor_order_id ?? ""}?`.replace(" ?", "?"),
+                  body: `${group.length} part${group.length === 1 ? "" : "s"} go back to Approved (still approved, ready to buy again). The order number, cost, payment and tracking are cleared.`,
+                  confirmLabel: "Undo order", danger: true,
+                }).then((ok) => { if (ok) void run("Order undone. The parts are back on To order.", () => undoOrder(client, ids)); })}>Undo order</Button>
               </div>
             </Card>
           );

@@ -52,7 +52,30 @@ follow [semver](https://semver.org/).
   every line, split, invoice, balance, reimbursement, budget, resolved
   discrepancy and part as it was; or add Airtable CSV exports a whole folder at
   a time, with car and subteam read from the folder and file names, statuses
-  carried over and parts already on a tab skipped.
+  carried over and parts already on a tab skipped. The restore asks when the
+  season started, so last season's spending doesn't count toward this one's
+  budgets.
+- **Agora: each car has its own subteams.** Pick SDM27 and Abacus shows the IC
+  subteams; pick SDM27e and it shows the EV ones. Execs add a subteam to a car
+  from the tab bar or Budgets > Set up budgets, and members can only add parts
+  to a subteam that's on that car.
+- **Agora: undo an order.** An order recorded by mistake can be undone (Orders &
+  tracking, or the parts list's actions): the parts go back to Approved.
+- **Agora: change an account's type, or delete it.** Accounts can now be
+  retyped (a funding account added as "holding", say), and deleted while
+  nothing is recorded against them.
+
+### Changed
+
+- **Agora: the parts list is called Abacus.**
+- **Agora: only the SAE card's own payment counts as a card payment.** Any
+  other autopay on the checking statement (a subscription) is now ordinary
+  spending, not a transfer.
+- **Agora: Airtable's "DATE NEEDED" is kept as written** whichever way a sheet
+  comes in (it holds request or order dates, not need-by dates), and column
+  headers that drift ("Unit Cost ($)", "Item Name (short)") are still recognised.
+- **Agora: approval cards show the approval rule from the settings** rather
+  than always "of 2".
 
 ### Fixed
 
@@ -61,6 +84,20 @@ follow [semver](https://semver.org/).
   their status.
 - **Agora: long pastes no longer push the Add button off screen.** The paste /
   upload preview (and the cart split) now fit the window and scroll inside.
+- **Agora: statement PDFs no longer drop a same-day, same-amount line** (two
+  $50 deposits from different people on one day, say).
+- **Agora: a card payment uploaded before its card statement isn't counted
+  twice.** The statement pairs with the payment already in the ledger.
+- **Agora: a reimbursement with no amount can't be marked paid.**
+- **Agora: recording an order again keeps "member who paid"** and the other
+  details instead of wiping them.
+- **Agora: the ledger line editor saves only what was changed**, so an upload
+  that cleared a check meanwhile isn't undone, and the split shown stays current.
+- **Agora: smaller fixes.** "Shipping - $5.00" was read as a negative amount;
+  an Airtable file's second row with the same name was dropped; daily balances
+  from a bank CSV listed oldest first were taken from the wrong row; "Ledger
+  exported" showed even when the file wasn't written; each PDF read left
+  PDF.js running.
 
 ## [6.0.0] - 2026-09-30
 

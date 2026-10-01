@@ -4,7 +4,7 @@ import { Button, Card, Empty } from "../../components/ui";
 import { reopenDiscrepancy, resolveDiscrepancy, saveCsv, toCsv } from "../api";
 import { allEvidence, discrepancies } from "../compute";
 import type { Discrepancy, Evidence } from "../discrepancies";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 
 const TONE = { high: "bad", medium: "warn", low: "plain" } as const;
@@ -26,7 +26,8 @@ export function DiscrepanciesView({ client, fin, pur, reload, flash, me, openTxn
       severity: d.severity, kind: d.kind, message: d.message, amount: d.amount_cents === null ? "" : (d.amount_cents / 100).toFixed(2),
       transactions: d.txn_ids.join(" "), status, note, key: d.key,
     })));
-    if (await saveCsv(`sdm-discrepancies-${today()}.csv`, csv)) flash("Exported.");
+    try { if (await saveCsv(`sdm-discrepancies-${today()}.csv`, csv)) flash("Exported."); }
+    catch (e) { flash(`Couldn't save the file: ${e instanceof Error ? e.message : String(e)}`, true); }
   }
 
   return (

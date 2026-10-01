@@ -314,27 +314,6 @@ export function anchoredRunning(txns: Txn[], accounts: Account[], entries: Balan
 
 // ------------------------------------------------------------ spending
 
-/** Key for spending per car + subteam; car null = whole team. */
-export const spendKey = (projectId: string | null, subteamId: string) => `${projectId ?? "team"}|${subteamId}`;
-
-/**
- * Net spending (positive cents) per car + subteam. Transfers never count;
- * deposits are income, not negative spending; card credits and refunds reduce
- * spend. Unassigned spending is reported under "unassigned|<category>".
- */
-export function spendBySubteam(txns: Txn[]): Map<string, number> {
-  const out = new Map<string, number>();
-  const add = (k: string, v: number) => out.set(k, (out.get(k) ?? 0) + v);
-  for (const t of txns) {
-    if (t.status !== "posted" || !(isSpend(t) || t.kind === "credit")) continue;
-    const net = -t.amount_cents;
-    if (!t.txn_allocations.length) { add(`unassigned|${t.category}`, net); continue; }
-    const sign = net >= 0 ? 1 : -1;
-    for (const a of t.txn_allocations) add(spendKey(a.project_id, a.subteam_id), sign * a.amount_cents);
-  }
-  return out;
-}
-
 /** Split total in proportion to weights so the parts sum exactly. */
 export function splitEvenly(total: number, weights: number[]): number[] {
   const wsum = sum(weights);

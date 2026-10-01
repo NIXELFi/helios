@@ -8,7 +8,7 @@ import {
 import { allEvidence } from "../compute";
 import { claimsACharge, type Evidence } from "../discrepancies";
 import { ALL_KINDS, anchoredRunning, isSpend, splitEvenly, type Txn, type TxnAllocation, type TxnKind } from "../ledger";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { Badge, Money, WherePicker, accountLabel, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 
 interface Filters { account: string; car: string; subteam: string; category: string; start: string; end: string; attention: boolean; q: string }
@@ -53,7 +53,8 @@ export function LedgerView(props: FinanceProps & { selected: number | null; sele
       split: t.txn_allocations.map((a) => `${where(a.project_id, a.subteam_id)} ${(a.amount_cents / 100).toFixed(2)}`).join("; "),
       cleared: t.cleared_date ?? "", needs_review: t.needs_review ? "yes" : "", notes: t.notes,
     })));
-    if (await saveCsv(`sdm-ledger-${today()}.csv`, csv)) flash("Ledger exported.");
+    try { if (await saveCsv(`sdm-ledger-${today()}.csv`, csv)) flash("Ledger exported."); }
+    catch (e) { flash(`Couldn't save the file: ${e instanceof Error ? e.message : String(e)}`, true); }
   }
 
   return (
@@ -145,12 +146,23 @@ function ShareAmount({ cents, onChange }: { cents: number; onChange: (cents: num
 }
 
 function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: FinanceProps & { t: Txn; evidence: Evidence[]; close: () => void }) {
-  const [form, setForm] = useState(() => ({
-    date: t.date, amount: centsToInput(Math.abs(t.amount_cents)), kind: t.kind, account_id: t.account_id, description: t.description,
-    vendor: t.vendor ?? "", category: t.category, reference: t.reference ?? "", cleared_date: t.cleared_date ?? "", status: t.status,
-    notes: t.notes, needs_review: t.needs_review, review_note: t.review_note,
-  }));
-  const [split, setSplit] = useState<TxnAllocation[]>(() => t.txn_allocations.map((a) => ({ project_id: a.project_id, subteam_id: a.subteam_id, amount_cents: a.amount_cents })));
+  const formOf = (x: Txn) => ({
+    date: x.date, amount: centsToInput(Math.abs(x.amount_cents)), kind: x.kind, account_id: x.account_id, description: x.description,
+    vendor: x.vendor ?? "", category: x.category, reference: x.reference ?? "", cleared_date: x.cleared_date ?? "", status: x.status,
+    notes: x.notes, needs_review: x.needs_review, review_note: x.review_note,
+  });
+  const splitOf = (x: Txn): TxnAllocation[] => x.txn_allocations.map((a) => ({ project_id: a.project_id, subteam_id: a.subteam_id, amount_cents: a.amount_cents }));
+  // What the line looked like when the form was filled. Save sends only what
+  // changed since, so an import that cleared a check or confirmed an autopay
+  // meanwhile isn't undone; while nothing is typed, the form follows the server.
+  const [base, setBase] = useState(() => formOf(t));
+  const [form, setForm] = useState(base);
+  const [split, setSplit] = useState<TxnAllocation[]>(() => splitOf(t));
+  const [splitBase, setSplitBase] = useState(() => JSON.stringify(splitOf(t)));
+  const server = formOf(t);
+  if (JSON.stringify(server) !== JSON.stringify(base) && JSON.stringify(form) === JSON.stringify(base)) { setBase(server); setForm(server); }
+  const serverSplit = JSON.stringify(splitOf(t));
+  if (serverSplit !== splitBase) { setSplitBase(serverSplit); if (JSON.stringify(split) === splitBase) setSplit(splitOf(t)); }
   const [history, setHistory] = useState<FinanceEvent[] | null>(null);
   const [ask, confirmDialog] = useConfirm();
   const abs = Math.abs(t.amount_cents);
@@ -172,13 +184,25 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
     const amount = form.kind === t.kind && t.amount_cents !== 0
       ? Math.sign(t.amount_cents) * Math.abs(cents)
       : signed(form.kind, form.kind === "transfer" && t.amount_cents < 0 ? -Math.abs(cents) : cents);
-    const fields: TxnFields = {
+    const all: TxnFields = {
       date: form.date, amount_cents: amount,
       kind: form.kind, account_id: Number(form.account_id), description: form.description, vendor: form.vendor || null,
       category: form.category, reference: form.reference || null, cleared_date: form.cleared_date || null, status: form.status,
       notes: form.notes, needs_review: form.needs_review, review_note: form.review_note,
     };
-    await attempt(flash, reload, "Saved.", () => updateTxn(client, t.id, fields));
+    const changed = (k: keyof typeof form) => String(form[k]) !== String(base[k]);
+    const fields: TxnFields = {};
+    if (changed("amount") || changed("kind")) { fields.amount_cents = all.amount_cents; fields.kind = all.kind; }
+    for (const [k, v] of [["date", "date"], ["account_id", "account_id"], ["description", "description"], ["vendor", "vendor"], ["category", "category"],
+      ["reference", "reference"], ["cleared_date", "cleared_date"], ["status", "status"], ["notes", "notes"], ["needs_review", "needs_review"],
+      ["review_note", "review_note"]] as const) if (changed(k)) Object.assign(fields, { [v]: all[v] });
+    if (!Object.keys(fields).length) { flash("Nothing changed."); return; }
+    const oldSplit = t.txn_allocations.reduce((n, a) => n + a.amount_cents, 0);
+    const ok = await attempt(flash, reload, "Saved.", () => updateTxn(client, t.id, fields));
+    // a split is in dollars: a new amount needs a new split
+    if (ok && fields.amount_cents !== undefined && oldSplit && oldSplit !== Math.abs(fields.amount_cents) && t.kind !== "transfer") {
+      flash(`Saved. The subteam split still adds up to ${fmtCents(oldSplit)}: fix it below so the budgets match the new amount.`, true);
+    }
   }
   async function saveSplit() {
     if (split.some((a) => a.amount_cents <= 0)) { flash("Give every share an amount, or remove it.", true); return; }
@@ -325,7 +349,11 @@ function NewTxn({ client, fin, pur, reload, flash, done }: FinanceProps & { done
         amount_cents: form.kind === "deposit" || form.kind === "credit" ? abs : -abs,
         description: form.description, vendor: form.vendor || null, category: form.category, reference: form.reference || null, status: "posted",
       });
-      if (form.subteam_id) await setAllocations(client, id, [{ project_id: form.project_id || null, subteam_id: form.subteam_id, amount_cents: abs }]);
+      if (form.subteam_id) {
+        // all or nothing: a line without its split would be added again on the next try
+        try { await setAllocations(client, id, [{ project_id: form.project_id || null, subteam_id: form.subteam_id, amount_cents: abs }]); }
+        catch (e) { await deleteTxn(client, id).catch(() => {}); id = null; throw e; }
+      }
     });
     if (ok) done(id);
   }

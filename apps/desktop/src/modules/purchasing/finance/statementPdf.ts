@@ -115,11 +115,18 @@ export function parseCardWords(pages: Word[][]): CardStatement {
 
 /** Card lines in ledger form: charges negative, credits positive. */
 export function cardLines(st: CardStatement): Line[] {
-  return st.lines.map((l, i) => ({
-    n: i + 1, date: l.txn_date, post_date: l.post_date, amount_cents: -l.amount_cents,
-    description: `${l.description}${l.extra ? ` ${l.extra}` : ""}`.trim(), reference: l.reference,
-    type: l.amount_cents < 0 ? "Return" : "Sale", balance_cents: null, external_id: `${l.post_date}:${l.reference}:${l.amount_cents}`,
-  }));
+  const seen = new Map<string, number>();
+  return st.lines.map((l, i) => {
+    // two identical charges on one day (same P.O.S. reference) are still two charges
+    const id = `${l.post_date}:${l.reference}:${l.amount_cents}`;
+    const k = (seen.get(id) ?? 0) + 1;
+    seen.set(id, k);
+    return {
+      n: i + 1, date: l.txn_date, post_date: l.post_date, amount_cents: -l.amount_cents,
+      description: `${l.description}${l.extra ? ` ${l.extra}` : ""}`.trim(), reference: l.reference,
+      type: l.amount_cents < 0 ? "Return" : "Sale", balance_cents: null, external_id: k === 1 ? id : `${id}#${k}`,
+    };
+  });
 }
 
 // -------------------------------------------------------------- checking
@@ -236,7 +243,9 @@ export function checkingLines(st: CheckingStatement): Line[] {
   const seen = new Map<string, number>();
   return st.lines.map((l, i) => {
     const trn = `${l.description} ${l.detail}`.match(/Trn:\s*(\w+)/)?.[1];
-    const sig = `${l.date}|${l.section}|${l.amount_cents}|${l.description}`;
+    // counted per day, kind and amount (what the key is made of), so two $50
+    // deposits on one day from different people get different keys
+    const sig = `${l.date}|${l.section}|${l.amount_cents}`;
     const k = (seen.get(sig) ?? 0) + 1;
     seen.set(sig, k);
     const orig = `${l.description} ${l.detail}`.match(/Orig CO Name:\s*(.+?)(?=\s+(?:Orig ID|Desc Date|CO Entry|Entry Descr|Sec:|Ind ID|Ind Name|Trn:|Eed:)|$)/)?.[1];
@@ -255,7 +264,15 @@ export function checkingLines(st: CheckingStatement): Line[] {
 export async function pdfWords(data: ArrayBuffer): Promise<Word[][]> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+  const task = pdfjs.getDocument({ data: new Uint8Array(data) });
+  try {
+    return await readPages(await task.promise);
+  } finally {
+    await task.destroy();   // frees the document and its worker
+  }
+}
+
+async function readPages(doc: import("pdfjs-dist").PDFDocumentProxy): Promise<Word[][]> {
   const pages: Word[][] = [];
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);

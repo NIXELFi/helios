@@ -72,4 +72,9 @@ describe("splitOrder", () => {
     const s = splitOrder([{ id: "a", price: 2500 }], order, "share");
     expect(s).toEqual([{ id: "a", price: 2500, extra: 453, total: 2953 }]);
   });
+
+  it("a dash between the label and the amount isn't a minus sign", () => {
+    const o = parseOrderText("Subtotal - $20.00\nShipping - $5.00\nTax - $1.62\nTotal - $26.62", []);
+    expect(o).toMatchObject({ subtotal: 2000, shipping: 500, tax: 162, total: 2662 });
+  });
 });

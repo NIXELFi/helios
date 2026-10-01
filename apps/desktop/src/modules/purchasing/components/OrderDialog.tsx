@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import { recordOrderLines, updateItem, type Item } from "../lib/api";
+import { APPROVED_OR_LATER, recordOrderLines, updateItem, type Item } from "../lib/api";
 import { centsToInput, fmtCents, parseCents } from "../lib/money";
 import { extrasOf, parseOrderText, splitOrder, type OrderTotals } from "../lib/orderText";
 import { pdfWords, rows } from "../finance/statementPdf";
-import { today } from "../finance/useFinance";
+import { today } from "../lib/dates";
 import { Button } from "./ui";
 
 const input = "rounded-md border border-helios-line bg-helios-strip px-2 py-1 text-sm";
@@ -12,7 +12,6 @@ const MONEY_FIELDS = [
   ["subtotal", "Subtotal"], ["shipping", "Shipping"], ["tax", "Tax"], ["fees", "Fees / tariffs"], ["discount", "Discount"], ["total", "Order total"],
 ] as const;
 type MoneyField = (typeof MONEY_FIELDS)[number][0];
-const ORDERED = new Set(["APPROVED", "ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED", "RECEIVED", "RECONCILED"]);
 
 /** A part's price before shipping and tax: qty x unit, else the estimate without its tax/shipping. */
 export function partPrice(i: Item): number {
@@ -33,7 +32,7 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
   client: SupabaseClient; items: Item[]; canOrder: boolean; vendorNames: string[];
   reload: () => Promise<void>; flash: (msg: string, error?: boolean) => void; onClose: () => void;
 }) {
-  const allApproved = items.every((i) => ORDERED.has(i.status));
+  const allApproved = items.every((i) => APPROVED_OR_LATER.has(i.status));
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [f, setF] = useState<Record<MoneyField, string> & { orderId: string; date: string }>(() => ({
@@ -96,7 +95,17 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
           f.orderId.trim(), payment, f.date || null, mode === "whole" ? totals.total : null, paidBy);
         flash(`${items.length} part${items.length === 1 ? "" : "s"} marked ordered, each with its share of the order.`);
       } else {
-        for (const s of shares) await updateItem(client, s.id, { tax_shipping_cents: s.extra, total_estimate_cents: s.total });
+        // one save per part: if one fails, say which saved, so it's clear what to redo
+        const failed: string[] = [];
+        let saved = 0;
+        for (const s of shares) {
+          try { await updateItem(client, s.id, { tax_shipping_cents: s.extra, total_estimate_cents: s.total }); saved++; }
+          catch (e) { failed.push(`${items.find((i) => i.id === s.id)?.code}: ${e instanceof Error ? e.message : String(e)}`); }
+        }
+        if (failed.length) {
+          await reload();
+          throw new Error(`Saved ${saved} of ${shares.length}. Not saved: ${failed.join("; ")}`);
+        }
         flash(`Tax and shipping spread over ${items.length} part${items.length === 1 ? "" : "s"}.`);
       }
       await reload();

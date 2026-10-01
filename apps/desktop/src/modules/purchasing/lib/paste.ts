@@ -5,17 +5,17 @@ import { parseCents } from "./money";
 
 export type PasteField =
   | "title" | "quantity" | "unit_price" | "tax_shipping" | "total" | "vendor"
-  | "part_number" | "product_url" | "priority" | "needed_by" | "notes" | "status";
+  | "part_number" | "product_url" | "priority" | "needed_by" | "date_needed_raw" | "notes" | "status";
 
 export const PASTE_FIELDS: PasteField[] = [
   "title", "quantity", "unit_price", "tax_shipping", "total", "vendor",
-  "part_number", "product_url", "priority", "needed_by", "notes", "status",
+  "part_number", "product_url", "priority", "needed_by", "date_needed_raw", "notes", "status",
 ];
 
 export const PASTE_LABELS: Record<PasteField, string> = {
   title: "Item", quantity: "Qty", unit_price: "Unit $", tax_shipping: "Tax/ship $", total: "Total $",
   vendor: "Vendor", part_number: "Part #", product_url: "Link", priority: "Priority",
-  needed_by: "Needed by", notes: "Notes", status: "Status",
+  needed_by: "Needed by", date_needed_raw: "Date needed (as written)", notes: "Notes", status: "Status",
 };
 
 // Header names seen in Airtable, Excel BOMs, Mouser and Digikey cart exports.
@@ -33,7 +33,10 @@ const ALIASES: Record<PasteField, string[]> = {
     "part no", "mouser #", "digi key part number", "digikey part number", "sku", "customer reference"],
   product_url: ["link", "url", "product link", "product url"],
   priority: ["priority"],
-  needed_by: ["needed by", "date needed", "due", "need by"],
+  needed_by: ["needed by", "need by", "due", "due date", "need by date"],
+  // The team's Airtable "DATE NEEDED" holds request or order dates, not a
+  // need-by date, so it's kept as written rather than read as one.
+  date_needed_raw: ["date needed"],
   notes: ["notes", "comments", "note"],
   status: ["status"],
 };
@@ -48,7 +51,19 @@ function guess(header: string): { field: PasteField; rank: number } | null {
     const i = Math.max(names.indexOf(n), names.indexOf(n.replace(/ #$/, "")));
     if (i >= 0) return { field: f, rank: i };
   }
-  return null;
+  // Headers drift ("Unit Cost ($)", "Item Name (short)", "Total Cost USD"):
+  // failing an exact name, the longest known name inside the header wins.
+  // Exact matches still beat these (rank 100+).
+  let best: { field: PasteField; rank: number } | null = null;
+  let longest = 0;
+  for (const f of PASTE_FIELDS) {
+    const names = ALIASES[f];
+    for (let i = 0; i < names.length; i++) {
+      const a = names[i]!;
+      if (a.length >= 4 && a.length > longest && ` ${n} `.includes(` ${a} `)) { best = { field: f, rank: 100 + i }; longest = a.length; }
+    }
+  }
+  return best;
 }
 
 /** Map a header row to fields; if two columns claim a field, the better-ranked wins. */
@@ -114,9 +129,9 @@ export interface NewRow {
   notes?: string;
   /** From an Airtable Status column: PLANNED, READY, ORDERED, RECEIVED or HAVE. */
   status?: string;
-  /** Airtable's "DATE NEEDED" as written (its meaning isn't settled; execs' bulk import only). */
+  /** Airtable's "DATE NEEDED" as written (its meaning isn't settled). */
   date_needed_raw?: string;
-  /** Where the row came from, e.g. "airtable:IC Team/Aero-Grid view.csv row 4" (execs' bulk import only). */
+  /** Where the row came from, e.g. "airtable:IC Team/Aero-Grid view.csv row 4". */
   source?: string;
 }
 
@@ -168,6 +183,7 @@ export function toRows(matrix: string[][], mapping: (PasteField | null)[], defau
     if (o.product_url) row.product_url = o.product_url;
     if (o.priority) row.priority = ({ high: "HIGH", medium: "Medium", low: "Low" } as Record<string, string>)[o.priority.trim().toLowerCase()];
     if (o.needed_by) row.needed_by = parseDate(o.needed_by);
+    if (o.date_needed_raw) row.date_needed_raw = o.date_needed_raw.trim().slice(0, 100);
     const note = leftOut.length ? `Pasted ${leftOut.join(", ")} left out: check it.` : "";
     if (o.notes || note) row.notes = [o.notes, note].filter(Boolean).join(" ");
     if (o.status) { const s = AIRTABLE_STATUS[o.status.trim().toLowerCase()]; if (s) row.status = s; }

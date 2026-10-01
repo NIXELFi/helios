@@ -86,6 +86,10 @@ export async function saveAccount(c: SupabaseClient, a: Partial<Account> & { id?
   if (id) unwrap(await F(c).from("accounts").update(fields).eq("id", id));
   else unwrap(await F(c).from("accounts").insert(fields));
 }
+/** Delete an account added by mistake (refused once anything is recorded against it). */
+export async function deleteAccount(c: SupabaseClient, id: number): Promise<void> {
+  unwrap(await F(c).rpc("delete_account", { p_id: id }));
+}
 export async function resolveDiscrepancy(c: SupabaseClient, key: string, note: string, name: string): Promise<void> {
   unwrap(await F(c).from("discrepancy_resolutions").upsert({ key, note, resolved_by_name: name, resolved_at: new Date().toISOString() }));
 }
@@ -117,9 +121,6 @@ export async function withdrawReimbursement(c: SupabaseClient, r: ReimbursementW
 }
 export async function decideReimbursement(c: SupabaseClient, id: number, decision: "approve" | "deny", note = ""): Promise<void> {
   unwrap(await F(c).rpc("decide_reimbursement", { p_id: id, p_decision: decision, p_note: note }));
-}
-export async function payReimbursements(c: SupabaseClient, ids: number[], paidDate: string | null, checkNumber: string, addCheck: boolean): Promise<number | null> {
-  return unwrap(await F(c).rpc("pay_reimbursements", { p_ids: ids, p_paid_date: paidDate, p_check_number: checkNumber, p_add_check: addCheck })) as number | null;
 }
 /** Pay by check or in cash; with addToLedger, the check or the cash withdrawal goes into the ledger too. */
 export async function recordReimbursementPayment(c: SupabaseClient, ids: number[], method: PaidWith, paidDate: string | null, checkNumber: string, addToLedger: boolean): Promise<number | null> {
@@ -184,33 +185,6 @@ export function openExternal(url: string): void {
   invoke("open_external_url", { url }).catch(() => { window.open(url, "_blank", "noopener"); });
 }
 
-// ---- evidence for the discrepancy checker
-
-const ORDERED = new Set(["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED", "RECEIVED", "RECONCILED"]);
-export const itemEvidenceId = (i: Item) => -Number(i.code.replace(/\D/g, "") || 0);
-
-/** Invoices and emails, plus every ordered parts-list item as a "request". */
-export function evidenceFor(rows: EvidenceRow[], items: Item[], where: (projectId: string | null, subteamId: string | null) => string): Evidence[] {
-  const docs: Evidence[] = rows.map((e) => ({
-    id: e.id, kind: e.kind, source_file: e.source_file, vendor: e.vendor, order_ref: e.order_ref, date: e.date,
-    total_cents: e.total_cents, items: e.items, where: where(e.project_id, e.subteam_id), status: e.status,
-    payment_hint: e.payment_hint, record_type: e.record_type, flags: Array.isArray(e.flags) ? e.flags : [],
-    txn_id: e.txn_id, match_method: e.match_method, object_path: e.object_path ?? null,
-  }));
-  const reqs: Evidence[] = items.filter((i) => ORDERED.has(i.status)).map((i) => {
-    const a = i.item_allocations.length === 1 ? i.item_allocations[0] : undefined;
-    const cost = i.actual_total_cents ?? i.total_estimate_cents
-      ?? (i.quantity !== null && i.unit_price_cents !== null ? Math.round(i.quantity * i.unit_price_cents) + (i.tax_shipping_cents ?? 0) : 0);
-    return {
-      id: itemEvidenceId(i), kind: "request", source_file: i.code, vendor: i.vendor, order_ref: i.vendor_order_id,
-      date: i.ordered_at, total_cents: cost || null, items: `${i.title} ${i.part_number} ${i.notes}`.trim(),
-      where: a ? where(a.project_id, a.subteam_id) : "", status: "ORDERED", payment_hint: i.payment_method,
-      record_type: "request", flags: [], txn_id: i.finance_txn_id ?? null, match_method: i.match_method ?? "", item_id: i.id,
-    };
-  });
-  return [...docs, ...reqs];
-}
-
 // ---- CSV
 
 export function toCsv(rows: Record<string, unknown>[]): string {
@@ -226,15 +200,13 @@ export function toCsv(rows: Record<string, unknown>[]): string {
 }
 
 /** Save a CSV through the desktop save dialog, or download it in a browser. */
+/**
+ * Save a CSV where the user picks. True if saved, false if they cancelled;
+ * a failed write throws (it used to fall back to a browser download, which
+ * does nothing in the desktop app, and still report success).
+ */
 export async function saveCsv(filename: string, csv: string): Promise<boolean> {
-  try {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    const path = await save({ defaultPath: filename, filters: [{ name: "CSV", extensions: ["csv"] }] });
-    if (!path) return false;
-    await writeTextFile(path, csv);
-    return true;
-  } catch {
+  if (!("__TAURI_INTERNALS__" in window)) {   // a plain browser (dev): download it
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = filename;
@@ -242,6 +214,12 @@ export async function saveCsv(filename: string, csv: string): Promise<boolean> {
     URL.revokeObjectURL(a.href);
     return true;
   }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+  const path = await save({ defaultPath: filename, filters: [{ name: "CSV", extensions: ["csv"] }] });
+  if (!path) return false;
+  await writeTextFile(path, csv);
+  return true;
 }
 
 // ---- uploads (execs)
@@ -298,6 +276,7 @@ export interface RestoreResult {
   reimbursements: number; budget_lines: number; parts: number; skipped: string[];
 }
 /** Load the standalone ledger's export into an empty Agora (exec only; refused if anything is already there). */
-export async function restoreLedger(c: SupabaseClient, data: unknown, cars: { IC: string; EV: string }, subteams: Record<string, string>): Promise<RestoreResult> {
-  return unwrap(await F(c).rpc("restore_ledger", { p_data: data, p_cars: cars, p_subteams: subteams })) as RestoreResult;
+export async function restoreLedger(c: SupabaseClient, data: unknown, cars: { IC: string; EV: string; Team?: string },
+  subteams: Record<string, string>, seasonStart: string): Promise<RestoreResult> {
+  return unwrap(await F(c).rpc("restore_ledger", { p_data: data, p_cars: cars, p_subteams: subteams, p_season_start: seasonStart })) as RestoreResult;
 }

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
-  setStatus, updateItem, type Item, type Priority, type Status,
+  ON_THE_WAY, ORDERED_STATUSES, REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
+  setCarSubteam, setStatus, subteamsOfCar, undoOrder, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
-import { today } from "../finance/useFinance";
+import { today } from "../lib/dates";
 import { centsToInput, fmtCents, parseCents, requireCents } from "../lib/money";
 import { parseCsv, parseTsv, type NewRow, type PasteField } from "../lib/paste";
 import { normalizeVendor } from "../finance/importers";
@@ -17,7 +17,7 @@ type Filter = "all" | "planning" | "moving" | "done";
 const FILTERS: { id: Filter; label: string; test: (s: Status) => boolean }[] = [
   { id: "all", label: "Everything", test: () => true },
   { id: "planning", label: "Planning", test: (s) => s === "PLANNED" || s === "READY" },
-  { id: "moving", label: "On the way", test: (s) => ["APPROVED", "ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED"].includes(s) },
+  { id: "moving", label: "On the way", test: (s) => s === "APPROVED" || ON_THE_WAY.has(s) },
   { id: "done", label: "Done", test: (s) => s === "RECEIVED" || s === "RECONCILED" },
 ];
 
@@ -84,6 +84,10 @@ export function PartsView({
   const tableRef = useRef<HTMLTableElement>(null);
 
   const subteamOf = (i: Item) => i.item_allocations[0]?.subteam_id;
+  // a car shows its own subteams (IC: Engine, Data AQ...; EV: Battery, HV...)
+  const carTeams = subteamsOfCar(subteams, data.carSubteams, items, projectId);
+  const notOnCar = projectId ? subteams.filter((s) => !data.carSubteams.some((x) => x.project_id === projectId && x.subteam_id === s.id)) : [];
+  useEffect(() => { if (tab && !carTeams.some((s) => s.id === tab)) setTab(null); }, [projectId, carTeams, tab]);
   const inProject = (i: Item) => !projectId || i.item_allocations.some((a) => a.project_id === projectId);
 
   const counts = useMemo(() => {
@@ -103,13 +107,12 @@ export function PartsView({
 
   const canEdit = (i: Item) =>
     exec || ((i.status === "PLANNED" || i.status === "READY") && i.item_allocations.some((a) => can(caps, "purchasing.request", a.subteam_id)));
-  const POST_APPROVAL = new Set<Status>(["ORDERED", "BACKORDERED", "SHIPPED", "DELIVERED", "RECEIVED", "RECONCILED"]);
   const statusOptions = (i: Item): Status[] => {
     // Execs may set any status the server allows: APPROVED only comes from two
     // approvals, and nothing unapproved can jump to ordered/shipped/received.
     if (exec) {
-      const approved = POST_APPROVAL.has(i.status) || i.status === "APPROVED";
-      return STATUSES.filter((s) => s === i.status || (s !== "APPROVED" && (approved || !POST_APPROVAL.has(s))));
+      const approved = ORDERED_STATUSES.has(i.status) || i.status === "APPROVED";
+      return STATUSES.filter((s) => s === i.status || (s !== "APPROVED" && (approved || !ORDERED_STATUSES.has(s))));
     }
     if (!i.item_allocations.some((a) => can(caps, "purchasing.request", a.subteam_id))) return [i.status];
     return [i.status, ...(REQUESTER_MOVES[i.status] ?? [])];
@@ -220,6 +223,8 @@ export function PartsView({
     } else if (bulk === "tracking") {
       await run(`Tracking added to ${ids.length} item(s)`, () =>
         addTracking(client, ids, track.number, track.carrier || detectCarrier(track.number), track.eta || null));
+    } else if (bulk === "undo-order") {
+      await run(`Order undone: ${ids.length} part(s) back to approved`, () => undoOrder(client, ids));
     } else if (bulk === "cart") {
       const pick = rows.filter((r) => selected.has(r.id));
       const locked = pick.filter((r) => !canEdit(r));
@@ -242,15 +247,23 @@ export function PartsView({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* sheet tabs: every subteam, even empty ones */}
+      {/* sheet tabs: the car's subteams (every one on "Both cars"), even empty ones */}
       <div className="flex flex-wrap items-center gap-1 border-b border-helios-line pb-1">
         <TabButton on={!tab} onClick={() => setTab(null)}>All</TabButton>
-        {subteams.map((s) => (
+        {carTeams.map((s) => (
           <TabButton key={s.id} on={tab === s.id} empty={!counts.get(s.id)} onClick={() => setTab(s.id)}>
             <span className="size-1.5 rounded-full" style={{ background: s.color ?? "#8d8d97" }} />
             {s.name}<span className="text-[11px] text-helios-muted">{counts.get(s.id) ?? 0}</span>
           </TabButton>
         ))}
+        {exec && projectId && notOnCar.length > 0 && (
+          <select className="ml-1 rounded-md border border-dashed border-helios-line bg-transparent px-1 py-1 text-xs text-helios-dim" value=""
+            title="Execs: give this car another subteam tab"
+            onChange={(e) => { const id = e.target.value; if (id) void run("Subteam added to this car.", () => setCarSubteam(client, projectId, id, true)).then(() => setTab(id)); }}>
+            <option value="">+ subteam on {data.projects.find((p) => p.id === projectId)?.car_code}</option>
+            {notOnCar.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -381,6 +394,7 @@ export function PartsView({
             {exec && <>
               <option value="approve">Approve</option>
               <option value="order">Record order (bought together)</option>
+              <option value="undo-order">Undo order (back to approved)</option>
               <option value="tracking">Add tracking</option>
               <option value="status:DELIVERED">Mark delivered</option>
               <option value="status:CANCELLED">Cancel</option>

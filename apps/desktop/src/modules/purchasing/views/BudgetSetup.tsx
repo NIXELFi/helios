@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  deleteBudgetLine, fetchBudgetLines, fetchSeasons, upsertBudgetLine, upsertSeason, type BudgetLine, type Season,
+  deleteBudgetLine, fetchBudgetLines, fetchSeasons, setCarSubteam, upsertBudgetLine, upsertSeason, type BudgetLine, type Season,
 } from "../lib/api";
 import { centsToInput, fmtCents, parseCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
@@ -100,13 +100,16 @@ export function BudgetSetup({ client, data, reload, flash, done }: {
         )}
         {!newSeason && <Button kind="ghost" onClick={() => setNewSeason({ name: seasonName(), starts_on: "", ends_on: "" })}>+ New season</Button>}
       </div>
+      {season && !season.starts_on && (
+        <p className="-mt-2 text-xs text-asu-gold">{season.name} has no start date, so every charge in the ledger (last season's too) counts toward its budgets. Set when it started.</p>
+      )}
 
       {newSeason && (
         <div className="flex flex-wrap items-end gap-2 rounded-lg border border-helios-line p-3">
           <label className="flex flex-col gap-1 text-xs text-helios-dim">Name<input className={`${input} w-28`} value={newSeason.name} onChange={(e) => setNewSeason({ ...newSeason, name: e.target.value })} /></label>
           <label className="flex flex-col gap-1 text-xs text-helios-dim">Starts (after competition)<input type="date" className={input} value={newSeason.starts_on} onChange={(e) => setNewSeason({ ...newSeason, starts_on: e.target.value })} /></label>
           <label className="flex flex-col gap-1 text-xs text-helios-dim">Ends<input type="date" className={input} value={newSeason.ends_on} onChange={(e) => setNewSeason({ ...newSeason, ends_on: e.target.value })} /></label>
-          <Button onClick={() => void (async () => {
+          <Button disabled={!newSeason.starts_on} onClick={() => void (async () => {
             let id = "";
             const ok = await act(`Season ${newSeason.name} created and made current.`, async () => {
               id = await upsertSeason(client, { id: null, name: newSeason.name, starts_on: newSeason.starts_on || null, ends_on: newSeason.ends_on || null, is_current: true });
@@ -114,7 +117,7 @@ export function BudgetSetup({ client, data, reload, flash, done }: {
             if (ok) { setNewSeason(null); await load(id); }
           })()}>Create</Button>
           {seasons.length > 0 && <Button kind="ghost" onClick={() => setNewSeason(null)}>Cancel</Button>}
-          <p className="w-full text-xs text-helios-dim">The new season becomes the current one: new parts and the Budgets page use it.</p>
+          <p className="w-full text-xs text-helios-dim">The new season becomes the current one: new parts and the Budgets page use it. Its start date decides which charges count toward its budgets.</p>
         </div>
       )}
 
@@ -156,6 +159,28 @@ export function BudgetSetup({ client, data, reload, flash, done }: {
           <div className="border-t border-helios-line px-3 py-2 text-right text-xs text-helios-dim">{lines.length} lines | <b className="text-helios-text">{fmtCents(total)}</b> budgeted in {season.name}</div>
         </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        <div>
+          <b className="text-sm">Subteams on each car</b>
+          <p className="text-xs text-helios-dim">The tabs Abacus shows for each car, and where members can add parts. A budget line or a part adds its subteam here by itself.</p>
+        </div>
+        {projects.map((p) => {
+          const mine = data.carSubteams.filter((x) => x.project_id === p.id).map((x) => x.subteam_id);
+          return (
+            <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="w-20 font-semibold">{p.car_code}</span>
+              <SubteamPicker subteams={subteams} value={mine} taken={new Set()}
+                onChange={(ids) => {
+                  const added = ids.find((id) => !mine.includes(id));
+                  const removed = mine.find((id) => !ids.includes(id));
+                  const id = added ?? removed;
+                  if (id) void act(added ? "Subteam added." : "Subteam taken off this car (its parts stay).", () => setCarSubteam(client, p.id, id, !!added));
+                }} />
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 

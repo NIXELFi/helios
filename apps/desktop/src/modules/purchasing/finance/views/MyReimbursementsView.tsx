@@ -5,7 +5,7 @@ import { can } from "../../lib/api";
 import type { PurchasingData } from "../../lib/usePurchasing";
 import { Button, Card, Empty, useConfirm } from "../../components/ui";
 import { attachReceiptsOrUndo, deleteReceipt, requestReimbursement, uploadReceipts, withdrawReimbursement, type ReimbursementWithReceipts } from "../api";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { Badge, attempt, input, shortDate, whereLabel } from "./shared";
 import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 

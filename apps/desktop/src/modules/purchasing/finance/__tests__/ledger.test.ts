@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  available, cardHeadroom, reconcile, spendBySubteam, spendKey, splitEvenly,
+  available, cardHeadroom, reconcile, splitEvenly,
   type Account, type BalanceEntry, type Reimbursement, type Txn,
 } from "../ledger";
 import { crc32, findDiscrepancies, type Evidence } from "../discrepancies";
@@ -48,8 +48,6 @@ describe("ledger", () => {
   });
 
   it("the card payment is a transfer, not spending, and is never counted twice", () => {
-    const txns = [charge(100, D, "Mouser"), ...autopay(100_00, "2026-09-30")];
-    expect([...spendBySubteam(txns).values()].reduce((a, b) => a + b, 0)).toBe(100_00);
     const entries = [bal(1, CHECKING.id, D, 1_000_00)];
     const t2 = [charge(300), ...autopay(300_00, "2026-09-30")];
     expect(available(t2, entries, [], CHECKING, [CARD], "2026-09-29").available_cents).toBe(700_00);
@@ -88,13 +86,6 @@ describe("ledger", () => {
     expect(rows[0]!.difference_cents).toBeNull();
     expect(rows[1]!.computed_cents).toBe(5_100_00);
     expect(rows[1]!.difference_cents).toBe(-220_00);
-  });
-
-  it("a card credit reduces the subteam's spend", () => {
-    const engine = { project_id: "ic", subteam_id: "eng" };
-    const c = charge(318.40, D, "Parts Co", { txn_allocations: [{ ...engine, amount_cents: 318_40 }] });
-    const cr = txn({ amount_cents: 3_10, kind: "credit", vendor: "Parts Co", txn_allocations: [{ ...engine, amount_cents: 3_10 }] });
-    expect(spendBySubteam([c, cr]).get(spendKey("ic", "eng"))).toBe(315_30);
   });
 
   it("split evenly sums exactly", () => {

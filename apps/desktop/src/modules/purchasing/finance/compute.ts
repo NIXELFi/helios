@@ -3,7 +3,7 @@
 
 import type { Item } from "../lib/api";
 import type { FinanceData } from "./useFinance";
-import { evidenceFor } from "./api";
+import { evidenceFor } from "./evidence";
 import { bySeverity, findDiscrepancies, type Discrepancy, type Evidence } from "./discrepancies";
 import {
   available, cardHeadroom, cardOwed, latestBalance, outstandingChecks, reconcile,

@@ -5,7 +5,7 @@ import {
   addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, recordReimbursementPayment, updateReimbursement, uploadReceipts,
   type ReimbursementWithReceipts,
 } from "../api";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { PAID_WITH_LABEL, type PaidWith } from "../ledger";
 import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";

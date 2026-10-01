@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
-import { Button, Card } from "../../components/ui";
-import { saveAccount } from "../api";
+import { Button, Card, useConfirm } from "../../components/ui";
+import { deleteAccount, saveAccount } from "../api";
 import type { Account, AccountKind } from "../ledger";
 import { Badge, attempt, input, shortDate, type FinanceProps } from "./shared";
 
@@ -30,6 +30,8 @@ function AccountRow({ a, client, fin, pur, reload, flash, done }: Pick<FinancePr
     limit: centsToInput(a?.credit_limit_cents), notes: a?.notes ?? "", active: a?.active ?? true, project_id: a?.project_id ?? "",
   }));
   const statements = a ? fin.statements.filter((s) => s.account_id === a.id) : [];
+  const [ask, confirmDialog] = useConfirm();
+  const used = a ? fin.txns.filter((t) => t.account_id === a.id).length + fin.balances.filter((b) => b.account_id === a.id).length + statements.length : 0;
   async function save() {
     if (f.last4 && !/^\d{4}$/.test(f.last4)) { flash("Last four digits only, please.", true); return; }
     if (!f.name.trim()) { flash("Give the account a name.", true); return; }
@@ -37,7 +39,8 @@ function AccountRow({ a, client, fin, pur, reload, flash, done }: Pick<FinancePr
       id: a?.id, name: f.name.trim(), kind: f.kind, last4: f.last4 || null, holder: f.holder || null,
       credit_limit_cents: f.kind === "credit_card" ? parseCents(f.limit) : null, notes: f.notes, active: f.active,
       project_id: f.project_id || null,
-      ...(a ? {} : { paid_from_account_id: f.kind === "credit_card" ? checking?.id ?? null : null }),
+      // a card is paid from checking; anything else isn't paid from anywhere
+      ...(!a || a.kind !== f.kind ? { paid_from_account_id: f.kind === "credit_card" ? (a?.paid_from_account_id ?? checking?.id ?? null) : null } : {}),
     }));
     if (ok) done?.();
   }
@@ -46,7 +49,7 @@ function AccountRow({ a, client, fin, pur, reload, flash, done }: Pick<FinancePr
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="flex flex-col gap-1">Name<input className={`${input} w-56`} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label className="flex flex-col gap-1">Type
-          <select className={input} value={f.kind} disabled={!!a} onChange={(e) => setF({ ...f, kind: e.target.value as AccountKind })}>
+          <select className={input} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as AccountKind })}>
             {KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select></label>
         <label className="flex flex-col gap-1">Last 4<input className={`${input} w-16`} maxLength={4} value={f.last4} onChange={(e) => setF({ ...f, last4: e.target.value.replace(/\D/g, "") })} /></label>
@@ -60,7 +63,16 @@ function AccountRow({ a, client, fin, pur, reload, flash, done }: Pick<FinancePr
         <label className="flex items-center gap-1 pb-1.5"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />Active</label>
         <Button onClick={() => void save()}>{a ? "Save" : "Add"}</Button>
         {!a && <Button kind="ghost" onClick={done}>Cancel</Button>}
+        {a && <Button kind="danger" title={used ? "This account has lines, balances or statements: untick Active to hide it instead" : "Delete this account"}
+          onClick={() => void ask({ title: `Delete ${a.name}?`, confirmLabel: "Delete", danger: true,
+            body: used ? `${a.name} has ${used} ledger line(s), balance(s) or statement(s), so it can't be deleted. Untick Active to hide it instead.`
+              : "It has nothing recorded against it, so it can be deleted. Add it again any time." })
+            .then((ok) => { if (ok && !used) void attempt(flash, reload, `${a.name} deleted.`, () => deleteAccount(client, a.id)); })}>Delete</Button>}
       </div>
+      {confirmDialog}
+      {a && a.kind !== f.kind && used > 0 && (f.kind === "checking" || f.kind === "credit_card" || a.kind === "checking" || a.kind === "credit_card") && (
+        <div className="mt-2 text-xs text-asu-gold">Changing a bank account or card's type changes how its {used} recorded line(s) count toward Available and the card. Check the Overview after saving.</div>
+      )}
       {a?.kind === "credit_card" && a.paid_from_account_id && <div className="mt-2 text-xs text-helios-dim">Paid from {fin.accounts.find((x) => x.id === a.paid_from_account_id)?.name}.</div>}
       {statements.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5 text-xs">

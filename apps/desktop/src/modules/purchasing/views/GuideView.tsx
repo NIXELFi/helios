@@ -71,15 +71,15 @@ function Extra({ id, prefix, title, children }: { id: string; prefix: string; ti
 
 const PART_STEPS: Step[] = [
   { id: "planned", title: "Not ready to order", tag: "Planned", tone: "plan", who: "You",
-    what: <><p>Add the part to your subteam's tab as soon as you know you'll need it, even if the design isn't final. Nothing gets bought yet. This is the team's forecast.</p>
+    what: <><p>Add the part to your subteam's tab in <b>Abacus</b> (pick your car first) as soon as you know you'll need it, even if the design isn't final. Nothing gets bought yet. This is the team's forecast.</p>
       <p>Type it into the blank row, paste rows from Excel or a Mouser/Digikey cart, or <b>Upload CSV</b> (an Airtable export works). Include the link, part number and quantity.</p></>,
-    page: ["parts", "Open the parts list"] },
+    page: ["parts", "Open Abacus"] },
   { id: "ready", title: "Ready to order", tone: "ready", who: "You",
     what: <><p>When the design is settled and the part is priced, change its status to <b>Ready to order</b>. That sends it to the execs and they get a notification with your name on it.</p>
       <p>Add a <b>shipping estimate</b> in Tax/ship if you can. You don't need to work out sales tax: the execs see a rough figure with tax added.</p>
       <p>Several parts in one cart? Tick them, choose <b>Split one cart's shipping & tax over these</b>, and paste the cart page or order email (or type the shipping). Each part gets its share by price.</p>
       <p>Changed your mind? Move it back to Not ready, or Cancel it. You can edit it until it's approved.</p></>,
-    page: ["parts", "Open the parts list"] },
+    page: ["parts", "Open Abacus"] },
   { id: "approval", title: "Two execs approve", tone: "exec", who: "Execs",
     what: <><p>Two different execs must approve before anything is bought. If an exec asked for it, their own approval doesn't count. One "deny" stops it, and you're told why in your Inbox.</p>
       <p>Nothing to do but wait. Stuck for days? Ask in person; the approval queue shows how long it's waited.</p></>,
@@ -92,7 +92,7 @@ const PART_STEPS: Step[] = [
     what: <p>The carrier says it arrived. Packages go to the team's delivery person, who is notified every time something is delivered. <b>Delivered is not the same as in your hands.</b></p> },
   { id: "received", title: "Received", tone: "you", who: "You",
     what: <><p>When you <b>physically have the part</b>, set its status to <b>Received</b>. One click. It's the only way the team knows the part made it from the doorstep to the shop. Parts go missing in that gap.</p></>,
-    page: ["parts", "Open the parts list"] },
+    page: ["parts", "Open Abacus"] },
   { id: "reconciled", title: "Reconciled", tone: "done", who: "Execs",
     what: <><p>The execs have matched what was paid to the line on the bank or card statement. That's the money side finished. <b>You don't do anything here.</b></p></> },
 ];
@@ -147,7 +147,7 @@ export function MemberGuide({ go }: { go: Go }) {
         <button className="text-asu-gold hover:underline" onClick={() => go("budgets")}>Open Budgets</button>
       </Extra>
       <Extra id="tips" prefix={p} title="Tips">
-        <p>Everyone can see the whole parts list, so check another subteam isn't already buying the same thing.</p>
+        <p>Everyone can see all of Abacus, so check another subteam isn't already buying the same thing.</p>
         <p>One row per part. Put the link and the manufacturer part number in: they're how the order gets matched to its email and invoice.</p>
         <p>Big list of small parts (DAQ boards!)? Copy them from the Mouser or Digikey cart and paste into the blank row, or upload the CSV.</p>
       </Extra>
@@ -231,7 +231,7 @@ export function ExecGuide({ go }: { go: Go }) {
       </Extra>
       <Extra id="bring-in" prefix={p} title="Bringing in old data">
         <p>Finance &gt; <b>Bring in data</b>. <b>Restore from the old ledger</b> loads the standalone ledger's export (helios-export.json) in one go: accounts, statements, every line and split, invoices, balances, reimbursements, budgets and the parts list. It only works while Agora is empty.</p>
-        <p><b>Airtable parts lists</b>: pick the CSV exports or a whole folder. Car and subteam come from the folder and file names; statuses carry over, and parts already on a tab are skipped, so uploading a file again is safe.</p>
+        <p><b>Airtable parts lists</b> (into Abacus): pick the CSV exports or a whole folder. Car and subteam come from the folder and file names; statuses carry over, and parts already on a tab are skipped, so uploading a file again is safe.</p>
         <button className="text-asu-gold hover:underline" onClick={() => go("bring")}>Open Bring in data</button>
       </Extra>
       <Extra id="rules" prefix={p} title="How the money is counted">
@@ -243,7 +243,7 @@ export function ExecGuide({ go }: { go: Go }) {
       </Extra>
       <Extra id="who" prefix={p} title="Who sees what">
         <p>Only the six execs see Finance (this section), all budgets, and all reimbursements.</p>
-        <p>Members see the whole parts list, <b>only their own subteam's budget</b>, and only their own reimbursement requests.</p>
+        <p>Members see all of Abacus (the parts list), <b>only their own subteam's budget</b>, and only their own reimbursement requests.</p>
         <p>Only execs can upload statements. Only the last four digits of any account or card number are stored.</p>
       </Extra>
       <Extra id="statuses" prefix={p} title="Received vs Reconciled">

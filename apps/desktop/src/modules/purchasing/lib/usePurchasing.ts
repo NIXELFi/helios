@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  fetchApprovals, fetchBudgets, fetchCaps, fetchItems, fetchNotifications, fetchProjects, fetchSubteams,
-  type Approval, type BudgetRow, type Caps, type Item, type Notification, type Project, type Subteam,
+  fetchApprovals, fetchBudgets, fetchCaps, fetchCarSubteams, fetchItems, fetchNotifications, fetchProjects, fetchSubteams,
+  type Approval, type BudgetRow, type Caps, type CarSubteam, type Item, type Notification, type Project, type Subteam,
 } from "./api";
 import type { VendorRule } from "../finance/importers";
 
@@ -16,10 +16,11 @@ export interface PurchasingData {
   notifications: Notification[];
   caps: Caps | null;
   vendors: VendorRule[];   // the vendor list, for fixing spellings on import
+  carSubteams: CarSubteam[];   // which subteams each car has
 }
 
 const EMPTY: PurchasingData = {
-  items: [], approvals: [], subteams: [], projects: [], budgets: [], notifications: [], caps: null, vendors: [],
+  items: [], approvals: [], subteams: [], projects: [], budgets: [], notifications: [], caps: null, vendors: [], carSubteams: [],
 };
 
 /** How often to refresh while the module is on screen (other people's edits). */
@@ -33,13 +34,15 @@ export function usePurchasing(client: SupabaseClient | null, active: boolean) {
   const reload = useCallback(async () => {
     if (!client) return;
     try {
-      const [items, approvals, subteams, projects, budgets, notifications, caps, vendors] = await Promise.all([
+      const [items, approvals, subteams, projects, budgets, notifications, caps, vendors, carSubteams] = await Promise.all([
         fetchItems(client), fetchApprovals(client), fetchSubteams(client), fetchProjects(client),
         fetchBudgets(client), fetchNotifications(client), fetchCaps(client),
         // optional: an older database without the finance schema just has no vendor list
         client.schema("finance").from("vendors").select("*").then((r) => (r.data ?? []) as VendorRule[], () => []),
+        // optional too: a database from before cars had their own subteams
+        fetchCarSubteams(client).catch(() => [] as CarSubteam[]),
       ]);
-      setData({ items, approvals, subteams, projects, budgets, notifications, caps, vendors });
+      setData({ items, approvals, subteams, projects, budgets, notifications, caps, vendors, carSubteams });
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

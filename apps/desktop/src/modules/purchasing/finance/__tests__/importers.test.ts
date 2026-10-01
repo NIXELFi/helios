@@ -140,4 +140,33 @@ describe("importers", () => {
     const other = txn({ account_id: 2, date: "2026-09-30", amount_cents: -5058, kind: "charge", vendor: "Amazon" });
     expect(matchInvoice(inv[0]!, [charge, other], new Set(), RULES)?.id).toBe(charge.id);
   });
+
+  it("only the card's own payment is a transfer; a subscription's autopay is spending", () => {
+    const csv = `Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #,
+DEBIT,09/24/2026,"ORIG CO NAME:JP MORGAN CHASE CO ENTRY DESCR:COMM CARD SEC:CCD AUTOPAY",-412.50,ACH_DEBIT,1000.00,,
+DEBIT,09/20/2026,"ADOBE INC AUTOPAY 0001",-19.99,ACH_DEBIT,1412.50,,
+DEBIT,09/19/2026,"LOAN REPAYMENT",-5.00,ACH_DEBIT,1432.49,,`;
+    const plan = planImport("chase-checking", parseChaseChecking(parseCsv(csv)), CHECKING, opts());
+    expect(plan.lines.map((p) => p.txn.kind)).toEqual(["transfer", "withdrawal", "withdrawal"]);
+  });
+
+  it("a card statement uploaded after checking already shows its payment pairs with it instead of expecting another", () => {
+    const paid = txn({ account_id: 1, date: "2026-10-22", amount_cents: -6888, kind: "transfer", transfer_group: "card-payment:2026-10-22:6888" });
+    const csv = `Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+09/20/2026,09/21/2026,MOUSER ELECTRONICS,Shopping,Sale,-68.88,`;
+    const plan = planImport("chase-card", parseChaseCard(parseCsv(csv)), CARD, { ...opts([paid]), cardStatement: { periodStart: "2026-08-26", closing: "2026-09-25" } });
+    expect(plan.extra.map((t) => [t.account_id, t.amount_cents, t.status, t.transfer_group])).toEqual([
+      [2, 6888, "posted", "card-payment:2026-10-22:6888"],
+    ]);
+  });
+
+  it("keeps each day's closing balance whether the file lists newest or oldest first", () => {
+    const newest = `Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #,
+DEBIT,09/21/2026,"B",-2.00,ACH_DEBIT,96.00,,
+DEBIT,09/21/2026,"A",-2.00,ACH_DEBIT,98.00,,`;
+    const lines = parseChaseChecking(parseCsv(newest));
+    const day = (ls: typeof lines) => planImport("chase-checking", ls, CHECKING, opts()).balances.map((b) => b.balance_cents);
+    expect(day(lines)).toEqual([9600]);
+    expect(day([...lines].reverse())).toEqual([9600]);
+  });
 });

@@ -24,7 +24,9 @@ export interface OrderTotals {
 /** Shipping + tax + fees + discount: what goes on top of the parts' prices. */
 export const extrasOf = (o: OrderTotals) => (o.shipping ?? 0) + (o.tax ?? 0) + (o.fees ?? 0) + (o.discount ?? 0);
 
-const MONEY = /(-|−)?\s*\$?\s*(-|−)?\s*(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})\b/;
+// A minus only counts touching the amount ("-$2.96", "$-2.96"); in
+// "Shipping - $5.00" the dash just separates the label.
+const MONEY = /([-−](?=\$?\d))?\$?([-−])?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})\b/;
 const amount = (s: string): number | null => {
   const m = s.match(MONEY);
   if (!m) return null;

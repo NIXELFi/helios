@@ -34,7 +34,8 @@ export function BringInDataView(p: FinanceProps & { go: (view: string) => void }
 
 function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { empty: boolean }) {
   const [file, setFile] = useState<{ name: string; data: Export } | null>(null);
-  const [cars, setCars] = useState<{ IC: string; EV: string }>({ IC: "", EV: "" });
+  const [cars, setCars] = useState<{ IC: string; EV: string; Team: string }>({ IC: "", EV: "", Team: "" });
+  const [seasonStart, setSeasonStart] = useState("");
   const [map, setMap] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<RestoreResult | null>(null);
@@ -54,7 +55,7 @@ function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { emp
       const data = JSON.parse(await f.text()) as Export;
       if (data.source !== "sdm-ledger") { flash("That isn't an export from the SDM ledger (helios-export.json).", true); return; }
       setFile({ name: f.name, data });
-      setCars({ IC: guessCar("IC", pur.projects) ?? "", EV: guessCar("EV", pur.projects) ?? "" });
+      setCars({ IC: guessCar("IC", pur.projects) ?? "", EV: guessCar("EV", pur.projects) ?? "", Team: "" });
       // the export's own subteam list knows the old tab names ("Brakess", "Accumulator")
       const aliases = new Map<string, string[]>();
       for (const r of (data.subteams ?? []) as { subteam: string; aliases?: string }[]) {
@@ -73,12 +74,15 @@ function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { emp
 
   const count = (k: string) => (file?.data[k] ?? []).length;
   const unmapped = names.filter((n) => !map[n]);
+  // whole-team parts and budget lines need a car (every part and budget line has one)
+  const needsTeam = !!file && ["budgets", "line_item_allocations"].some((k) => ((file.data[k] ?? []) as Named[]).some((r) => r.program === "Team"));
+  const season = ((file?.data.budgets ?? []) as { season?: string }[]).map((b) => b.season ?? "").sort().at(-1) || "this season";
 
   async function restore() {
     if (!file) return;
     setBusy(true);
     try {
-      const r = await restoreLedger(client, file.data, cars, map);
+      const r = await restoreLedger(client, file.data, needsTeam ? cars : { IC: cars.IC, EV: cars.EV }, map, seasonStart);
       setDone(r);
       await reload();
       flash("Restored. Check the Overview and the Ledger against the old ledger.");
@@ -117,7 +121,18 @@ function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { emp
                 </select>
               </label>
             ))}
+            {needsTeam && (
+              <label className="flex items-center gap-2">Whole-team parts and budgets go under
+                <select className={input} value={cars.Team} onChange={(e) => setCars({ ...cars, Team: e.target.value })}>
+                  <option value="">pick...</option>{pur.projects.map((x) => <option key={x.id} value={x.id}>{x.car_code} {x.name}</option>)}
+                </select>
+              </label>
+            )}
           </div>
+          <label className="flex flex-wrap items-center gap-2 text-sm">{season} started on
+            <input type="date" className={`${input} ${seasonStart ? "" : "border-asu-gold"}`} value={seasonStart} onChange={(e) => setSeasonStart(e.target.value)} />
+            <span className="text-xs text-helios-dim">Spending before this (last season's competition, say) stays in the ledger but doesn't count toward {season}'s budgets.</span>
+          </label>
           <div>
             <div className="mb-1 text-xs text-helios-dim">Which Helios subteam each of the old ledger's subteams is:</div>
             <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -132,7 +147,8 @@ function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { emp
             </div>
             {unmapped.length > 0 && <p className="mt-1 text-xs text-asu-gold">Pick a subteam for {unmapped.join(", ")}. If Helios doesn't have one, add it in Helios first, or pick the closest.</p>}
           </div>
-          <div><Button disabled={busy || !cars.IC || !cars.EV || cars.IC === cars.EV || unmapped.length > 0} onClick={() => void restore()}>
+          <div><Button disabled={busy || !cars.IC || !cars.EV || cars.IC === cars.EV || unmapped.length > 0 || !seasonStart || (needsTeam && !cars.Team)}
+            onClick={() => void restore()}>
             {busy ? "Restoring..." : "Restore everything"}</Button></div>
         </>
       )}
@@ -163,13 +179,9 @@ function AirtableCard({ client, pur, reload, flash }: FinanceProps) {
       const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
       const matrix = parseCsv(await f.text());
       if (!matrix.length || !looksLikeHeader(matrix[0]!)) { flash(`${path}: no header row, skipped.`, true); continue; }
-      const rows = toRows(matrix.slice(1), mapHeaders(matrix[0]!)).map((r, k) => {
-        // "DATE NEEDED" in the team's sheets isn't a need-by date (it holds
-        // request or order dates), so it's kept as written, not as Needed by
-        const { needed_by, ...rest } = r;
-        return { ...rest, vendor: r.vendor ? normalizeVendor(r.vendor, pur.vendors) : undefined,
-          date_needed_raw: needed_by ?? "", source: `airtable:${path} row ${k + 2}` } as NewRow;
-      });
+      // "DATE NEEDED" lands in its own as-written field (see lib/paste.ts)
+      const rows = toRows(matrix.slice(1), mapHeaders(matrix[0]!))
+        .map((r) => ({ ...r, vendor: r.vendor ? normalizeVendor(r.vendor, pur.vendors) : undefined, source: `airtable:${path}` }));
       out.push({ path, rows, car: guessCar(path, pur.projects) ?? "", subteam: guessSubteam(path, pur.subteams) ?? "" });
     }
     setFiles(out.sort((a, b) => a.path.localeCompare(b.path)));
@@ -185,9 +197,11 @@ function AirtableCard({ client, pur, reload, flash }: FinanceProps) {
     }
     return m;
   }, [pur.items]);
+  // only parts already in Abacus are skipped: two rows with the same name in
+  // one file (a reorder) are both kept
   const fresh = (f: CsvFile) => {
-    const seen = new Set(onTab.get(`${f.car}|${f.subteam}`) ?? []);
-    return f.rows.filter((r) => { const t = r.title.trim().toLowerCase(); if (seen.has(t)) return false; seen.add(t); return true; });
+    const there = onTab.get(`${f.car}|${f.subteam}`);
+    return there ? f.rows.filter((r) => !there.has(r.title.trim().toLowerCase())) : f.rows;
   };
   const ready = files.filter((f) => f.car && f.subteam);
   const toAdd = ready.reduce((s, f) => s + fresh(f).length, 0);
@@ -216,11 +230,11 @@ function AirtableCard({ client, pur, reload, flash }: FinanceProps) {
   return (
     <Card className="flex flex-col gap-3">
       <div>
-        <b>Airtable parts lists</b>
+        <b>Airtable parts lists into Abacus</b>
         <p className="mt-1 text-xs text-helios-dim">
           Pick the CSV exports (one per Airtable tab), or a whole folder of them. Each file's car and subteam come from its folder and name
           ("EV Team/Brakess-Grid view.csv" is EV Brakes); change any that are wrong. Statuses carry over (Not ready, Ready to order, Ordered,
-          Received), vendor spellings are fixed, and parts already on a tab with the same name are skipped, so a file can be uploaded again safely.
+          Received), vendor spellings are fixed, and parts already in Abacus on that car and subteam with the same name are skipped, so a file can be uploaded again safely.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">

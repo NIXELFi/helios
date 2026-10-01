@@ -33,7 +33,7 @@ const VIEW_KEY = "helios:purchasing:view";
 const FINANCE_VIEWS: string[] = ["overview", "balances", "ledger", "reimbursements", "discrepancies", "accounts", "import", "bring", "execguide"];
 
 const SUBTITLE: Record<View, string> = {
-  parts: "The team's parts list: add parts when you know you'll need them, send them for approval when the design is settled.",
+  parts: "Abacus, the team's parts list: add parts when you know you'll need them, send them for approval when the design is settled.",
   approvals: "Oldest and highest priority first. Each card shows what approving does to the subteam's budget.",
   orders: "Approved parts waiting to be bought, and everything on its way.",
   budgets: "Budget, spent, committed and planned per budget line.",
@@ -41,7 +41,7 @@ const SUBTITLE: Record<View, string> = {
   inbox: "Requests, approvals, shipments, deliveries and reimbursements that involve you.",
   guide: "How buying a part works, step by step, and how to get paid back.",
   import: "Upload bank, card and Square exports and invoice lists. Execs only.",
-  bring: "Restore the old ledger, or add Airtable parts lists a folder at a time. Execs only.",
+  bring: "Restore the old ledger, or bring Airtable parts lists into Abacus a folder at a time. Execs only.",
   execguide: "The weekly routine and the rules behind the numbers. Execs only.",
   overview: "What the team can actually spend, the card, and what needs attention.",
   balances: "This week's balances for every account, and how they compare with the ledger.",
@@ -52,7 +52,7 @@ const SUBTITLE: Record<View, string> = {
 };
 
 /**
- * Agora (purchasing and finance): the parts list that replaces the Airtable cost
+ * Agora (purchasing and finance): Abacus, the parts list that replaces the Airtable cost
  * tracker, exec approvals, orders and tracking, per-subteam budgets,
  * reimbursement requests, and (execs only) the ledger. Every rule is enforced
  * by the purchasing and finance schemas' RPCs and RLS; this UI only decides
@@ -102,7 +102,7 @@ export function AgoraModule() {
   const toReview = fin.data.reimbursements.filter((r) => r.status === "requested").length;
 
   const nav: { id: View; label: string; Icon: TablerIcon; count?: number; show: boolean }[] = [
-    { id: "parts", label: "Parts & requests", Icon: IconTable, show: true },
+    { id: "parts", label: "Abacus (parts)", Icon: IconTable, show: true },
     { id: "approvals", label: "Approvals", Icon: IconCheckbox, count: waiting, show: exec },
     { id: "orders", label: "Orders & tracking", Icon: IconTruckDelivery, count: toOrder, show: can(data.caps, "purchasing.order") },
     { id: "budgets", label: "Budgets", Icon: IconChartPie, show: true },

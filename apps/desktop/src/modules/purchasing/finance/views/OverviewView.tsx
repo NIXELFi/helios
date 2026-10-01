@@ -5,7 +5,7 @@ import { Card } from "../../components/ui";
 import { allEvidence, dashboard, discrepancies } from "../compute";
 import { claimsACharge } from "../discrepancies";
 import { isSpend } from "../ledger";
-import { today } from "../useFinance";
+import { today } from "../../lib/dates";
 import { Badge, Bar, Money, Tile, accountLabel, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 
 export type FinanceView = "overview" | "balances" | "ledger" | "reimbursements" | "discrepancies" | "accounts";

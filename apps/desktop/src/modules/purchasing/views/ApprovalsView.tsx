@@ -29,7 +29,13 @@ export function ApprovalsView({
   const [notes, setNotes] = useState<Record<string, string>>({});
   // members aren't asked for sales tax, so show a rough all-in figure where it's missing
   const [taxPct, setTaxPct] = useState<number | null>(null);
-  useEffect(() => { void fetchSetting(client, "estimated_tax_percent").then((v) => setTaxPct(v && Number(v) > 0 ? Number(v) : null)); }, [client]);
+  // the approval rule is a setting (the server's decide() reads the same ones)
+  const [rule, setRule] = useState({ required: 2, selfCounts: false });
+  useEffect(() => {
+    void fetchSetting(client, "estimated_tax_percent").then((v) => setTaxPct(v && Number(v) > 0 ? Number(v) : null));
+    void Promise.all([fetchSetting(client, "approvals_required"), fetchSetting(client, "requester_counts_as_approver")])
+      .then(([n, self]) => setRule({ required: Number(n) > 0 ? Number(n) : 2, selfCounts: self === "true" }));
+  }, [client]);
   const now = Date.now();
 
   const waiting = items
@@ -48,7 +54,7 @@ export function ApprovalsView({
       const result = await decide(client, i.id, decision, notes[i.id] ?? "");
       await reload();
       flash(result === "APPROVED" ? `${i.code} approved: it's on the To order list.`
-        : result === "DENIED" ? `${i.code} denied.` : `Your approval is in. ${i.code} needs one more.`);
+        : result === "DENIED" ? `${i.code} denied.` : `Your approval is in. ${i.code} is waiting for more.`);
     } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
   }
 
@@ -57,7 +63,7 @@ export function ApprovalsView({
   return (
     <div className="flex flex-col gap-3">
       {waiting.map(({ i, mine, hours, flag }) => {
-        const count = approvals.filter((a) => a.item_id === i.id && a.decision === "approve" && a.user_id !== i.requester_id).length;
+        const count = approvals.filter((a) => a.item_id === i.id && a.decision === "approve" && (rule.selfCounts || a.user_id !== i.requester_id)).length;
         const border = flag === "stale" ? "border-helios-danger/60" : flag === "nudge" ? "border-helios-warn/60" : "";
         return (
           <Card key={i.id} className={border}>
@@ -97,7 +103,7 @@ export function ApprovalsView({
                 {i.justification && <p className="mb-1"><span className="text-helios-dim">Why:</span> {i.justification}</p>}
                 {i.notes && <p className="mb-1"><span className="text-helios-dim">Notes:</span> {i.notes}</p>}
                 {i.product_url && <a className="text-asu-gold hover:underline" href={i.product_url} target="_blank" rel="noreferrer">Open product page</a>}
-                <p className="mt-2 text-xs text-helios-dim">{count} of 2 exec approvals{i.requester_id === userId ? " | your own request doesn't count toward them" : ""}</p>
+                <p className="mt-2 text-xs text-helios-dim">{count} of {rule.required} exec approval{rule.required === 1 ? "" : "s"}{i.requester_id === userId && !rule.selfCounts ? " | your own request doesn't count toward them" : ""}</p>
               </div>
               <table className="text-xs">
                 <thead className="text-helios-dim"><tr><th className="text-left">Budget</th><th className="text-right">Left now</th><th className="text-right">After</th></tr></thead>
