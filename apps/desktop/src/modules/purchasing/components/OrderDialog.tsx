@@ -108,7 +108,7 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6" role="dialog" aria-modal="true">
-      <div className="flex max-h-full w-[min(1000px,94vw)] flex-col gap-3 overflow-auto rounded-xl border border-helios-line bg-helios-panel p-5 shadow-2xl">
+      <div className="flex max-h-[calc(100vh-3rem)] w-[min(1000px,94vw)] flex-col gap-3 overflow-auto rounded-xl border border-helios-line bg-helios-panel p-5 shadow-2xl">
         <div>
           <h2 className="text-base font-semibold">Split a cart's shipping and tax over {items.length} part{items.length === 1 ? "" : "s"}</h2>
           <p className="text-xs text-helios-dim">Each part gets a share in proportion to its price, so the shares add up to the cent.</p>

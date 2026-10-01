@@ -59,6 +59,8 @@ follow [semver](https://semver.org/).
 - **Agora: Airtable rows already Ordered or Received can be uploaded.** Upload
   CSV failed on them ("hasn't been approved yet"); execs now bring them in with
   their status.
+- **Agora: long pastes no longer push the Add button off screen.** The paste /
+  upload preview (and the cart split) now fit the window and scroll inside.
 
 ## [6.0.0] - 2026-09-30
 

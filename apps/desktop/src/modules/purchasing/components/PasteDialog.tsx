@@ -47,7 +47,7 @@ export function PasteDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6" role="dialog" aria-modal="true">
-      <div className="flex max-h-full w-[min(1100px,94vw)] flex-col rounded-xl border border-helios-line bg-helios-panel p-5 shadow-2xl">
+      <div className="flex max-h-[calc(100vh-3rem)] w-[min(1100px,94vw)] flex-col rounded-xl border border-helios-line bg-helios-panel p-5 shadow-2xl">
         <h2 className="text-base font-semibold">Add {rows.length} item{rows.length === 1 ? "" : "s"} to {tabLabel}</h2>
         <p className="mb-3 text-xs text-helios-dim">Check each column is going to the right place. Columns set to "ignore" are skipped.</p>
         <div className="min-h-0 overflow-auto rounded-md border border-helios-line">
