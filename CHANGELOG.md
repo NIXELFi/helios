@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-10-02
+
 ### Added
 
 - **Agora: set up budgets in the app.** Budgets > Set up budgets (execs): create
