@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-10-02
+
 ### Changed
 
 - **Agora: each car's subteams come from Admin > Org Structure.** Abacus shows

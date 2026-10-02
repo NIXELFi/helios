@@ -3,8 +3,8 @@
 --      (pm.project_subteams, edited in Admin > Org Structure), not a second
 --      map of Agora's own. purchasing.car_subteams (20261002000000) goes;
 --      add_items checks the org structure instead.
---   2. Execs can delete parts (mistakes, test rows, or clearing Abacus before
---      restoring the old ledger), except parts matched to a ledger charge.
+--   2. Execs can delete parts that never got as far as spending (mistakes,
+--      test rows), and empty Abacus for the restore while the books are empty.
 --   3. Parts carry a funding source, as the Airtable sheets did ("Chase
 --      Account", "Dean's funding"): free text members fill in, so it can be
 --      typed, pasted, uploaded from Airtable and filled down like the rest.
