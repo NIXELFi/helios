@@ -14,7 +14,7 @@ H = core.H; OUT = os.path.join(H, "charts", "asmeasured"); os.makedirs(OUT, exis
 D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, "asmeasured.ndjson"))]); D = D[D.bt.notna()]
 dy = core.dyno(); ETA = 0.94
 NAMES = {"model": "as modelled (0036)", "plenum": "+ real plenum (1.83 L, 141 mm)", "intake": "+ real runners (252 / 230 mm)", "exh": "model intake + real exhaust",
-         "all": "all measured", "all_sharp": "all measured, sharp runner mouths",
+         "all": "all measured (80 mm port, 1.83 L)", "all_sharp": "all measured, sharp runner mouths",
          "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum",
          "all_port100": "all measured, 100 mm head port", "all_port120": "all measured, 120 mm head port"}
 NOTE = "1D engine model, 160-cell plenum, venturi inertance 400 1/m, logged AFR and spark maps. Wheel torque = brake torque x 0.94. Dyno: team chassis dyno, 25 rpm bins."
@@ -48,6 +48,23 @@ if C:
     hd, lb = ax[0].get_legend_handles_labels(); fig.legend(hd, lb, loc="upper left", bbox_to_anchor=(0.008, 1 - 0.95 / fig.get_figheight()), ncol=len(lb), fontsize=10, labelcolor=INK2, handlelength=1.6, columnspacing=2.2)
     head(fig, "The as-measured car against the dyno", "Same engine model and tune; only the intake and exhaust dimensions change from the model's estimates to the CAD's.", NOTE)
     fig.subplots_adjust(left=0.055, right=0.985, top=TOP(fig) - 0.14, bottom=0.12, wspace=0.18); vc.save(fig, "A1_dyno.png")
+
+def panel(fname, show, title, sub):
+    fig, ax = plt.subplots(1, 2, figsize=(15, 6)); m = (dy.rpm >= 5500) & (dy.rpm <= 12500); ax[0].plot(dy.rpm[m], dy.Nm[m], color=INK, lw=2.6, label="dyno")
+    for c, col in show:
+        if c not in C: continue
+        r, t = C[c]; u = r >= 5500; ax[0].plot(r[u], t[u], color=col, label=NAMES[c]); ax[1].plot(r[u], t[u] - np.interp(r[u], dy.rpm, dy.Nm), color=col, label=NAMES[c])
+    ax[1].axhline(0, color=MUTED, lw=1); ax[0].set_ylabel("wheel torque, N.m"); ax[1].set_ylabel("model minus dyno, N.m")
+    ax[0].set_title("torque curve", loc="left", fontsize=11.5, color=INK, pad=8); ax[1].set_title("error against the dyno", loc="left", fontsize=11.5, color=INK, pad=8)
+    for a in ax: a.set_xlabel("engine speed, rpm")
+    hd, lb = ax[0].get_legend_handles_labels(); fig.legend(hd, lb, loc="upper left", bbox_to_anchor=(0.008, 1 - 0.95 / fig.get_figheight()), ncol=len(lb), fontsize=10, labelcolor=INK2, handlelength=1.6, columnspacing=2.2)
+    head(fig, title, sub, NOTE); fig.subplots_adjust(left=0.055, right=0.985, top=TOP(fig) - 0.14, bottom=0.12, wspace=0.18); vc.save(fig, fname)
+if "all_port120" in C:
+    panel("A2_port_length.png", [("all", "#2a78d6"), ("all_port100", "#eb6834"), ("all_port120", "#1baf7a")], "A longer head port moves the model's torque peaks onto the dyno's",
+          "All-measured car with the head port (flange to valve seat) at the model's 80 mm estimate, 100 mm and 120 mm.")
+if "all_big" in C:
+    panel("A3_plenum.png", [("all", "#2a78d6"), ("all_mid", "#eb6834"), ("all_big", "#1baf7a")], "A bigger plenum in the model, against the dyno",
+          "All-measured car with the real plenum (1.83 L) and with 40 mm and 93 mm of straight section added (2.77 L, 4.03 L). The dyno is the real 1.83 L plenum.")
 
 # design set: VRLI in the real plenum
 R = vc.R; TODAY = core.today()(R)

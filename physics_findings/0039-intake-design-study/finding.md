@@ -459,3 +459,24 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - Under this reading wall finish is worth as much as the shape: a 20 um bore on today's shape equals the optimizer's short part at 60 um.
 - These are conditional on the bore actually being that rough. Against a 60 um part the same shapes give the smaller gains in the earlier table (L140 +1.5 % / +1.0 %).
 - Fluent's L140 at 20 and 200 um (queued) will show whether the short part keeps its lead across finish.
+
+**Second pass (2026-10-02): port length, bigger plenums and the dump plenum on the as-measured car.** Charts `charts/asmeasured/A2_port_length.png`, `A3_plenum.png`.
+
+| case (all measured unless noted) | lower peak | upper peak | rms 7-10k | rms 10-12.5k | 7-10.5k vs 80 mm / 1.83 L | 10.5-12.5k |
+|---|---|---|---|---|---|---|
+| dyno | 5.9k | 8.6k | | | | |
+| 80 mm port, 1.83 L | 6.5k | 9.0-9.5k | 2.13 N.m | 3.32 N.m | 0 | 0 |
+| 100 mm port | 6.0-6.25k | 8.75k | 1.75 | 3.68 | +0.4 % | +0.4 % |
+| 120 mm port | 5.75-6.0k | 8.5k | 2.29 | 4.50 | +0.1 % | +2.7 % |
+| plenum + 40 mm (2.77 L) | 6.25-6.75k | 8.75k | 1.83 | 3.19 | +0.6 % | -0.4 % |
+| plenum + 93 mm (4.03 L) | 6.25-6.75k | 8.5k | 1.59 | 3.03 | +1.0 % | -0.8 % |
+| dump plenum | 6.5k | 9.0k | 2.25 | 2.76 | -0.9 % | -1.6 % |
+
+- **A head port of about 115 mm puts both of the model's torque peaks on the dyno's.** 100 mm leaves them about 150-250 rpm high, 120 mm about 100 rpm low. The model's 80 mm is an estimate; the same shift could come from cam timing or the runner end correction, but as a length it is about +35 mm of intake path.
+- **If that is right, every runner length in this finding is about 35 mm too long for the real car.** Today's 248 mm runner behaves like the model's 283 mm, and the recommended VRLI window 198 -> 298 mm becomes roughly 163 -> 263 mm above the flange, which is easier to package. `portshift.py` (queued) reruns the VRLI windows with a 115 mm port.
+- **To settle it: measure the head port,** flange face to valve seat along the centreline.
+- A longer port does not fix the amplitude errors: the dyno's trough at 7-7.5k (42 N.m) stays 2-3 N.m too shallow in the model, and above 10.5k the model gets worse (4.5 N.m rms at 120 mm).
+- **Bigger plenum in the model:** +1.0 % at 7-10.5k, -0.8 % above 10.5k and -0.8 % at 4-6k for 4.03 L. It sharpens the upper peak (47.8 N.m at 8.5k against 45.3) toward the dyno's 49.7, so the 4.03 L model fits the real 1.83 L car better than the 1.83 L model does (rms 7-10k 1.59 against 2.13 N.m).
+  - One reading: the model's single-node plenum couples the runners more strongly than the real plenum does, so the real plenum already behaves like a larger one in the model.
+  - That would mean the model's absolute plenum effects are mis-scaled; the 3D check is the test.
+- **Dump plenum:** 1.0 % less torque over 6-12k and 1.6 % less above 10.5k, where the model is high. The overall scale moves 0.975 -> 0.985.
