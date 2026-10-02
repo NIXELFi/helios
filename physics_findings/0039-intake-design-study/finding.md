@@ -647,3 +647,40 @@ Fluent's transient 3D exhaust (real pipe lengths, driven by the 1D valve flow, 9
 **Plenum claim on the re-measured intake** (`intake_bc.py`, dump plenums 1.807 L and 3.847 L, VE as-built -> big): 6000 +0.9 %, 8000 +8.1 %, 8500 +0.9 %, 9000 -3.7 %, 9500 +0.5 %, 11500 -0.2 %.
 - The peak shift is now from about 9000 to about 8000 rpm, so the large change sits at 8000, not 8500. The speed at which the model shows the plenum effect moves with every geometry correction.
 - For the 3D check this argues for a short sweep (8000 / 8500 / 9000) and not one speed, and for the as-built pressure swing (7.6 / 11.7 / 12.3 kPa peak-to-peak in 1D) as the direct test of the model.
+
+## Addendum (2026-10-02): exhaust primary diameter, 1.25 in against 1.5 in OD
+
+Nick's question, asked of both models. `primary_dia.py` (210 runs + traces), `primary_dia_report.py`; chart `charts/asmeasured/A6_primary_diameter.png`, tables `primary_dia_bands.csv`, `primary_dia_points.csv`. All-measured car: runners 260 / 256 mm, dump plenum 1.807 L, exhaust 481 / 576 mm, logged tune, CAD bores (1.0 mm wall).
+
+- **p125** (the CAD): primaries 29.75 mm, collector legs and secondaries 36.10 mm, final 48.1-48.8 mm.
+- **p150** (scaled system, an estimate): primaries 36.10 mm, everything downstream x 1.176 (42.45 mm, final 56.6-57.4 mm).
+- **p150only**: primaries 36.10 mm, the rest as CAD.
+- Lengths, merge positions, wall temperatures and the 65 mm head port (27.65 -> 29.75 mm) are the same in all three.
+
+Brake torque against p125:
+
+| case, junction model | 4-6k | 6-12k | 7-10.5k | 10.5-12.5k | peak torque | peak power | largest gain | largest loss |
+|---|---|---|---|---|---|---|---|---|
+| p150, as modelled | -0.8 % | +0.5 % | +0.7 % | -0.2 % | +1.8 % | -1.7 % | +1.9 % at 8750 | -3.6 % at 5250 |
+| p150only, as modelled | 0.0 % | +0.2 % | +0.6 % | +0.3 % | +2.3 % | +0.6 % | +2.3 % at 8750 | -2.4 % at 6000 |
+| p150, momentum junction off | -0.8 % | +0.9 % | +1.0 % | +0.4 % | +1.5 % | -2.4 % | +2.6 % at 8250 | -2.7 % at 5000 |
+| p150only, momentum junction off | 0.0 % | +0.6 % | +1.1 % | +0.7 % | +2.9 % | +0.6 % | +3.0 % at 8750 | -3.0 % at 6000 |
+
+Per speed (junction as modelled; p125 / p150 / p150only):
+
+| | 6000 rpm | 9000 rpm | 11500 rpm |
+|---|---|---|---|
+| VE | 0.972 / 0.954 / 0.956 | 0.965 / 0.972 / 0.989 | 0.826 / 0.833 / 0.832 |
+| residual fraction at IVC | 10.8 / 10.3 / 10.3 % | 4.7 / 4.8 / 5.2 % | 5.4 / 5.7 / 5.6 % |
+| mean cylinder pressure over the exhaust stroke | 89 / 89 / 108 kPa | 128 / 122 / 118 kPa | 99 / 102 / 100 kPa |
+| pressure at the valve over overlap, mean (min) | 63 (46) / 65 (51) / 65 (54) kPa | 148 (113) / 148 (111) / 141 (107) kPa | 120 (84) / 124 (114) / 116 (98) kPa |
+| blowdown peak at the valve | 166 / 149 / 151 kPa | 168 / 153 / 147 kPa | 152 / 131 / 144 kPa |
+| brake torque | 47.3 / 47.1 / 46.2 N.m | 49.6 / 50.1 / 50.7 N.m | 40.5 / 40.6 / 40.7 N.m |
+
+- **In this model the primary diameter is worth under 1 % over any band.** The 1.5 in system gains about 0.5-0.7 % through 7-10.5k (up to +1.9 % at 8.25-8.75k) and loses about 0.8 % below 6k and 1.7-1.9 % at 12.25-12.5k, so peak power is 1.7 % lower.
+- The bigger primary lowers the blowdown peak by 15-20 kPa and the exhaust-stroke pressure at 9000 by 5-8 %, and moves the upper peak from 9.0k to 8.75k. The overlap pressure and the residual fraction barely change.
+- Primaries alone (unchanged collectors) do slightly better at the top and worse at 6-7.5k than the scaled system.
+- **Junction dependence:** with the more-transmitting junction (165 kPa at the primary end against 147.5) every gain grows by about 0.3-0.5 points. Fluent's 3D has less cross-transmission than either (125-129 kPa), and no setting in the model reaches it (merge angle 0-45°: 147-150 kPa). Extrapolating the trend, the real difference is more likely smaller than larger. A new junction term would be needed to test that in 1D.
+- Caveats: the head port is unchanged, so p150 has a 1.47 x area step at the head face; wall temperatures are held; these are 1 % differences on a model whose torque curve is 4-6 % off the dyno in shape.
+- **Verdict from the 1D side: no performance case for 1.5 in primaries.** It is a wash within the model's accuracy, with a small midrange gain traded for low-end and peak power. Fluent's 3D pair (cylinder-behind-the-valve boundary) is the check. Traces for it: `exhaust_bc/exhaust_allmeasured_{p125,p150,p150only}_{9000,6000,11500}rpm.csv`.
+- Side result: this configuration (re-measured runners, dump plenum) is the best match to the dyno so far over 7-10k: 1.71 N.m rms (0036: 2.15).

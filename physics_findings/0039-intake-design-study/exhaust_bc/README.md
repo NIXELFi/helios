@@ -69,3 +69,9 @@ All-measured car, 9000 rpm, cylinder 1's path:
 | final end | 908 | 892-936 | | 307 |
 
 The blowdown front takes 137° (2.54 ms) from valve to open end over 1.722 m: 678 m/s.
+
+## Primary-diameter pair (added 2026-10-02)
+
+`exhaust_allmeasured_{p125,p150,p150only}_{9000,6000,11500}rpm.csv` (made by `primary_dia.py --traces`): the all-measured car with runners 260.2 / 256.0 mm and the dump plenum (1.807 L). p125 = the CAD exhaust; p150 = primaries 36.10 mm and every diameter downstream x 1.176; p150only = primaries 36.10 mm, rest as CAD. Same columns as the other exhaust files, plus, appended after every original column, for each cylinder: `m_cyl{i}_kg`, `f_res_ivc{i}` (residual fraction latched at the last intake-valve closing), `p_iport{i}_Pa` and `T_iport{i}_K` (runner cell at the intake valve), `mdot_ivalve{i}_kg_s` (interval mean, positive into the cylinder).
+
+Valve data: exhaust 2 x 23.0 mm, lift 7.35 mm x sin^1.3 over seat-to-seat 121.9-383.1 deg (140 / 365 at 1 mm); intake 2 x 27.5 mm, 8.56 mm, seat-to-seat 321.8-601.2 deg (339 / 584 at 1 mm). In-cylinder burned gas: gamma(T) = 1.40186 - 1.273e-4 T + 2.518e-8 T^2, R = 295 J/kg/K (the constant 1.30 / 295 is the exhaust pipes only).
