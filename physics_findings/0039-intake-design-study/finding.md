@@ -684,3 +684,23 @@ Per speed (junction as modelled; p125 / p150 / p150only):
 - Caveats: the head port is unchanged, so p150 has a 1.47 x area step at the head face; wall temperatures are held; these are 1 % differences on a model whose torque curve is 4-6 % off the dyno in shape.
 - **Verdict from the 1D side: no performance case for 1.5 in primaries.** It is a wash within the model's accuracy, with a small midrange gain traded for low-end and peak power. Fluent's 3D pair (cylinder-behind-the-valve boundary) is the check. Traces for it: `exhaust_bc/exhaust_allmeasured_{p125,p150,p150only}_{9000,6000,11500}rpm.csv`.
 - Side result: this configuration (re-measured runners, dump plenum) is the best match to the dyno so far over 7-10k: 1.71 N.m rms (0036: 2.15).
+
+## Addendum (2026-10-02): exhaust pressure during overlap and the model's airflow (Fluent's lead, tested)
+
+Fluent's lead: the 1D exhaust port sits at 136-148 kPa through overlap at 8.5-10k where the 3D exhaust shows about 100 kPa, so the 1D model may under-fill. `diag/overlap_test.py`: the all-measured car with an exhaust that holds the port near ambient at every speed (primaries cut to the head port, discharging into a 300 mm reservoir), with the car-fitted restrictor (Cd 0.95, R 0.572) and the clean-wall CFD one (Cd 0.965, R 0.692).
+
+| rpm | overlap pressure, car exhaust -> ambient | airflow change | torque change | MAP drop: car / model / ambient exhaust / ambient exhaust + R 0.692 |
+|---|---|---|---|---|
+| 7000 | 96 -> 94 kPa | -3.2 % | +1.2 % | 3.24 / 2.98 / 2.78 / 1.98 kPa |
+| 8000 | 111 -> 94 | -0.9 % | +1.5 % | 4.60 / 4.30 / 4.22 / 3.05 |
+| 8500 | 137 -> 94 | +4.4 % | +4.3 % | - / 5.30 / 5.84 / 4.26 |
+| 9000 | 148 -> 92 | +6.8 % | +4.2 % | 6.51 / 6.28 / 7.40 / 5.51 |
+| 9500 | 140 -> 83 | +6.1 % | +3.1 % | 7.38 / 6.81 / 7.95 / 5.93 |
+| 10000 | 141 -> 96 | +4.9 % | +2.9 % | 7.85 / 7.14 / 8.11 / 6.04 |
+
+- **The overlap pressure is worth 4-7 % of airflow and 3-4 % of torque at 8.5-10k.** That is larger than the 3 % first estimated from the junction variants, and it is where the model's torque is lowest against the dyno: the dyno peaks at 49.5-49.7 N.m at 8.5-8.6k, the model reads 46.6, and +4 % is 48.5.
+- **So the exhaust junction error is an engine-level error near the upper peak,** not a detail. A junction that passes less of the partner's pulse is the most valuable model fix identified so far.
+- **It does not explain the airflow gap by itself.** At 7-8k the model's overlap pressure is already near ambient, the ambient exhaust changes nothing, and the clean-wall restrictor still leaves the pressure drop 1.3-1.6 kPa short of the logs. With the ambient exhaust and R 0.692 the drop is 1.0-1.8 kPa short at every speed (rms 1.44 kPa); with R 0.572 it is within 0.26-0.89 kPa (rms 0.55).
+- The rough bore / airflow question therefore stays open, with a smaller remaining gap at 8.5-10k.
+- The "ambient exhaust" is a bound, not the car: the real exhaust has tuned waves, and Fluent's 3D port falls to 70-73 kPa by exhaust-valve closing at 9000.
+- Not settled on the 3D side: the intake + cylinder run that suggested 15-20 % more air was at 1.9 of 5 cycles with the plenum still draining from its ambient start.
