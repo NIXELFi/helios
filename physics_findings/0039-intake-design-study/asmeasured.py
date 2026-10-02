@@ -22,7 +22,7 @@ PORT = 0.080; INERT = 400.0; V_REAL, H_REAL = 1.826e-3, 140.9
 RPM_DYNO = list(range(4000, 12501, 250)); RPM_DESIGN = list(range(4000, 12501, 500))
 BASE = json.load(open(study.BASE))
 
-def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0):
+def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0, dump=False):
     if plenum:
         _, p = study.make_cfg(V=V_REAL, lenfac=H_REAL / 120.0); d = json.load(open(p))
     else:
@@ -30,6 +30,8 @@ def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0)
     if extra:                                                   # straight section added at the plenum floor (intake_bc.py's "big" case)
         prof = d["plenum"]["diameter_profile"]; prof.append([round(prof[-1][0] + extra, 6), prof[-1][1]]); d["plenum"]["length"] = prof[-1][0]
         d["plenum"]["volume"] = sum(math.pi / 12 * (x1 - x0) * (a * a + a * b + b * b) for (x0, a), (x1, b) in zip(prof, prof[1:]))
+    if dump:                                                    # plain cylinder of the same volume and height: the restrictor's exit velocity is lost, as in the 3D run
+        D = math.sqrt(4 * d["plenum"]["volume"] / (math.pi * d["plenum"]["length"])); d["plenum"]["diameter_profile"] = [[0.0, round(D, 6)], [d["plenum"]["length"], round(D, 6)]]
     if tune:
         for k in ("afr_map", "spark_advance_map"): d["physics"][k] = BASE["physics"][k]
     if runners:
@@ -51,7 +53,9 @@ DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), 
         "exh": (build("exh", exhaust=True), []), "all": (build("all", plenum=True, runners=OUTER14, exhaust=True), []),
         "all_sharp": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["intake_runner_entry_k=0.5"]),
         "all_big": (build("all_big", plenum=True, runners=OUTER14, exhaust=True, extra=0.093), []),      # 4.03 L, 234 mm: the 3D plenum check's big case
-        "all_mid": (build("all_mid", plenum=True, runners=OUTER14, exhaust=True, extra=0.040), [])}      # 2.77 L, 181 mm
+        "all_mid": (build("all_mid", plenum=True, runners=OUTER14, exhaust=True, extra=0.040), []),
+        "all_dump": (build("all_dump", plenum=True, runners=OUTER14, exhaust=True, dump=True), []),               # diag/plenum_recovery.py
+        "model_dump": (build("model_dump", dump=True), [])}      # 2.77 L, 181 mm
 DESIGN_CFG = build("design_plenum", plenum=True, tune=False)
 VPOS = [198.1, 223.1, 248.1, 273.1, 298.1]
 

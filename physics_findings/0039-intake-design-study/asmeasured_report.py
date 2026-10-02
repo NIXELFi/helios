@@ -14,7 +14,8 @@ H = core.H; OUT = os.path.join(H, "charts", "asmeasured"); os.makedirs(OUT, exis
 D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, "asmeasured.ndjson"))]); D = D[D.bt.notna()]
 dy = core.dyno(); ETA = 0.94
 NAMES = {"model": "as modelled (0036)", "plenum": "+ real plenum (1.83 L, 141 mm)", "intake": "+ real runners (252 / 230 mm)", "exh": "model intake + real exhaust",
-         "all": "all measured", "all_sharp": "all measured, sharp runner mouths"}
+         "all": "all measured", "all_sharp": "all measured, sharp runner mouths",
+         "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum"}
 NOTE = "1D engine model, 160-cell plenum, venturi inertance 400 1/m, logged AFR and spark maps. Wheel torque = brake torque x 0.94. Dyno: team chassis dyno, 25 rpm bins."
 
 def curve(case):

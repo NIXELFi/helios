@@ -394,3 +394,31 @@ Car pressure drop (engine-off MAP minus WOT MAP, Josh AX 4-26) against the ventu
 - **The 1D claim under test** (`intake_bc.py`, all-measured car): VE change big vs as-built +0.6 % at 6000, +1.3 % at 9000, -0.2 % at 11500 rpm. At 9000 the gain is on cylinders 2 and 3 (+1.9 / +2.3 %). Plenum pressure swing at the mouths falls 11.2 -> 6.6 kPa.
 - **What would overturn it:** more than about +3 % trapped mass at 9000, or a positive change at 11500.
 - `intake_bc/` holds the 1D valve, port, flange, mouth and plenum traces for a second, comparison run driven by the 1D valve flow.
+
+## Addendum (2026-10-01, late): the 1D plenum recovers pressure the real one does not; the two boundary errors cancel
+
+**Fluent's 3D whole-intake run (steady, all four runners drawing, `intake3d_all4.csv`).**
+- The MAP port reads the plenum average to within 45 Pa at every flow. Sensor position does not explain the car's pressure drop.
+- The plenum average is only 0.07-0.19 kPa above the static pressure at the restrictor exit plane. The restrictor's exit jet (1.1-3.1 kPa of dynamic pressure) is not recovered in the plenum.
+- The jet lands on the floor between the mouths and feeds the runners directly: total pressure 25 mm inside each runner is above plenum static.
+- Steady flow split 26.3 / 26.9 / 24.4 / 22.3 % for runners 1-4.
+
+**The 1D plenum does recover it** (`diag/plenum_recovery.py`). The plenum is a smooth dome-shaped duct from 38 mm to 167 mm, so the solver diffuses the exit velocity like an ideal diffuser: the MAP station sits 0.5-1.4 kPa above the exit plane, against 0.05-0.15 kPa in 3D.
+
+Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and logged tune:
+
+| rpm | car | 0036 as calibrated (20 cells, quasi-steady) | 0039 (160 cells, inertance) | 0039 + dump plenum |
+|---|---|---|---|---|
+| 7000 | 3.24 | 3.19 | 2.80 | 3.22 |
+| 8000 | 4.60 | 4.45 | 3.68 | 4.25 |
+| 9000 | 6.51 | 7.44 | 6.16 | 6.88 |
+| 9500 | 7.38 | 8.74 | 7.14 | 7.93 |
+| 10000 | 7.85 | 8.66 | 6.98 | 7.77 |
+| rms error | | 0.83 | 0.63 | 0.34 |
+
+- "Dump plenum" = a plain cylinder of the same volume and height, so the venturi discharges into the full area and its exit dynamic pressure is lost.
+- **With the inertance on and the dump plenum, the calibrated recovery R = 0.572 fits the car best** (0.62 and 0.66 give rms 0.53 and 0.97 kPa). The quasi-steady venturi under-delivered and the dome over-recovered; the two errors nearly cancelled in 0036.
+- **The 0039 runs with the inertance on and the dome plenum run the plenum 0.2-0.9 kPa too high**, so their absolute airflow is about 2 % high at 7-10k (plenum2, the as-measured set, the intake traces). Comparisons between designs are ratios in the same model and are not expected to move; `plenum3.py` checks the plenum-volume result on dump plenums.
+- The car-implied recovery at the exit plane stays 0.57. The gap to clean-wall CFD (0.69 in 2D, 0.65-0.66 in this coarser 3D mesh) is unchanged by the plenum and the sensor position; it stays with bore roughness or airflow.
+- **Consistent boundary to carry forward:** Cd 0.95, R 0.572, inertance 400 1/m, dump plenum, 160 cells. The drivetrain efficiency then needs a refit against the dyno (airflow falls about 2 %).
+- **Not modelled in 1D:** the jet feeding the runner mouths. One-runner-open 3D cases (planned) will give a usable mouth loss coefficient.
