@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
 import { Button, Card } from "../../components/ui";
 import { dashboard } from "../compute";
-import { latestBalance } from "../ledger";
 import { remaining } from "../../views/ApprovalsView";
 import { today } from "../../lib/dates";
 import { runWhatIf, whatIfText, type PaidFrom, type WhatIfLine, type WhatIfStart } from "../whatif";
@@ -32,12 +31,15 @@ export function WhatIfView({ fin, pur, flash }: FinanceProps) {
     available: d.summary?.available_cents ?? null,
     cards: Object.fromEntries(d.cards.filter((c) => c.account.active && c.account.credit_limit_cents).map((c) => [c.account.id, { name: accountLabel(c.account), remaining: c.headroom.remaining_cents }])),
     accounts: Object.fromEntries(fin.accounts.filter((a) => a.active && a.kind !== "checking" && a.kind !== "credit_card")
-      .map((a) => [a.id, { name: a.name, balance: latestBalance(fin.balances, a.id, asOf)?.balance_cents ?? null }])),
+      .map((a) => [a.id, { name: a.name, balance: d.funds.others.find((o) => o.account.id === a.id)?.balance_cents ?? null }])),
     budgets: Object.fromEntries(pur.budgets.filter((b) => b.budget_line_id).map((b) => [b.budget_line_id!, { name: `${b.project_code} ${b.name}`, remaining: remaining(b) }])),
   }), [d, fin, pur.budgets, asOf]);
   const steps = useMemo(() => runWhatIf(start, lines, cushion), [start, lines, cushion]);
   const stepOf = (id: string) => steps.find((s) => s.line.id === id);
   const last = [...steps].reverse().find((s) => !s.account);
+  // every account together, as the Overview's Available to spend: each ticked line moves it by its amount
+  const totalNow = d.funds.total_cents;
+  const totalAfter = totalNow === null ? null : totalNow + steps.reduce((t, s) => t + (s.line.direction === "out" ? -1 : 1) * s.line.cents, 0);
   const sources: [PaidFrom, string][] = [
     ["checking", `${d.checking?.name ?? "Checking"} (cash or check)`],
     ...Object.entries(start.cards).map(([id, c]) => [`card:${id}`, c.name] as [PaidFrom, string]),
@@ -61,9 +63,10 @@ export function WhatIfView({ fin, pur, flash }: FinanceProps) {
         today's figures on the Overview. Nothing here touches the books; the list is kept on this computer only.
       </p>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile label="Available now" value={<Money cents={start.available} />} note="As on the Overview" />
-        <Tile hero label="Available after" value={<Money cents={last ? last.available : start.available} />}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Tile hero label="All accounts after" value={<Money cents={totalAfter} />}
+          note={totalNow !== null && totalAfter !== null ? `Available to spend now ${fmtCents(totalNow)}, ASU accounts included${totalAfter !== totalNow ? `; ${totalAfter - totalNow >= 0 ? "+" : ""}${fmtCents(totalAfter - totalNow)}` : ""}` : "No Chase balance yet"} />
+        <Tile label={`${d.checking?.name ?? "Checking"} available after`} value={<Money cents={last ? last.available : start.available} />}
           note={last && start.available !== null && last.available !== null ? `${last.available - start.available >= 0 ? "+" : ""}${fmtCents(last.available - start.available)} from the ticked lines` : "Add a line below"} />
         <Tile label="Card left this cycle" value={<Money cents={firstCard?.remaining} />} note={firstCard ? firstCard.name : "No card"} />
         <div className="rounded-lg border border-helios-line bg-helios-panel p-4">

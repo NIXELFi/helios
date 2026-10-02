@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  available, cardHeadroom, reconcile, splitEvenly,
+  available, cardHeadroom, reconcile, splitEvenly, teamFunds,
   type Account, type BalanceEntry, type Reimbursement, type Txn,
 } from "../ledger";
 import { crc32, findDiscrepancies, type Evidence } from "../discrepancies";
@@ -34,6 +34,25 @@ const autopay = (cents: number, date: string) => [
 ];
 
 describe("ledger", () => {
+  it("Available to spend counts the ASU accounts, cash box and GoFundMe on top of Chase's Available", () => {
+    const deans: Account = { ...CHECKING, id: 3, name: "IC Dean's funding", kind: "university" };
+    const gift: Account = { ...CHECKING, id: 4, name: "Foundation gift", kind: "university" };
+    const box: Account = { ...CHECKING, id: 5, name: "Cash Box", kind: "holding" };
+    const held: Account = { ...CHECKING, id: 6, name: "Old account", kind: "university", active: false };
+    const gofund: Account = { ...CHECKING, id: 7, name: "GoFundMe", kind: "crowdfunding" };
+    const entries = [bal(1, deans.id, D, 20_000_00), bal(2, gift.id, D, 5_000_00), bal(3, box.id, D, 300_00),
+      bal(4, held.id, D, 9_999_00), bal(5, gift.id, "2026-09-05", 9_000_00, { confirmed: false })];
+    // cash paid out of the cash box after it was counted
+    const txns = [txn({ account_id: box.id, date: "2026-09-03", amount_cents: -50_00, kind: "withdrawal" })];
+    const f = teamFunds(txns, entries, [CHECKING, CARD, deans, gift, box, held, gofund], CHECKING, 5_750_00, "2026-09-10");
+    expect(f.others.map((o) => [o.account.name, o.balance_cents])).toEqual([
+      ["IC Dean's funding", 20_000_00], ["Foundation gift", 5_000_00], ["Cash Box", 250_00], ["GoFundMe", null],
+    ]);
+    expect(f.others_cents).toBe(25_250_00);
+    expect(f.total_cents).toBe(31_000_00);
+    expect(teamFunds(txns, entries, [CHECKING, deans], CHECKING, null, D).total_cents).toBeNull();
+  });
+
   it("the brief's worked example: $8,450 bank - $2,100 card - $600 owed = $5,750", () => {
     const s = available([charge(2100)], [bal(1, CHECKING.id, D, 8_450_00)], [owed(600_00)], CHECKING, [CARD], D);
     expect(s.bank_balance_cents).toBe(8_450_00);

@@ -11,6 +11,7 @@ import { normalizeVendor } from "../finance/importers";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { PasteDialog } from "../components/PasteDialog";
 import { OrderDialog } from "../components/OrderDialog";
+import { linkHref } from "../lib/links";
 import { inRange, rangeBounds, rangeSize, summarize, type CellRange, type CellValue } from "../lib/cellRange";
 import { Button, Empty, PrioritySelect, StatusSelect, SubteamChip, useConfirm } from "../components/ui";
 
@@ -694,6 +695,14 @@ function TabButton({ on, empty, onClick, children }: { on: boolean; empty?: bool
 }
 
 /** One editable cell. Saves on blur (or when paste dispatches a change) if the value changed. */
+/** "open" beside a product link; a click opens it without starting a cell selection. */
+function OpenLink({ href, className = "" }: { href: string; className?: string }) {
+  return (
+    <a className={`text-xs text-asu-gold hover:underline ${className}`} href={href} target="_blank" rel="noreferrer" title={href}
+      onMouseDown={(e) => e.stopPropagation()}>open</a>
+  );
+}
+
 function Cell({ item, col, edit, onSave }: { item: Item; col: string; edit: boolean; onSave: (v: string) => void }) {
   const initial =
     col === "quantity" ? (item.quantity ?? "").toString()
@@ -705,18 +714,21 @@ function Cell({ item, col, edit, onSave }: { item: Item; col: string; edit: bool
   if (initial !== shown) { setShown(initial); setValue(initial); }   // server refreshed
   const numeric = col === "quantity" || MONEY.has(col);
   if (!edit) {
-    return col === "product_url" && initial
-      ? <a className="block truncate px-2 text-asu-gold hover:underline" href={initial} target="_blank" rel="noreferrer">open</a>
+    const href = col === "product_url" ? linkHref(initial) : null;
+    return href
+      ? <div className="flex items-center gap-2 px-2 leading-8"><OpenLink href={href} /><span className="truncate text-helios-dim">{initial.replace(/^https?:\/\/(www\.)?/i, "")}</span></div>
       : <span className={`block truncate px-2 leading-8 ${numeric ? "text-right" : ""}`}>{initial}</span>;
   }
-  return (
+  const href = col === "product_url" ? linkHref(value) : null;
+  const field = (
     <input
       data-key={col}
-      className={`h-8 w-full bg-transparent px-2 outline-none hover:bg-white/[0.03] focus:bg-helios-strip focus:ring-1 focus:ring-asu-gold ${numeric ? "text-right" : ""} ${col === "title" ? "font-semibold" : ""}`}
+      className={`h-8 w-full bg-transparent px-2 ${href ? "pr-10" : ""} outline-none hover:bg-white/[0.03] focus:bg-helios-strip focus:ring-1 focus:ring-asu-gold ${numeric ? "text-right" : ""} ${col === "title" ? "font-semibold" : ""}`}
       type={col === "needed_by" ? "date" : "text"}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={(e) => { if (e.currentTarget.value !== initial) onSave(e.currentTarget.value); }}
     />
   );
+  return href ? <div className="relative">{field}<OpenLink href={href} className="absolute right-2 top-1/2 -translate-y-1/2" /></div> : field;
 }

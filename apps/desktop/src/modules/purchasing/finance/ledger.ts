@@ -234,6 +234,38 @@ export function available(txns: Txn[], entries: BalanceEntry[], reimbs: Reimburs
   };
 }
 
+// ------------------------------------------------------ all the team's money
+
+export interface FundsLine { account: Account; balance_cents: number | null; basis: BalanceEntry | null }
+export interface TeamFunds {
+  /** Chase's Available (bank - card owed - uncashed checks - reimbursements owed). */
+  checking_cents: number | null;
+  /** Every other active account with money in it: ASU, the cash box, GoFundMe... */
+  others: FundsLine[];
+  others_cents: number;
+  /** checking + others; null until Chase's balance is known. */
+  total_cents: number | null;
+}
+
+/**
+ * What the team can spend across every account: Chase's Available plus the
+ * last confirmed balance of each other active account (ASU accounts, the cash
+ * box, GoFundMe), moved by anything logged on it since. Cards aren't money
+ * (they're owed out of checking, already taken off Available), and an account
+ * with no balance entered yet adds nothing and is listed so it can be filled in.
+ */
+export function teamFunds(txns: Txn[], entries: BalanceEntry[], accounts: Account[], checking: Account | null, checkingAvailable: number | null, asOf: string): TeamFunds {
+  const confirmed = entries.filter((e) => e.confirmed);
+  const others = accounts
+    .filter((a) => a.active && a.kind !== "credit_card" && a.id !== checking?.id)
+    .map((a) => { const { balance, basis } = projectedBankBalance(txns, confirmed, a, asOf); return { account: a, balance_cents: balance, basis }; });
+  const othersCents = sum(others.map((o) => o.balance_cents ?? 0));
+  return {
+    checking_cents: checkingAvailable, others, others_cents: othersCents,
+    total_cents: checkingAvailable === null ? null : checkingAvailable + othersCents,
+  };
+}
+
 // -------------------------------------------------------- reconciliation
 
 export interface ReconRow {

@@ -41,6 +41,17 @@ follow [semver](https://semver.org/).
   Reimbursements, Delete on its row or request), with its receipts. A check or
   cash withdrawal already in the ledger for it stays there.
 
+### Changed
+
+- **Agora: Available to spend counts every account.** The Overview's headline
+  figure is now Chase's Available plus the latest balance of each ASU account
+  (dean's funding, the Foundation gift account), the cash box and GoFundMe,
+  with a "Where the money is" breakdown. Chase's own Available is still shown
+  next to it, and What if? starts from the same total.
+- **Agora: links in Abacus are clickable.** A product link shows an "open"
+  beside it, also on rows you can edit; a link typed without https:// still
+  opens.
+
 ## [6.0.2] - 2026-10-02
 
 ### Changed
