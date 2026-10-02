@@ -23,6 +23,12 @@ big["name"] = "as-measured, plenum + 93 mm straight section"
 CFG = {"asbuilt": os.path.join(H, "cfg", "ASMEASURED_all.json"), "big": os.path.join(H, "cfg", "ASMEASURED_all_bigplenum.json")}
 json.dump(big, open(CFG["big"], "w"), indent=1)
 GEO = {"asbuilt": base["plenum"], "big": big["plenum"]}
+# the same pair on DUMP plenums (plain cylinders: the restrictor's exit velocity is lost, diag/plenum_recovery.py) at the volumes
+# Fluent meshed (1.823 L / 140.9 mm, 3.863 L / 233.9 mm), and at more speeds: the bigger plenum moves the 8.5-9k peak down
+RPM_DUMP = [6000, 8000, 8500, 9000, 9500, 11500]
+for _n, _V, _L in [("asbuilt_dump", 1.823e-3, 0.1409), ("big_dump", 3.863e-3, 0.2339)]:
+    _d = json.loads(json.dumps(base)); _D = math.sqrt(4 * _V / (math.pi * _L)); _d["plenum"].update(volume=_V, length=_L, diameter_profile=[[0.0, round(_D, 6)], [_L, round(_D, 6)]])
+    _d["name"] = "as-measured, dump plenum " + _n; CFG[_n] = os.path.join(H, "cfg", f"ASMEASURED_{_n}.json"); json.dump(_d, open(CFG[_n], "w"), indent=1); GEO[_n] = _d["plenum"]
 
 def run(job):
     case, rpm = job; f = os.path.join(OUT, f"intake_{case}_{rpm}rpm.csv")
@@ -33,7 +39,7 @@ def run(job):
 
 if __name__ == "__main__":
     unthrottle(os.getpid())
-    with ThreadPoolExecutor(2) as ex: res = list(ex.map(run, [(c, r) for r in RPMS for c in CFG]))
+    with ThreadPoolExecutor(6) as ex: res = list(ex.map(run, [(c, r) for r in RPMS for c in ("asbuilt", "big")] + [(c, r) for r in RPM_DUMP for c in ("asbuilt_dump", "big_dump")]))
     cyl = base["cylinder"]; Vd = math.pi / 4 * cyl["bore"] ** 2 * cyl["stroke"]; rho = base["p_ambient"] / (287.0 * base["T_ambient"])
     rows = []
     for case, rpm, x in res:

@@ -17,6 +17,8 @@ D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, PRE + ".ndjson"))]
 R = np.array(sorted(D.rpm.unique()), float); TODAY = core.today()(R); assert np.array_equal(R, vc.R)
 POS = sorted(D[D.kind == "vrli"].pos.unique()); HEIGHTS = sorted(D.h.unique()); VOLS = sorted(D.V.unique())
 HC = {120: "#2a78d6", 165: "#eb6834", 213: "#1baf7a"}; HL = {120: "120 mm tall (today)", 165: "165 mm tall", 213: "213 mm tall (today + 93)"}
+if set(HEIGHTS) - set(HC):                                     # other height sets: ordinal ramp, light = short
+    HC = dict(zip(HEIGHTS, vc.RAMP[:len(HEIGHTS)] if len(HEIGHTS) <= 5 else plt.cm.Blues(np.linspace(0.35, 1, len(HEIGHTS))))); HL = {h: f"{h:.0f} mm tall" for h in HEIGHTS}
 NOTE = ("1D engine model, 160-cell plenum, venturi inertance 400 1/m, neutral tune. Gains vs today's intake in the same runs (1.44 L, 120 mm tall, fixed 248 mm runner). "
         "Runner lengths are above the head flange.")
 

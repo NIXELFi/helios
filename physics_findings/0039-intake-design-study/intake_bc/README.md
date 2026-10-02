@@ -61,3 +61,18 @@ Firing order 1-2-4-3 at 180° intervals. At `theta_deg` = 0, cylinder 1 is at it
 VE is referenced to ambient density. At 9000 rpm the gain is on the inner cylinders (2 and 3: +2.0 % and +2.2 %); the outer ones lose 0.4 %.
 
 Regenerated 2026-10-02: `mdot_valve` is now the mean over each 1° interval (from the cylinder's mass ledger). The earlier point samples chattered by 10-30 g/s between neighbouring degrees when cylinder and port pressure were close, which also put up to 0.6 % of error in the trapped-mass sums; the numbers above are the corrected ones.
+
+## Dump-plenum pair at Fluent's volumes (added 2026-10-02)
+
+`intake_{asbuilt_dump,big_dump}_{6000,8000,8500,9000,9500,11500}rpm.csv`: the same car with the plenum as a plain cylinder (the restrictor's exit velocity is lost, as the 3D steady run shows) at the meshed volumes, 1.823 L / 140.9 mm and 3.863 L / 233.9 mm. These are the traces to compare a 3D run against.
+
+| rpm | VE as-built | VE big | change | cylinders 1 & 4 | cylinders 2 & 3 | plenum swing at the mouths, as-built / big |
+|---|---|---|---|---|---|---|
+| 6000 | 0.926 | 0.942 | +1.7 % | +0.6 % | +2.9 % | 4.2 / 2.7 kPa |
+| 8000 | 0.926 | 0.959 | +3.6 % | +4.5 % | +2.6 % | 6.2 / 6.0 kPa |
+| 8500 | 0.917 | 0.991 | +8.1 % | +4.9 % | +11.1 % | 9.7 / 7.1 kPa |
+| 9000 | 0.943 | 0.932 | -1.2 % | -2.0 % | -0.1 % | 12.4 / 7.7 kPa |
+| 9500 | 0.951 | 0.933 | -1.9 % | -0.1 % | -3.8 % | 11.6 / 5.8 kPa |
+| 11500 | 0.812 | 0.814 | +0.2 % | +1.1 % | -0.4 % | 4.6 / 3.8 kPa |
+
+The bigger plenum moves the model's upper torque peak down from about 9.0-9.5k to 8.5k. A single-speed comparison at 9000 rpm sits on the falling side of that shift; 8500 rpm is where the 1D model predicts the large change.

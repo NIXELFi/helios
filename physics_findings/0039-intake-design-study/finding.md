@@ -531,3 +531,34 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
   - The full 150 mm range recovers +4.8 %.
 - **Design consequence:** the worst-case gain (+2.5 to +2.9 %) barely depends on the window, so the VRLI case does not hinge on the port length. Make the window adjustable by about 25 mm (spacers or trumpet length) and set it on the dyno.
 - These runs use the dome plenum; the window ranking is a comparison inside one model.
+
+## Addendum (2026-10-02): second dump-plenum batch, and why one speed is the wrong test for the plenum
+
+**Second batch (`plenum3.py`, 432 more runs), dump plenum, against 1.44 L / 120 mm / fixed runner:**
+
+| plenum | fixed runner: 6-12k / 10.5-12.5k | VRLI 198-298: worst / 6-12k | extra lost time per snap (6000 / 8500 rpm) |
+|---|---|---|---|
+| 1.83 L, 141 mm (the real one) | +0.1 / -0.3 % | +2.6 / +4.5 % | +3.5 / +4.1 ms |
+| 2.3 L, 141 mm | +0.4 / -0.1 % | +3.4 / +5.1 % | +7.8 / +8.1 ms |
+| 2.75 L, 165 mm | +0.4 / -0.2 % | +3.1 / +5.3 % | +11.8 / +11.2 ms |
+| 3.86 L, 234 mm (Fluent's big case) | +0.3 / -0.8 % | +3.9 / +5.6 % | +22.8 / +16.9 ms |
+
+- **Against the real plenum, bigger buys little in the model:** with a fixed runner under 0.3 % over 6-12k; for the VRLI +0.6 to +0.8 points at 2.3 L and +1.2 points at 3.86 L, for 4 and 13-19 ms of throttle response.
+- 2.3 L at the real height is the best value in the model: most of the VRLI gain for a third of the response cost.
+
+**The bigger plenum's effect in the model is a peak shift, not a level** (`intake_bc.py`, all-measured car, dump plenums at Fluent's meshed volumes):
+
+| rpm | VE, 1.823 L | VE, 3.863 L | change |
+|---|---|---|---|
+| 6000 | 0.926 | 0.942 | +1.7 % |
+| 8000 | 0.926 | 0.959 | +3.6 % |
+| 8500 | 0.917 | 0.991 | +8.1 % |
+| 9000 | 0.943 | 0.932 | -1.2 % |
+| 9500 | 0.951 | 0.933 | -1.9 % |
+| 11500 | 0.812 | 0.814 | +0.2 % |
+
+- The big plenum moves the model's upper peak from 9.0-9.5k down to 8.5k and sharpens it. The band average is about +1 %, but single speeds range from -2 to +8 %.
+- **The model's as-built plenum has a dip at 8.5k (VE 0.917) exactly where the real car's dyno curve peaks (8.6k).** The model with the big plenum peaks there. So the model is wrong about the as-built plenum near 8.5k, in the direction of the real plenum behaving like a larger, less coupled one.
+- That cuts both ways for the design question. The model may understate what the real 1.83 L plenum already does, and overstate what a bigger one adds at 8.5k. The model's plenum sensitivity near the upper peak is not trustworthy in either direction.
+- **For the 3D check:** 8500 rpm is the primary speed (model: +8 % trapped air, +11 % on cylinders 2 and 3), with 9000 or 9500 as the second (model: -1 to -2 %). The plenum pressure swing at the mouths is a direct test of the as-built model: 9.7 kPa peak-to-peak at 8500 and 12.4 at 9000 in 1D.
+- The earlier single-speed claim (+0.8 % at 9000 on the dome) is superseded by this table.
