@@ -314,3 +314,47 @@ This error lowers the model's plenum pressure at a given flow, so it cannot expl
   - The restrictor and VRLI rankings do not: they are ratios.
   - The absolute "+3-4 % available from the restrictor" exists only under A.
   - Under B the engine runs nearer choke at the top end (about 87 % of choked flow at 10k, against 77 %), so top-end gains from runner tuning would be smaller than modelled and the restrictor's Cd and recovery would matter more.
+
+## Addendum (2026-10-01, evening): a rough bore reproduces the car's pressure drop; the exhaust is longer than modelled
+
+**Third reading of the car data (C): the printed bore is rough.** Fluent ran the as-built wall at 120 and 200 um sand-grain roughness (`brief_A_CAD_KS120.csv`, `brief_A_CAD_KS200.csv`):
+
+| wall | Cd | R |
+|---|---|---|
+| smooth | 0.981 | 0.760 |
+| 20 um | 0.977 | 0.734 |
+| 60 um (reference A_CAD) | 0.965 | 0.692 |
+| 120 um | 0.957 | 0.648 |
+| 200 um | 0.953 | 0.615 |
+| car-fitted (0036) | 0.95 | 0.572 |
+
+Car pressure drop (engine-off MAP minus WOT MAP, Josh AX 4-26) against the venturi at the model's airflow, with the measured inlet loss (bare mouth + plate + thin shaft, K 0.30 on the 32 mm bore), kPa:
+
+| rpm | car | 60 um + inlet | 120 um + inlet | 200 um + inlet | 1D fit |
+|---|---|---|---|---|---|
+| 7000 | 3.24 | 2.56 | 2.93 | 3.21 | 3.26 |
+| 8000 | 4.60 | 3.34 | 3.83 | 4.19 | 4.26 |
+| 9000 | 6.51 | 5.26 | 6.05 | 6.63 | 6.77 |
+| 9500 | 7.38 | 5.86 | 6.75 | 7.40 | 7.56 |
+| 10000 | 7.85 | 5.85 | 6.73 | 7.38 | 7.54 |
+| rms error, 6.5-10k | | 1.25 | 0.63 | 0.25 | 0.22 |
+
+- 200 um plus the inlet loss fits the car as well as the fitted 1D boundary does. With the printed 19.8 mm throat, 120-200 um fits (rms 0.42 / 0.26 kPa).
+- This gives reading A a mechanism. It does not rule out B (more airflow, lower driveline efficiency): the same three measurements still separate them, plus a fourth, the bore finish itself.
+- **Is 200 um plausible?** Unknown. The part is PPA-CF at 0.08 mm layers; on a 3.65 degree wall the layer steps are about 5 um, so the roughness would have to come from the fibre-filled surface. A profilometer trace or a comparison plaque on the bore settles it.
+- **If C is right, bore finish is the largest restrictor gain available:** the same shape at 20 um recovers R 0.615 -> 0.734. Engine runs with the 200 um part as reference are queued (`fluent_engine_refA_CAD_KS200.csv`); from the existing runs the estimate is +3 to +4 % at the top end.
+- Check: `diag/car_intake_dp.py` conventions, fits from `fluent_ingest.py`.
+
+**Exhaust lengths from the assembly CAD (Fluent's cuts of SDM26Exhaust_Assm).**
+
+| pipe | CAD | 1D model |
+|---|---|---|
+| primary, valve to first merge | 479-483 mm | 423.9 mm |
+| secondary, merge to merge | 573-580 mm | 467.3 mm |
+| primary tube bore | 29.75 mm | 29.26 mm |
+| collector legs | 36.10 mm | 35.61 mm |
+| final collector | 103.9 mm | 110 mm cone + pipe |
+
+- Pairing 1&4 / 2&3 is confirmed.
+- The model's primaries are 12 % short and its secondaries 19 % short, so its exhaust tuning sits higher in rpm than the car's. 0036 was calibrated on the short pipes.
+- `asmeasured.py` now runs a dyno set (logged AFR and spark, 250 rpm steps): model, real plenum, real intake, real exhaust, all measured, all measured with sharp runner mouths. It compares each with the dyno curve. Queued behind the plenum sweep.

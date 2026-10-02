@@ -99,7 +99,7 @@ def main():
         R_ = np.array(rpms, float); base = res[("ratio", REF)]
         band = lambda Tq, lo, hi: (np.trapezoid(Tq[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) / np.trapezoid(base[(R_ >= lo) & (R_ <= hi)], R_[(R_ >= lo) & (R_ <= hi)]) - 1) * 100
         E = pd.DataFrame([dict(reference=REF, mode=m, geometry=g, top_10p5_12p5k=band(v, 10500, 12500), p1_6_12k=band(v, 6000, 12000), low_4_6k=band(v, 4000, 6000)) for (m, g), v in res.items()])
-        E.round(2).to_csv(os.path.join(out, "fluent_engine.csv"), index=False); print("\nengine torque vs the reference geometry (car-fitted level), %:"); print(E.round(2).to_string(index=False))
+        E.round(2).to_csv(os.path.join(out, "fluent_engine.csv" if "--ref" not in sys.argv else f"fluent_engine_ref{REF}.csv"), index=False); print("\nengine torque vs the reference geometry (car-fitted level), %:"); print(E.round(2).to_string(index=False))
 
 if __name__ == "__main__":
     main()
