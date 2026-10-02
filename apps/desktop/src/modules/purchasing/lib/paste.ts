@@ -25,8 +25,8 @@ export const PASTE_LABELS: Record<PasteField, string> = {
 const ALIASES: Record<PasteField, string[]> = {
   title: ["item", "item name", "name", "description", "product", "part description", "component", "title", "product description"],
   quantity: ["qty", "q", "quantity", "order qty", "quantity ordered", "qty ordered", "quantity requested"],
-  unit_price: ["unit price", "cost per unit", "price", "unit cost", "unit price usd", "price each", "each", "unit price $"],
-  tax_shipping: ["tax shipping", "tax and shipping", "shipping", "tax & shipping"],
+  unit_price: ["unit price", "cost per unit", "price", "unit cost", "unit price usd", "price each", "each", "unit price $", "unit $"],
+  tax_shipping: ["tax shipping", "tax and shipping", "shipping", "tax & shipping", "tax ship $"],
   total: ["total", "total cost", "ext price", "extended price", "total price", "ext price usd", "line total", "extended price usd"],
   vendor: ["vendor", "supplier", "distributor", "store"],
   funding_source: ["funding source", "funding", "paid from", "funding account"],

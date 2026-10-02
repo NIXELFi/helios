@@ -57,3 +57,10 @@ describe("purchasing paste", () => {
     expect(mapHeaders(["Item Name (short)", "Unit Cost ($)", "Qty.", "Needed by"])).toEqual(["title", "unit_price", "quantity", "needed_by"]);
   });
 });
+
+describe("Abacus's own copied rows", () => {
+  it("map back onto every column when pasted into a blank row", () => {
+    expect(mapHeaders(["Item", "Qty", "Unit $", "Tax/ship $", "Vendor", "Funding", "Part #", "Link", "Needed by", "Notes"]))
+      .toEqual(["title", "quantity", "unit_price", "tax_shipping", "vendor", "funding_source", "part_number", "product_url", "needed_by", "notes"]);
+  });
+});
