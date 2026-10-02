@@ -8,11 +8,11 @@ Measured exhaust (SDM26Exhaust_Assm): primaries 481 mm valve to merge (model 423
 
 Dyno set (logged AFR / spark maps, 250 rpm steps, fixed runner):
   model | plenum (real plenum) | intake (real plenum + runners 252/230 on cyl 1,4 / 2,3) | exh (model intake, real exhaust)
-  all (real intake + real exhaust) | all_sharp (all + runner entry K 0.5)
+  all (real intake + real exhaust) | all_sharp (all + runner entry K 0.5) | all_mid / all_big (all + 40 / 93 mm of straight plenum)
 Design set (neutral tune, 500 rpm steps, real plenum): fixed 248 mm runner and the VRLI at five positions.
 All with the venturi inertance on (400 1/m) and a 160-cell plenum. Resumable (asmeasured.ndjson).
 """
-import json, os, subprocess, sys
+import json, math, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 import study
 from nothrottle import unthrottle
@@ -22,11 +22,14 @@ PORT = 0.080; INERT = 400.0; V_REAL, H_REAL = 1.826e-3, 140.9
 RPM_DYNO = list(range(4000, 12501, 250)); RPM_DESIGN = list(range(4000, 12501, 500))
 BASE = json.load(open(study.BASE))
 
-def build(name, plenum=False, runners=None, exhaust=False, tune=True):
+def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0):
     if plenum:
         _, p = study.make_cfg(V=V_REAL, lenfac=H_REAL / 120.0); d = json.load(open(p))
     else:
         d = json.loads(json.dumps(BASE)); d["physics"].pop("afr_map", None); d["physics"].pop("spark_advance_map", None)
+    if extra:                                                   # straight section added at the plenum floor (intake_bc.py's "big" case)
+        prof = d["plenum"]["diameter_profile"]; prof.append([round(prof[-1][0] + extra, 6), prof[-1][1]]); d["plenum"]["length"] = prof[-1][0]
+        d["plenum"]["volume"] = sum(math.pi / 12 * (x1 - x0) * (a * a + a * b + b * b) for (x0, a), (x1, b) in zip(prof, prof[1:]))
     if tune:
         for k in ("afr_map", "spark_advance_map"): d["physics"][k] = BASE["physics"][k]
     if runners:
@@ -46,7 +49,9 @@ def build(name, plenum=False, runners=None, exhaust=False, tune=True):
 OUTER14 = [0.252, 0.230, 0.230, 0.252]
 DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), []), "intake": (build("intake", plenum=True, runners=OUTER14), []),
         "exh": (build("exh", exhaust=True), []), "all": (build("all", plenum=True, runners=OUTER14, exhaust=True), []),
-        "all_sharp": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["intake_runner_entry_k=0.5"])}
+        "all_sharp": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["intake_runner_entry_k=0.5"]),
+        "all_big": (build("all_big", plenum=True, runners=OUTER14, exhaust=True, extra=0.093), []),      # 4.03 L, 234 mm: the 3D plenum check's big case
+        "all_mid": (build("all_mid", plenum=True, runners=OUTER14, exhaust=True, extra=0.040), [])}      # 2.77 L, 181 mm
 DESIGN_CFG = build("design_plenum", plenum=True, tune=False)
 VPOS = [198.1, 223.1, 248.1, 273.1, 298.1]
 
