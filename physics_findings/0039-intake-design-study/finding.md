@@ -704,3 +704,20 @@ Fluent's lead: the 1D exhaust port sits at 136-148 kPa through overlap at 8.5-10
 - The rough bore / airflow question therefore stays open, with a smaller remaining gap at 8.5-10k.
 - The "ambient exhaust" is a bound, not the car: the real exhaust has tuned waves, and Fluent's 3D port falls to 70-73 kPa by exhaust-valve closing at 9000.
 - Not settled on the 3D side: the intake + cylinder run that suggested 15-20 % more air was at 1.9 of 5 cycles with the plenum still draining from its ambient start.
+
+**First settled-enough 3D intake numbers (Fluent, as-built plenum, 8500 rpm, bellmouths, cylinder behind each valve, cycle 2) against the 1D model:**
+
+| | 1D | 3D |
+|---|---|---|
+| plenum mean / swing | 92.0 kPa / 11.7 kPa | 91.35 / 12.7 kPa |
+| port pressure minimum | 52.5 kPa at 415° | 49-55 kPa near 430° |
+| port pressure peak | 129.1 kPa at 568° | 126-132 kPa at 555-560° |
+| port at BDC | 123.7 kPa, 348 K | 122.5-127.2 kPa, 326-329 K |
+| cylinder at BDC | 122.7 kPa, 389 K, 174 mg | 123.6 kPa, 360 K, 195 mg |
+| net air per cylinder | 160 mg | 185 mg |
+
+- **The pressure waves agree to a few kPa:** plenum mean and swing, port minimum, port peak and its timing, cylinder pressure at BDC. The as-built single-node plenum passes its first direct check; the test that would have shown it over-coupling (a much smaller 3D swing) did not.
+- **The 17 % difference in air is charge temperature, not pressure.** The 1D port gas is 20-21 K hotter and the cylinder 29 K hotter at BDC.
+- The 3D port gas is exactly isentropic from ambient (no heating at all, an upper bound on airflow). The 1D port gas is heated by blowback: at intake opening the 1D cylinder is at 185 kPa and 1119 K because its exhaust port is at 173 kPa, and the port gas reaches 654 K by 365°. This is the overlap-pressure error again, acting through hot gas re-inducted into the charge.
+- Woschni wall heat transfer in the 1D cylinder accounts for only about 8 K (2 %).
+- Working bracket at 8500 rpm: 1D 45 g/s is a lower bound, 3D 53-54 g/s an upper bound; the truth is probably +5 to +10 % over the 1D.
