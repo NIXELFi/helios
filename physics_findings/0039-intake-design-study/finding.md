@@ -721,3 +721,21 @@ Fluent's lead: the 1D exhaust port sits at 136-148 kPa through overlap at 8.5-10
 - The 3D port gas is exactly isentropic from ambient (no heating at all, an upper bound on airflow). The 1D port gas is heated by blowback: at intake opening the 1D cylinder is at 185 kPa and 1119 K because its exhaust port is at 173 kPa, and the port gas reaches 654 K by 365°. This is the overlap-pressure error again, acting through hot gas re-inducted into the charge.
 - Woschni wall heat transfer in the 1D cylinder accounts for only about 8 K (2 %).
 - Working bracket at 8500 rpm: 1D 45 g/s is a lower bound, 3D 53-54 g/s an upper bound; the truth is probably +5 to +10 % over the 1D.
+
+## Addendum (2026-10-02): the overlap pressure error is confirmed as the 1D exhaust model's
+
+Fluent reran the 3D exhaust (p125, 9000 rpm) with a cylinder behind an orifice at each exhaust valve, started from the 1D cylinder state, so the boundary is like-for-like. Settled to about 1 kPa.
+
+| at the exhaust valve, 9000 rpm | 3D, real valve | 3D, prescribed flow | 1D |
+|---|---|---|---|
+| overlap 322-365°, mean | 102-105 kPa | 101-103 kPa | 148-149 kPa |
+| minimum, at 365° | 75-76 kPa | 71-74 kPa | 113 kPa |
+| blowdown peak | 223-231 kPa | 233-235 kPa | 168 kPa |
+| cylinder pressure at exhaust-valve closing | 84-86 kPa | | 84-85 kPa |
+| pumping work over the exhaust stroke | -19.1 to -19.3 J | | -19.2 J |
+
+- **The boundary type was not the cause.** With a real valve the 3D port still sits about 45 kPa below the 1D through overlap and its blowdown peak is 55-60 kPa higher. Cylinder-side quantities over the whole stroke (pressure at closing, pumping work) agree; the overlap state does not.
+- In the 3D cylinder model, replacing the 1D exhaust trace by the 3D exhaust state cuts the burned gas pushed into the intake port from 3.5 to 0.35 mg at 9000 rpm (5.3 to 0.9 mg at 8500).
+- **Where the 1D differs is the return pass, not the first.** The partner's blowdown reaches the primary end and the closed valve with similar or higher amplitude in 3D (169-171 kPa at the primary ends against 151-155; 212 against 232 kPa at the closed valve). The wave coming back to the source primary is 125-129 kPa in 3D against 146-148 in 1D, while the source cylinder is still exhausting into the junction.
+- The 1D merge already has the collector's ejector effect (finding 0035), so the fix is not simply "less transmission". Station histories from the 3D final cycle are requested; the 1D stations on the corrected intake are in `exhaust_bc/stations_allmeasured_p125_9000rpm.csv`. The junction change will be opt-in and made against those histories.
+- **Minor model defect found on the way:** during gas exchange the 1D cylinder keeps burned-gas properties (R 295) until intake-valve closing. Mass and pressure are unaffected (mass is the integral of valve flow; gamma x R is 401 against 402), but the reported cylinder temperature during the intake stroke is 2.9 % low. At BDC at 8500 rpm the 1D cylinder is about 400 K, not 389 K. To be fixed with the junction work.
