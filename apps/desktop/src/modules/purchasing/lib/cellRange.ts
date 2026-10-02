@@ -34,5 +34,6 @@ export function summarize(values: CellValue[]): RangeSummary {
     else if ("number" in v) { s.numberCount++; s.numberSum += v.number; s.count++; }
     else if (v.text.trim()) s.count++;
   }
+  s.numberSum = Math.round(s.numberSum * 1e6) / 1e6;   // 0.1 + 0.2 shows as 0.3
   return s;
 }

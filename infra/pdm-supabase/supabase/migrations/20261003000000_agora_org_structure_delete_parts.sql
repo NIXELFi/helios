@@ -162,6 +162,19 @@ drop function if exists purchasing.car_subteam_from_budget();
 drop function if exists purchasing.set_car_subteam(uuid, uuid, boolean);
 drop table if exists purchasing.car_subteams;
 
+-- For 6.0.1 clients until they update: the old map is now the org structure.
+-- Reading it shows the org structure; set_car_subteam edits the org structure
+-- with its own rule (org.manage_structure). Remove in a later release.
+create view purchasing.car_subteams with (security_invoker = true) as
+  select project_id, subteam_id from pm.project_subteams;
+grant select on purchasing.car_subteams to authenticated, service_role;
+create or replace function purchasing.set_car_subteam(p_project uuid, p_subteam uuid, p_on boolean)
+returns void language sql security invoker set search_path = '' as $$
+  select pm.set_project_subteam(p_project, p_subteam, p_on);
+$$;
+revoke all on function purchasing.set_car_subteam(uuid, uuid, boolean) from public, anon;
+grant execute on function purchasing.set_car_subteam(uuid, uuid, boolean) to authenticated, service_role;
+
 -- add_items() as in 20261002000000 (plus funding_source), checking the org structure: a member
 -- adds parts only to a subteam the org structure puts on that car (or one
 -- that already has parts there). A car the org structure says nothing about
@@ -242,27 +255,79 @@ end; $$;
 
 -- 2. Deleting parts ----------------------------------------------------------------------
 
--- Execs: delete parts from the list. Not a part matched to a ledger charge:
--- unlink it in the Ledger first, so the books never lose their evidence. The
--- parts history (purchasing.events, which has no foreign key to items) keeps a
--- line saying who deleted what; approvals and notifications go with the part.
+-- Execs: delete parts that never got as far as spending money: planned,
+-- waiting for approval, denied, cancelled, or already had. An approved or
+-- ordered part is committed or spent and counts toward its budget, so it is
+-- cancelled (or its order undone) first; one exec deleting it would hide that
+-- spending. Not a part a reimbursement points at either. The parts history
+-- (purchasing.events, which has no foreign key to items) keeps who deleted it
+-- and the whole part as it was; approvals and notifications go with it.
 create or replace function purchasing.delete_items(p_ids uuid[])
 returns int language plpgsql security definer set search_path = '' as $$
 declare v_codes text; n int;
 begin
   if not purchasing.is_exec() then raise exception 'only execs delete parts' using errcode = '42501'; end if;
-  perform 1 from purchasing.items where id = any (p_ids) for update;
-  select string_agg(code, ', ') into v_codes from purchasing.items where id = any (p_ids) and finance_txn_id is not null;
+  perform 1 from purchasing.items where id = any (p_ids) order by id for update;
+  select string_agg(code, ', ' order by code) into v_codes from purchasing.items
+  where id = any (p_ids) and (finance_txn_id is not null or status not in ('PLANNED', 'READY', 'DENIED', 'CANCELLED', 'HAVE'));
   if v_codes is not null then
-    raise exception '% % matched to a ledger charge: unlink it in the Ledger first', v_codes,
-      case when position(',' in v_codes) > 0 then 'are' else 'is' end using errcode = '22023';
+    raise exception 'only parts that were never approved or ordered (or were cancelled) can be deleted: %. Cancel them, or undo the order, first.', v_codes
+      using errcode = '22023';
   end if;
-  insert into purchasing.events (actor_id, item_id, field, old_value, new_value)
-  select auth.uid(), id, 'deleted', code || ' ' || title, null from purchasing.items where id = any (p_ids);
+  select string_agg(i.code, ', ' order by i.code) into v_codes from purchasing.items i
+  where i.id = any (p_ids) and exists (select 1 from finance.reimbursements r where r.item_id = i.id);
+  if v_codes is not null then
+    raise exception '% % a reimbursement pointing at it', v_codes,
+      case when position(',' in v_codes) > 0 then 'have' else 'has' end using errcode = '22023';
+  end if;
+  perform purchasing.log_deleted(p_ids);
   delete from purchasing.items where id = any (p_ids);
   get diagnostics n = row_count;
   return n;
 end; $$;
 
+-- What a deleted part was, in its history: code, title, and the whole row
+-- with its split as JSON.
+create or replace function purchasing.log_deleted(p_ids uuid[])
+returns void language sql security definer set search_path = '' as $$
+  insert into purchasing.events (actor_id, item_id, field, old_value, new_value)
+  select auth.uid(), i.id, 'deleted', i.code || ' ' || i.title,
+         (to_jsonb(i) || jsonb_build_object('item_allocations',
+           (select coalesce(jsonb_agg(to_jsonb(a) - 'item_id'), '[]') from purchasing.item_allocations a where a.item_id = i.id)))::text
+  from purchasing.items i where i.id = any (p_ids);
+$$;
+
+-- Execs: empty Abacus so the old ledger can be restored (restore_ledger only
+-- fills an empty Agora). Only while the books are empty too: then no part's
+-- spending is recorded anywhere else, and the restore brings the parts list
+-- back. Every part is logged as above.
+create or replace function purchasing.clear_parts_for_restore()
+returns int language plpgsql security definer set search_path = '' as $$
+declare v_busy text; n int;
+begin
+  if not (finance.can_edit() and purchasing.is_exec()) then
+    raise exception 'only execs can empty Abacus for a restore' using errcode = '42501';
+  end if;
+  lock table purchasing.items in exclusive mode;
+  select string_agg(what, ', ') into v_busy from (
+    select format('%s ledger lines', count(*)) what from finance.transactions having count(*) > 0
+    union all select format('%s statements', count(*)) from finance.statements having count(*) > 0
+    union all select format('%s weekly balances', count(*)) from finance.balance_entries having count(*) > 0
+    union all select format('%s reimbursements', count(*)) from finance.reimbursements having count(*) > 0
+    union all select format('%s invoices', count(*)) from finance.evidence having count(*) > 0
+    union all select format('%s uploads', count(*)) from finance.imports having count(*) > 0
+  ) x;
+  if v_busy is not null then
+    raise exception 'the books already have %, so a restore can''t run and Abacus was left as it is', v_busy using errcode = '55000';
+  end if;
+  perform purchasing.log_deleted(array(select id from purchasing.items));
+  delete from purchasing.items where id is not null;
+  get diagnostics n = row_count;
+  return n;
+end; $$;
+
+revoke all on function purchasing.log_deleted(uuid[]) from public, anon, authenticated;
+revoke all on function purchasing.clear_parts_for_restore() from public, anon;
+grant execute on function purchasing.clear_parts_for_restore() to authenticated, service_role;
 revoke all on function purchasing.delete_items(uuid[]) from public, anon;
 grant execute on function purchasing.delete_items(uuid[]) to authenticated, service_role;

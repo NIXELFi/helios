@@ -45,10 +45,12 @@ follow [semver](https://semver.org/).
   range. Ticked rows show their combined total too.
 - **Abacus: a Funding column**, like the Airtable sheets' "Funding Source".
   Members fill it in for their own parts, and Airtable uploads bring it in.
-- **Agora: execs can delete parts from Abacus** (select, then Delete), except
-  parts matched to a ledger charge. The parts history notes who deleted what.
-  Bring in data offers to clear Abacus when its parts are all that stand in the
-  way of restoring the old ledger.
+- **Agora: execs can delete parts from Abacus** (select, then Delete): parts
+  that were never approved or ordered, or were cancelled. Approved and ordered
+  parts count toward budgets, so they're cancelled (or the order undone)
+  first. The parts history keeps the whole part and who deleted it. While the
+  books are still empty, Bring in data can clear Abacus so the old ledger can
+  be restored.
 
 ## [6.0.1] - 2026-10-02
 

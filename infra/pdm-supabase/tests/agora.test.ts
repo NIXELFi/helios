@@ -254,8 +254,8 @@ describe("agora follow-ups", () => {
     const aero = await subteam("Aero", "AERO");
     const aeroMember = await person("aero", "engineer", aero);
     expect((await aeroMember.p.rpc("add_items", { p_project: ev, p_subteam: aero, p_rows: [{ title: "v" }] })).error?.message).toMatch(/isn't on this car/);
-    // the old Agora-only map is gone
-    expect((await pur().from("car_subteams").select("*")).error).not.toBeNull();
+    // the old Agora-only map is gone: what's left is a view of the org structure
+    expect((await pur().from("car_subteams").select("project_id,subteam_id").eq("project_id", ev)).data).toEqual([{ project_id: ev, subteam_id: eng }]);
   });
 
   it("parts carry a funding source that members fill in and Airtable uploads keep", async () => {
@@ -270,23 +270,52 @@ describe("agora follow-ups", () => {
     ]);
   });
 
-  it("execs delete parts, except ones matched to a ledger charge, and the history says so", async () => {
+  it("execs delete parts that never got as far as spending, and the history keeps the whole part", async () => {
     const cfo = await person("cfo", "executive");
+    const chief = await person("chief", "executive");
     const member = await person("member", "engineer", daq);
-    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Test row" }, { title: "Charged part" }] });
-    const [test, charged] = ids as string[];
+    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_ready: true,
+      p_rows: [{ title: "Test row", quantity: 2, unit_price_cents: 150 }, { title: "Charged part" }, { title: "Ordered part" }, { title: "Reimbursed part" }] });
+    const [test, charged, ordered, reimbursed] = ids as string[];
     const { data: acct } = await fin().from("accounts").insert({ name: "Card", kind: "credit_card" }).select("id").single();
     const { data: t } = await fin().from("transactions").insert({ account_id: acct!.id, date: "2026-09-01", amount_cents: -500, kind: "charge" }).select("id").single();
     await pur().from("items").update({ finance_txn_id: t!.id }).eq("id", charged!);
+    for (const exec of [cfo, chief]) await exec.p.rpc("decide", { p_id: ordered, p_decision: "approve" });
+    await cfo.p.rpc("record_order", { p_ids: [ordered], p_order_id: "W1", p_payment: "Dean", p_total_cents: 250000, p_paid_by: "Dean" });
+    await fin().from("reimbursements").insert({ person_name: "Demo Member", reason: "x", amount_cents: 100, item_id: reimbursed });
 
     expect((await member.p.rpc("delete_items", { p_ids: [test] })).error).not.toBeNull();
-    expect((await cfo.p.rpc("delete_items", { p_ids: [test, charged] })).error?.message).toMatch(/matched to a ledger charge/);
+    // matched to a charge, or approved/ordered (spending that counts toward a budget): no
+    expect((await cfo.p.rpc("delete_items", { p_ids: [test, charged] })).error?.message).toMatch(/never approved or ordered/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [ordered] })).error?.message).toMatch(/never approved or ordered/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [reimbursed] })).error?.message).toMatch(/reimbursement/);
     const { data: n, error } = await cfo.p.rpc("delete_items", { p_ids: [test] });
     expect(error).toBeNull();
     expect(n).toBe(1);
-    expect((await pur().from("items").select("title")).data).toEqual([{ title: "Charged part" }]);
-    expect((await pur().from("events").select("field,old_value").eq("item_id", test!).eq("field", "deleted")).data)
-      .toEqual([{ field: "deleted", old_value: expect.stringMatching(/Test row$/) }]);
+    expect((await pur().from("items").select("title").order("title")).data!.map((r) => r.title)).toEqual(["Charged part", "Ordered part", "Reimbursed part"]);
+    const { data: ev } = await pur().from("events").select("old_value,new_value").eq("item_id", test!).eq("field", "deleted").single();
+    expect(ev!.old_value).toMatch(/Test row$/);
+    expect(JSON.parse(ev!.new_value!)).toMatchObject({ title: "Test row", quantity: 2, unit_price_cents: 150, item_allocations: [{ subteam_id: daq, percent: 100 }] });
+
+    // emptying Abacus for a restore: only while the books are empty
+    expect((await member.p.rpc("clear_parts_for_restore")).error).not.toBeNull();
+    expect((await cfo.p.rpc("clear_parts_for_restore")).error?.message).toMatch(/books already have/);
+    await fin().from("reimbursements").delete().gte("id", 0);
+    await pur().from("items").update({ finance_txn_id: null }).eq("id", charged!);
+    await fin().from("transactions").delete().gte("id", 0);
+    const { data: cleared, error: e2 } = await cfo.p.rpc("clear_parts_for_restore");
+    expect(e2).toBeNull();
+    expect(cleared).toBe(3);
+    expect((await pur().from("items").select("id")).data).toEqual([]);
+  });
+
+  it("6.0.1 clients still read and edit a car's subteams, now the org structure", async () => {
+    const cfo = await person("cfo", "executive");
+    const member = await person("member", "engineer", daq);
+    expect((await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true })).error).toBeNull();
+    expect((await member.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: false })).error).not.toBeNull();
+    const { data } = await member.p.from("car_subteams").select("project_id,subteam_id").eq("project_id", ic);
+    expect(data).toContainEqual({ project_id: ic, subteam_id: daq });
   });
 
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {

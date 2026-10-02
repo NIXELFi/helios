@@ -225,6 +225,10 @@ export async function setCarSubteam(c: SupabaseClient, projectId: string, subtea
   unwrap(await c.schema("pm").rpc("set_project_subteam", { p_project_id: projectId, p_subteam_id: subteamId, p_present: on }));
 }
 /** Execs: delete parts (not ones matched to a ledger charge). Returns how many went. */
+/** Execs, while the books are empty: delete every part so the old ledger can be restored. */
+export async function clearPartsForRestore(c: SupabaseClient): Promise<number> {
+  return unwrap(await P(c).rpc("clear_parts_for_restore")) as number;
+}
 export async function deleteItems(c: SupabaseClient, ids: string[]): Promise<number> {
   let n = 0;
   for (let k = 0; k < ids.length; k += 200) n += unwrap(await P(c).rpc("delete_items", { p_ids: ids.slice(k, k + 200) })) as number;

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { deleteItems, importItems, type Item } from "../../lib/api";
+import { clearPartsForRestore, importItems, type Item } from "../../lib/api";
 import { mapHeaders, looksLikeHeader, parseCsv, toRows, type NewRow } from "../../lib/paste";
 import { guessCar, guessSubteam } from "../../lib/airtableFiles";
 import { normalizeVendor } from "../importers";
@@ -41,16 +41,15 @@ function RestoreCard({ client, fin, pur, reload, flash, empty }: FinanceProps & 
     [fin.balances.length, "weekly balances"], [fin.reimbursements.length, "reimbursements"], [fin.evidence.length, "invoices"],
   ] as [number, string][]).filter(([n]) => n > 0);
   const onlyParts = blockers.length === 1 && pur.items.length > 0;
-  const linked = pur.items.filter((i) => i.finance_txn_id).length;
   async function clearAbacus() {
-    const ok = await ask({ title: `Delete all ${pur.items.length} parts in Abacus?`, confirmLabel: "Delete them all", danger: true,
-      body: "This empties Abacus so the old ledger can be restored (its parts list comes back with it). It can't be undone." });
+    const ok = await ask({ title: `Delete all ${pur.items.length} parts in Abacus?`, confirmLabel: `Delete all ${pur.items.length} parts`, danger: true,
+      body: `Every part in Abacus, on both cars, is deleted (each one is kept in the parts history) so the old ledger can be restored; the export's parts list comes back with it. This can't be undone. Do it only if ${file?.name ?? "the export"} is the right file.` });
     if (!ok) return;
     try {
-      const n = await deleteItems(client, pur.items.map((i) => i.id));
-      await reload();
-      flash(`Deleted ${n} parts. Abacus is empty: pick the export and restore.`);
+      const n = await clearPartsForRestore(client);
+      flash(`Deleted ${n} parts. Abacus is empty: check the cars and subteams below and restore.`);
     } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
+    await reload();
   }
   const [file, setFile] = useState<{ name: string; data: Export } | null>(null);
   const [cars, setCars] = useState<{ IC: string; EV: string; Team: string }>({ IC: "", EV: "", Team: "" });
@@ -125,8 +124,8 @@ function RestoreCard({ client, fin, pur, reload, flash, empty }: FinanceProps & 
           A restore only fills an empty Agora, and this one has {blockers.map(([n, what]) => `${n} ${what}`).join(", ")}.
           {onlyParts ? <>
             {" "}If those parts are test rows or a first try, clear Abacus and restore.
-            {linked > 0 && <> {linked} of them are matched to ledger charges and can't be deleted.</>}
-            <div className="mt-2"><Button kind="danger" onClick={() => void clearAbacus()}>Delete all {pur.items.length} parts in Abacus</Button></div>
+            <div className="mt-2 flex items-center gap-2"><Button kind="danger" disabled={!file} onClick={() => void clearAbacus()}>Delete all {pur.items.length} parts in Abacus</Button>
+              {!file && <span className="text-helios-dim">Pick the export first.</span>}</div>
           </> : <> Ledger lines, statements and balances can't be deleted here (that keeps the books safe), so use the Airtable upload below for parts lists, or ask Nick to clear the finance data first.</>}
         </div>
       )}

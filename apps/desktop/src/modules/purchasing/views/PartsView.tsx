@@ -45,7 +45,9 @@ const FIRST_COL = 2;
 
 /** What a cell holds, for the status bar's sum, average and count. */
 function cellValue(i: Item, key: string): CellValue {
-  if (key === "total") return { money: itemCost(i) };
+  // an unpriced part shows a blank Total, so it isn't a $0.00 in the sum, count and average
+  if (key === "total") return i.actual_total_cents === null && i.total_estimate_cents === null && (i.quantity === null || i.unit_price_cents === null)
+    ? null : { money: itemCost(i) };
   if (MONEY.has(key)) { const v = i[key as "unit_price_cents" | "tax_shipping_cents"]; return v === null ? null : { money: v }; }
   if (key === "quantity") return i.quantity === null ? null : { number: Number(i.quantity) };
   return { text: String((i as unknown as Record<string, unknown>)[key] ?? "") };
@@ -154,33 +156,58 @@ export function PartsView({
     try { await fn(); await reload(); if (label) flash(label); } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
   }
 
+  // A cell's save runs when it loses focus. The fill handle blurs the cell it
+  // starts from, so it waits for that save and copies what was just typed.
+  const pendingSave = useRef<Promise<unknown>>(Promise.resolve());
+  const savedPatch = useRef(new Map<string, Record<string, unknown>>());
+  useEffect(() => { savedPatch.current.clear(); }, [data.items]);
   function save(i: Item, key: string, raw: string) {
     const patch = toPatch(key, raw);
     if (!patch) { flash(`"${raw.trim()}" isn't a valid ${COLS.find((c) => c.key === key)?.label.toLowerCase() ?? "value"}. Nothing was changed.`, true); return; }
-    return run("", () => updateItem(client, i.id, patch));
+    savedPatch.current.set(i.id, { ...savedPatch.current.get(i.id), ...patch });
+    const p = run("", () => updateItem(client, i.id, patch));
+    pendingSave.current = p;
+    return p;
   }
 
   // ---- cell ranges: drag across cells (or shift-click) to add them up; drag
   // the corner square down to copy the cells into the rows below
   useEffect(() => { select(null); }, [tab, filter, q, projectId]);
   const rowsRef = useRef(rows); rowsRef.current = rows;
+  const applyFillRef = useRef<() => Promise<void>>(async () => {});
+  const flashRef = useRef(flash); flashRef.current = flash;
   useEffect(() => {
-    const up = () => { if (drag.current === "fill") void applyFill(); drag.current = null; };
+    // the module stays mounted while hidden: only act while the sheet is on screen
+    const shown = () => !!tableRef.current && tableRef.current.offsetParent !== null;
+    const up = () => { if (drag.current === "fill") void applyFillRef.current(); drag.current = null; };
     const outside = (e: MouseEvent) => { if (!tableRef.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest?.("[data-sheet-bar]")) select(null); };
+    // Escape clears a range wherever focus is (a drag blurs the cell), unless
+    // it's in a box outside the sheet (a dialog, the search)
+    const key = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || !rangeRef.current || !shown()) return;
+      const a = document.activeElement;
+      if (a && a !== document.body && !tableRef.current!.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+      select(null);
+    };
+    // a range of 2+ cells is copied as a range even while a cell in it has focus
     const copy = (e: globalThis.ClipboardEvent) => {
       const r = rangeRef.current;
-      if (!r || rangeSize(r) < 2 || (document.activeElement && tableRef.current?.contains(document.activeElement))) return;
+      if (!r || rangeSize(r) < 2 || !shown()) return;
       const { r0, r1, c0, c1 } = rangeBounds(r);
       const lines = rowsRef.current.slice(r0, r1 + 1).map((i) => COLS.slice(c0, c1 + 1).map((c) => cellText(i, c.key)).join("\t"));
       e.clipboardData?.setData("text/plain", lines.join("\n"));
       e.preventDefault();
-      flash(`Copied ${rangeSize(r)} cells.`);
+      flashRef.current(`Copied ${rangeSize(r)} cells.`);
     };
     document.addEventListener("mouseup", up);
     document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", key);
     document.addEventListener("copy", copy);
-    return () => { document.removeEventListener("mouseup", up); document.removeEventListener("mousedown", outside); document.removeEventListener("copy", copy); };
-  });
+    return () => {
+      document.removeEventListener("mouseup", up); document.removeEventListener("mousedown", outside);
+      document.removeEventListener("keydown", key); document.removeEventListener("copy", copy);
+    };
+  }, []);
   function cellAt(target: EventTarget): [number, number] | null {
     const td = (target as HTMLElement).closest?.("td");
     const id = (td?.parentElement as HTMLElement | null)?.dataset.id;
@@ -210,27 +237,44 @@ export function PartsView({
     (document.activeElement as HTMLElement | null)?.blur?.();
     window.getSelection()?.removeAllRanges();
   }
+  const filling = useRef(false);
   async function applyFill() {
     const r = rangeRef.current, to = fillRef.current;
     fillRef.current = null;
     setFillTo(null);
-    if (!r || to === null) return;
+    if (!r || to === null || filling.current) return;
+    filling.current = true;
+    try { await fillDown(r, to); } finally { filling.current = false; }
+  }
+  applyFillRef.current = applyFill;
+  async function fillDown(r: CellRange, to: number) {
+    // the cell the fill started from may still be saving what was typed in it
+    await pendingSave.current.catch(() => {});
+    const rows = rowsRef.current;
     const { r0, r1, c0, c1 } = rangeBounds(r);
     const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
     let skipped = 0;
     for (let t = r1 + 1; t <= to; t++) {
       // like Excel: the selected rows repeat down
-      const target = rows[t], from = rows[r0 + ((t - r0) % (r1 - r0 + 1))];
-      if (!target || !from) continue;
+      const target = rows[t], src = rows[r0 + ((t - r0) % (r1 - r0 + 1))];
+      if (!target || !src) continue;
+      const from = { ...src, ...savedPatch.current.get(src.id) } as Item;
       if (!canEdit(target)) { skipped++; continue; }
       const patch: Record<string, unknown> = {};
       for (let k = c0; k <= c1; k++) Object.assign(patch, fillPatch(from, COLS[k]!.key) ?? {});
       if (Object.keys(patch).length) updates.push({ id: target.id, patch });
     }
     if (!updates.length) { if (skipped) flash(`You can't edit ${skipped === 1 ? "that part" : "those parts"} (approved already, or another subteam's).`, true); return; }
-    await run(`Filled ${updates.length} row${updates.length === 1 ? "" : "s"}${skipped ? `; ${skipped} you can't edit were skipped` : ""}.`, async () => {
-      for (const u of updates) await updateItem(client, u.id, u.patch);
-    });
+    flash(`Filling ${updates.length} row${updates.length === 1 ? "" : "s"}...`);
+    let done = 0;
+    try {
+      for (const u of updates) { await updateItem(client, u.id, u.patch); done++; }
+      flash(`Filled ${done} row${done === 1 ? "" : "s"}${skipped ? `; ${skipped} you can't edit were skipped` : ""}.`);
+    } catch (e) {
+      const code = rows.find((x) => x.id === updates[done]?.id)?.code ?? "a part";
+      flash(`Filled ${done} of ${updates.length}, then ${code}: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+    await reload();
     select({ a: [r0, c0], b: [to, c1] });
   }
   const bounds = range ? rangeBounds(range) : null;
@@ -338,7 +382,7 @@ export function PartsView({
     } else if (bulk === "delete") {
       const pick = rows.filter((r) => selected.has(r.id));
       const ok = await ask({ title: `Delete ${pick.length} part${pick.length === 1 ? "" : "s"}?`, confirmLabel: "Delete", danger: true,
-        body: <>They're removed from Abacus for good (the parts history keeps a note of who deleted them). Parts matched to a ledger charge can't be deleted: unlink them in the Ledger first.
+        body: <>They're removed from Abacus for good (the parts history keeps the whole part and who deleted it). Only parts that were never approved or ordered, or were cancelled, can be deleted: approved and ordered parts count toward budgets, so cancel them or undo the order first.
           {pick.length <= 8 && <span className="mt-2 block text-xs">{pick.map((r) => `${r.code} ${r.title}`).join(", ")}</span>}</> });
       if (!ok) return;
       await run("", async () => { const n = await deleteItems(client, ids); flash(`Deleted ${n} part${n === 1 ? "" : "s"}.`); });
@@ -458,7 +502,11 @@ export function PartsView({
                     <td key={c.key} className={`relative border-b border-l border-helios-line ${c.className} ${on ? "bg-asu-gold/15" : filling ? "bg-asu-gold/[0.07] outline-dashed outline-1 -outline-offset-1 outline-asu-gold/60" : ""}`}>
                       {corner && (
                         <span title="Drag down to copy into the rows below" data-fill-handle=""
-                          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); drag.current = "fill"; fillRef.current = null; setFillTo(null); }}
+                          onMouseDown={(e) => {
+                            // save what's being typed in the cell first: the fill copies it
+                            (document.activeElement as HTMLElement | null)?.blur?.();
+                            e.stopPropagation(); e.preventDefault(); drag.current = "fill"; fillRef.current = null; setFillTo(null);
+                          }}
                           className="absolute -bottom-[3px] -right-[3px] z-20 size-[7px] cursor-crosshair border border-helios-base bg-asu-gold" />
                       )}
                       {c.key === "status" ? (
