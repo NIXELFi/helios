@@ -562,3 +562,21 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - That cuts both ways for the design question. The model may understate what the real 1.83 L plenum already does, and overstate what a bigger one adds at 8.5k. The model's plenum sensitivity near the upper peak is not trustworthy in either direction.
 - **For the 3D check:** 8500 rpm is the primary speed (model: +8 % trapped air, +11 % on cylinders 2 and 3), with 9000 or 9500 as the second (model: -1 to -2 %). The plenum pressure swing at the mouths is a direct test of the as-built model: 9.7 kPa peak-to-peak at 8500 and 12.4 at 9000 in 1D.
 - The earlier single-speed claim (+0.8 % at 9000 on the dome) is superseded by this table.
+
+## Addendum (2026-10-02): 3D exhaust run against the 1D model (in progress)
+
+Fluent's transient 3D exhaust (real pipe lengths, driven by the 1D valve flow, 9000 rpm, four cycles in) disagrees with the 1D model on wave timing.
+
+| | 3D | 1D |
+|---|---|---|
+| pressure at the valve over overlap (322-365°), mean | 101-103 kPa | 148 kPa |
+| blowdown peak at the valve | 233 kPa at 201° | 164 kPa at 180-200° |
+| blowdown front, valve to open end | 113° (811 m/s) | 137° (678 m/s) |
+| gas temperature, primary middle / secondary middle / final middle | 1120 / 1099 / 1053 K | 1026 / 970 / 940 K |
+| partner cylinder's blowdown at the closed valve | about 215 kPa | 232 kPa at 605° |
+
+- The 3D waves are about 20 % faster. The 1D gas is 90-130 K cooler, which explains about 6 %.
+- Not yet like-for-like: the 3D boundary prescribes valve mass flow, which reflects returning waves like a closed end while the valve is open; the 1D valve is an orifice into the cylinder. The closed-valve periods are comparable, and there the two agree on amplitude.
+- **Why it matters:** pressure at the exhaust valve during overlap sets residual gas and VE. If the 3D timing is right, the 1D model's exhaust tuning is about 25-30° late at 9000 rpm, which would also bear on the 4-8 % rpm offset against the dyno.
+- Discriminating number requested from Fluent: arrival of the partner pulse at the closed valve (1D: 605°).
+- No logged EGT is available to choose between the two gas temperatures. `exhaust_bc/stations_allmeasured_9000rpm.csv` holds the 1D stations (`driver/src/bin/exhstations.rs`).
