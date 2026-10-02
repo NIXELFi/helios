@@ -629,3 +629,21 @@ Fluent's transient 3D exhaust (real pipe lengths, driven by the 1D valve flow, 9
   - airflow level (recovery 0.572 against clean CFD 0.69);
   - model 2-4 N.m high above 10.5k and too shallow at 7-7.5k;
   - valve boundary flips step to step.
+
+## Addendum (2026-10-02): re-measured runners (260 / 256 mm) against the dyno, and the plenum claim restated again
+
+| case (all measured) | lower peak | upper peak | rms 7-10k | rms 5.5-12.5k |
+|---|---|---|---|---|
+| dyno | 5.9k | 8.6k | | |
+| runners 252 / 230 mm, 80 mm port (earlier "all measured") | 6.5k | 9.0k | 2.17 N.m | 2.87 N.m |
+| runners 260 / 256 mm, 80 mm port | 6.25k | 8.75k | 1.81 | 2.77 |
+| runners 260 / 256 mm, 100 mm port | 6.0k | 8.25-8.75k | 2.17 | 3.08 |
+
+- **The re-measured runners close about half of the rpm offset.** They are 8-26 mm longer than the lengths used before and do what the "100 mm port" case did: peaks at 6.25k and 8.75k, error over 7-10k down from 2.17 to 1.81 N.m.
+- **The head-port lead shrinks to about 10-15 mm.** With the correct runners, 100 mm puts the lower peak on the dyno's but takes the upper peak slightly past it. The 80 mm estimate is within the uncertainty; "about 115 mm" is withdrawn.
+- The amplitude errors are unchanged (trough at 7-7.5k too shallow, top end high).
+- The model's own "today" runner (248 mm) is about 10 mm shorter than the car's (258 mm mean). VRLI windows are absolute lengths to the trumpet lip and do not change; the gains quoted against "today" are against a slightly short baseline.
+
+**Plenum claim on the re-measured intake** (`intake_bc.py`, dump plenums 1.807 L and 3.847 L, VE as-built -> big): 6000 +0.9 %, 8000 +8.1 %, 8500 +0.9 %, 9000 -3.7 %, 9500 +0.5 %, 11500 -0.2 %.
+- The peak shift is now from about 9000 to about 8000 rpm, so the large change sits at 8000, not 8500. The speed at which the model shows the plenum effect moves with every geometry correction.
+- For the 3D check this argues for a short sweep (8000 / 8500 / 9000) and not one speed, and for the as-built pressure swing (7.6 / 11.7 / 12.3 kPa peak-to-peak in 1D) as the direct test of the model.

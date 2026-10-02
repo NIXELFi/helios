@@ -16,7 +16,7 @@ CFG = {"ports": study.BASE, "allmeasured": os.path.join(H, "cfg", "ASMEASURED_al
 def run(job):
     case, rpm = job; f = os.path.join(OUT, f"exhaust_{case}_{rpm}rpm.csv")
     p = subprocess.Popen([EXE, CFG[case], str(rpm), "20", "plenum_n_cells=160", "restrictor_inertance=400"], stdout=subprocess.PIPE, text=True); unthrottle(p.pid)
-    io.open(f, "w", newline="\n").write(p.communicate()[0]); x = pd.read_csv(f); dt = np.gradient(x.t_s.values)
+    out = p.communicate()[0]; assert out.count(chr(10)) > 700, f"{case} {rpm}: engine run returned no trace"; io.open(f, "w", newline="\n").write(out); x = pd.read_csv(f); dt = np.gradient(x.t_s.values)
     return dict(case=case, rpm=rpm, **{f"out{i}_mg": 1e6 * float(np.sum(x[f"mdot_valve{i}_kg_s"] * dt)) for i in range(1, 5)},
                 **{f"port{i}_mg": 1e6 * float(np.sum(x[f"mdot_port{i}_kg_s"] * dt)) for i in range(1, 5)},
                 max_jump_g_s=1000 * max(float(x[f"mdot_valve{i}_kg_s"].diff().abs().max()) for i in range(1, 5)),

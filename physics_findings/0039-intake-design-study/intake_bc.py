@@ -37,7 +37,7 @@ def run(job):
     case, rpm = job; f = os.path.join(OUT, f"intake_{case}_{rpm}rpm.csv")
     if not os.path.exists(f) or "--force" in sys.argv or ("--dump" in sys.argv and "dump" in case):
         p = subprocess.Popen([EXE, CFG[case], str(rpm), "20", "plenum_n_cells=160", "restrictor_inertance=400", "runner_mouth_extension=0.0000"], stdout=subprocess.PIPE, text=True)
-        unthrottle(p.pid); io.open(f, "w", newline="\n").write(p.communicate()[0])
+        unthrottle(p.pid); out = p.communicate()[0]; assert out.count(chr(10)) > 700, f"{case} {rpm}: engine run returned no trace"; io.open(f, "w", newline="\n").write(out)
     return case, rpm, pd.read_csv(f)
 
 if __name__ == "__main__":
