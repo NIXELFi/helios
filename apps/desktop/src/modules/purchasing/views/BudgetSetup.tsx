@@ -163,7 +163,7 @@ export function BudgetSetup({ client, data, reload, flash, done }: {
       <div className="flex flex-col gap-2">
         <div>
           <b className="text-sm">Subteams on each car</b>
-          <p className="text-xs text-helios-dim">The tabs Abacus shows for each car, and where members can add parts. A budget line or a part adds its subteam here by itself.</p>
+          <p className="text-xs text-helios-dim">The tabs Abacus shows for each car, and where members can add parts. A budget line, or a part an exec adds, puts its subteam here by itself. Until a car has any, members can add to every subteam; after that, only to these and ones that already have parts on the car, so tick all of a car's subteams at once.</p>
         </div>
         {projects.map((p) => {
           const mine = data.carSubteams.filter((x) => x.project_id === p.id).map((x) => x.subteam_id);

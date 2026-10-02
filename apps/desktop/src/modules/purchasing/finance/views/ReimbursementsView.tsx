@@ -94,7 +94,7 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
           </select>
           {pay.method === "check" && <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />}
           <label className="flex items-center gap-1 text-sm" title={LEDGER_HINT[pay.method]}>
-            <input type="checkbox" checked={pay.addToLedger || pay.method === "cash_box"}
+            <input type="checkbox" checked={pay.method === "cash_box" || (pay.addToLedger && !(pay.method === "check" && pickedPeople.size !== 1))}
               disabled={pay.method === "cash_box" || (pay.method === "check" && pickedPeople.size !== 1)}
               onChange={(e) => setPay({ ...pay, addToLedger: e.target.checked })} />
             {LEDGER_LABEL[pay.method]}
