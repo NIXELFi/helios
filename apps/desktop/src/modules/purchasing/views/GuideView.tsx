@@ -71,8 +71,8 @@ function Extra({ id, prefix, title, children }: { id: string; prefix: string; ti
 
 const PART_STEPS: Step[] = [
   { id: "planned", title: "Not ready to order", tag: "Planned", tone: "plan", who: "You",
-    what: <><p>Add the part to your subteam's tab in <b>Abacus</b> (pick your car first) as soon as you know you'll need it, even if the design isn't final. Nothing gets bought yet. This is the team's forecast.</p>
-      <p>Type it into the blank row, paste rows from Excel or a Mouser/Digikey cart, or <b>Upload CSV</b> (an Airtable export works). Include the link, part number and quantity.</p></>,
+    what: <><p>Add the part in <b>Abacus</b> as soon as you know you'll need it, even if the design isn't final. Nothing gets bought yet. This is the team's forecast.</p>
+      <p>Type it into the gold row at the top of the sheet and press Enter; the row stays there for the next one. Abacus opens on your subteam, and the car and subteam new parts go to are shown next to <b>+ New part</b>. You can also paste rows from Excel or a Mouser/Digikey cart into the gold row, or <b>Upload CSV</b> (an Airtable export works). Include the link, part number and quantity; "price?", "vendor?" and "link?" show what's still missing. Already sure? Set its status to "Ready: send for approval" before pressing Enter.</p></>,
     page: ["parts", "Open Abacus"] },
   { id: "ready", title: "Ready to order", tone: "ready", who: "You",
     what: <><p>When the design is settled and the part is priced, change its status to <b>Ready to order</b>. That sends it to the execs and they get a notification with your name on it.</p>
@@ -150,7 +150,8 @@ export function MemberGuide({ go }: { go: Go }) {
       <Extra id="tips" prefix={p} title="Tips">
         <p>Everyone can see all of Abacus, so check another subteam isn't already buying the same thing.</p>
         <p>One row per part. Put the link and the manufacturer part number in: they're how the order gets matched to its email and invoice.</p>
-        <p>Big list of small parts (DAQ boards!)? Copy them from the Mouser or Digikey cart and paste into the blank row, or upload the CSV.</p>
+        <p>Big list of small parts (DAQ boards!)? Copy them from the Mouser or Digikey cart and paste into the gold row, or upload the CSV.</p>
+        <p><b>Views</b>, as in Airtable: "By status" splits the sheet into Not ready, Ready to order, Ordered and so on; "My parts", "Ready to order" and "Missing info" do what they say. Change Group, Sort or Columns above the sheet, then <b>Save as a new view</b> to keep it, shared with the team or just for you. Click a group's arrow to fold it, or its box to tick every part in it.</p>
       </Extra>
     </div>
   );

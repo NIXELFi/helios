@@ -331,5 +331,8 @@ database. Ordering by `(ts, id)` would make it stable.
   person"), sets any status, records orders on unapproved or self-imported
   parts, deletes any part not matched to a charge, and moves parts between
   subteams (`purchasing.move_items`). No dashboard changes.
+- `20261005000000_agora_abacus_views.sql` adds `purchasing.views` (Abacus's
+  saved views: config JSON read by the app's `lib/views.ts`), with
+  `save_view` / `delete_view` (owner or exec). No dashboard changes.
 - In Phase A "spent" comes from recorded orders (`actual_total`). Once the
   ledger lands in Phase B it comes from statement lines instead.

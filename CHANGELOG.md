@@ -48,6 +48,22 @@ follow [semver](https://semver.org/).
   (dean's funding, the Foundation gift account), the cash box and GoFundMe,
   with a "Where the money is" breakdown. Chase's own Available is still shown
   next to it, and What if? starts from the same total.
+- **Agora: Abacus is quicker to fill in.** The new-part row is pinned at the
+  top of the sheet (no more scrolling to the bottom), and Enter adds the part
+  and keeps the row ready for the next one, with its priority, status and
+  vendor. Parts can be added from any tab: Abacus opens on a lead's own
+  subteam, and the car and subteam new parts go to are picked beside **+ New
+  part**. A new part can be sent for approval straight away. Empty price,
+  vendor and link cells on planned parts say "price?", "vendor?" and "link?".
+  The Item column stays put when scrolling sideways, and a **Why** column
+  holds the reason for the execs approving it.
+- **Agora: Abacus views, as in Airtable.** Built-in views (By status, Not
+  ready, Ready to order, On the way, Done, My parts, Missing info) and views
+  anyone can make: filter by status, priority, "mine" or missing info; group
+  by status, priority, vendor, subteam, who asked, needed-by or funding, with
+  counts and totals per group (fold a group, or tick all of it); sort; hide
+  columns. Views are shared with the team or kept to yourself; Abacus
+  remembers the view and tab you had open.
 - **Agora: links in Abacus are clickable.** A product link shows an "open"
   beside it, also on rows you can edit; a link typed without https:// still
   opens.

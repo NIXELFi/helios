@@ -382,6 +382,28 @@ describe("agora follow-ups", () => {
     expect((await fin().from("reimbursements").select("id")).data).toEqual([]);
   });
 
+  it("Abacus views: anyone on the team saves one; shared ones everyone sees; only the owner or an exec changes it", async () => {
+    const lead = await person("lead", "engineer", daq);
+    const other = await person("other", "engineer", daq);
+    const chief = await person("chief", "executive");
+    const config = { statuses: ["READY"], groupBy: "vendor", hidden: ["notes"] };
+    const { data: shared, error } = await lead.p.rpc("save_view", { p_id: null, p_name: "DAQ to order", p_config: config, p_shared: true });
+    expect(error).toBeNull();
+    const { data: mine } = await lead.p.rpc("save_view", { p_id: null, p_name: "Scratch", p_config: {}, p_shared: false });
+    expect((await other.p.from("views").select("name,config,owner_name")).data)
+      .toEqual([{ name: "DAQ to order", config, owner_name: expect.any(String) }]);
+    expect((await lead.p.from("views").select("name").order("name")).data!.map((v) => v.name)).toEqual(["DAQ to order", "Scratch"]);
+    // someone else can't change or delete it; an exec can
+    expect((await other.p.rpc("save_view", { p_id: shared, p_name: "Mine now", p_config: {}, p_shared: true })).error?.message).toMatch(/only whoever made/);
+    expect((await other.p.rpc("delete_view", { p_id: shared })).error?.message).toMatch(/only whoever made/);
+    expect((await chief.p.rpc("save_view", { p_id: shared, p_name: "DAQ: to order", p_config: config, p_shared: true })).error).toBeNull();
+    expect((await lead.p.rpc("save_view", { p_id: null, p_name: "  ", p_config: {}, p_shared: true })).error?.message).toMatch(/name/);
+    expect((await lead.p.rpc("save_view", { p_id: null, p_name: "Bad", p_config: [1], p_shared: true })).error).not.toBeNull();
+    expect((await lead.p.rpc("delete_view", { p_id: mine })).error).toBeNull();
+    expect((await pur().from("views").select("name")).data).toEqual([{ name: "DAQ: to order" }]);
+    await pur().from("views").delete().neq("id", NIL);
+  });
+
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);

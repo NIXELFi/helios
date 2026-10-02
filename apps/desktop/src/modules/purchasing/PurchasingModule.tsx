@@ -186,7 +186,7 @@ export function AgoraModule() {
           <Flash message={error ?? fin.error} error />
           <Flash message={flashMsg?.text ?? null} error={flashMsg?.error} />
           {loading || (isFinance && financeExec && fin.loading) ? <div className="text-sm text-helios-dim">Loading...</div>
-            : shown === "parts" ? <PartsView client={client} data={data} projectId={projectId} reload={reloadAll} flash={flash} focus={partFocus} />
+            : shown === "parts" ? <PartsView client={client} data={data} projectId={projectId} reload={reloadAll} flash={flash} focus={partFocus} userId={user?.id ?? null} />
             : shown === "approvals" ? <ApprovalsView client={client} data={data} userId={user?.id ?? null} reload={reloadAll} flash={flash} />
             : shown === "orders" ? <OrdersView client={client} data={data} reload={reloadAll} flash={flash} />
             : shown === "budgets" ? <BudgetsView client={client} data={data} projectId={projectId} openPart={openPart} openTxn={financeExec ? openTxn : undefined}

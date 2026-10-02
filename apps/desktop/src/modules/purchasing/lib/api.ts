@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@helios/auth";
 import type { NewRow } from "./paste";
+import type { SavedView, ViewConfig } from "./views";
 
 // Data layer for the Purchasing module. Reads come straight from the
 // `purchasing` schema (RLS returns only what the caller may see); every write
@@ -237,6 +238,19 @@ export async function deleteItems(c: SupabaseClient, ids: string[]): Promise<num
   for (let k = 0; k < ids.length; k += 200) n += unwrap(await P(c).rpc("delete_items", { p_ids: ids.slice(k, k + 200) })) as number;
   return n;
 }
+// ---- Abacus views (lib/views.ts): saved filters, grouping, sorting and hidden columns
+
+export async function fetchViews(c: SupabaseClient): Promise<SavedView[]> {
+  return unwrap(await P(c).from("views").select("id,name,config,shared,owner_id,owner_name").order("created_at"));
+}
+/** Create (id null) or change a view; its owner or an exec. Returns its id. */
+export async function saveView(c: SupabaseClient, v: { id: string | null; name: string; config: ViewConfig; shared: boolean }): Promise<string> {
+  return unwrap(await P(c).rpc("save_view", { p_id: v.id, p_name: v.name, p_config: v.config, p_shared: v.shared })) as string;
+}
+export async function deleteView(c: SupabaseClient, id: string): Promise<void> {
+  unwrap(await P(c).rpc("delete_view", { p_id: id }));
+}
+
 /** The CFO (purchasing.override): move parts to another car and subteam. Returns how many moved. */
 export async function moveItems(c: SupabaseClient, ids: string[], projectId: string, subteamId: string): Promise<number> {
   return unwrap(await P(c).rpc("move_items", { p_ids: ids, p_project: projectId, p_subteam: subteamId })) as number;
