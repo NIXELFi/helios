@@ -739,3 +739,30 @@ Fluent reran the 3D exhaust (p125, 9000 rpm) with a cylinder behind an orifice a
 - **Where the 1D differs is the return pass, not the first.** The partner's blowdown reaches the primary end and the closed valve with similar or higher amplitude in 3D (169-171 kPa at the primary ends against 151-155; 212 against 232 kPa at the closed valve). The wave coming back to the source primary is 125-129 kPa in 3D against 146-148 in 1D, while the source cylinder is still exhausting into the junction.
 - The 1D merge already has the collector's ejector effect (finding 0035), so the fix is not simply "less transmission". Station histories from the 3D final cycle are requested; the 1D stations on the corrected intake are in `exhaust_bc/stations_allmeasured_p125_9000rpm.csv`. The junction change will be opt-in and made against those histories.
 - **Minor model defect found on the way:** during gas exchange the 1D cylinder keeps burned-gas properties (R 295) until intake-valve closing. Mass and pressure are unaffected (mass is the integral of valve flow; gamma x R is 401 against 402), but the reported cylinder temperature during the intake stroke is 2.9 % low. At BDC at 8500 rpm the 1D cylinder is about 400 K, not 389 K. To be fixed with the junction work.
+
+**Overlay of the 3D and 1D exhaust station histories (p125, 9000 rpm; `diag/exhaust_match.py`, `diag/exhaust_match.csv`).** Fluent wrote its real-valve run in the 1D stations layout (`restrictor_opt/data/exhaust/stations_3d_cyl_p125_cycle4_9000rpm.csv`).
+
+| event (cylinder 1's angle) | 3D | 1D as modelled |
+|---|---|---|
+| other pair's pulse reaches the valve | 139° | 172° |
+| own blowdown at the primary end | 179 kPa at 207° | 156 kPa at 230° |
+| at the final merge | 128 kPa at 300° | 123 kPa at 320° |
+| return hump at the source primary end | 135-137 kPa at 260-270° | 144-147 kPa at 280-300° |
+| return hump at the source valve | 131-134 kPa at 310-320° | 169 kPa at 330-340° |
+| overlap mean at the valve | 104 kPa | 148 kPa |
+
+- **The error is mostly timing through the merges, not one amplitude.** Every event is 15-30° earlier in 3D. The returning hump is only about 10 kPa weaker in 3D; it arrives 20-30° sooner, so the 3D port is past the crest by overlap while the 1D port sits on it with the valve nearly shut.
+- On the first pass the 3D primary end reaches 179 kPa against 156: the ratio matches a primary discharging into one pipe area instead of the two-area trunk the model has.
+
+| 1D variant | rms vs 3D, 7 stations | overlap mean | other pair's step | primary-end first peak |
+|---|---|---|---|---|
+| as modelled | 23.0 kPa | 148 kPa | 172° | 156 kPa at 230° |
+| hot walls (1100 / 1050 / 1000 K) | 19.1 | 139 | 161° | 161 at 218° |
+| merge trunk at one pipe area (36.1 mm) | 22.0 | 143 | 171° | 151 at 221° |
+| hot + trunk 36.1 mm | 17.5 | 131 | 156° | 162 at 217° |
+| no wall heat loss + both trunks 36.1 mm | 19.0 | 121 | 160° | 144 at 212° |
+| exhaust grid x2, x4 | no change | | | |
+
+- Gas temperature plus a narrower merge trunk closes about 40 % of the gap (overlap 148 -> 131 kPa, torque at 9000 +1.8 %). The exhaust grid is converged.
+- **Unexplained:** the other pair's pulse still arrives 17° late (about 570 m/s over the 2.12 m path against 640 m/s in 3D) and overlap is still 27 kPa high.
+- Requested from Fluent: section-mean pressure, density and signed velocity on six planes around the two merges, to split each signal into incoming and outgoing waves and measure what the real merge does to a pulse. The junction model is not changed until then.
