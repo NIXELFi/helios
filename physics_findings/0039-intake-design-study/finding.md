@@ -603,3 +603,29 @@ Fluent's transient 3D exhaust (real pipe lengths, driven by the 1D valve flow, 9
 - **Overlap pressure is not explained by temperature** (147 -> 136 kPa against 101-103). Fluent's stations show why: the wave returning from the partner's closed valve is 125-129 kPa as it leaves the primary collector in 3D, 146-148 kPa in 1D. The 1D junction (momentum-mixing merge, finding 0035) passes too much of a pulse from one primary into its partner and back. This is the part that bears on scavenging.
 - Which gas temperature is right is open: the 3D mesh has no wall layers (too little heat loss); the 1D walls were fitted to the car's MAP ripple in 0036, not to a measured EGT.
 - **Hot exhaust against the dyno (70 runs, `charts/asmeasured/A4_exhaust_heat.png`):** walls at 1100 / 1050 / 1000 K or no wall heat loss change the torque curve by +0.5 % over 6-12k and move the upper peak from 9.0k to 8.75k. The error against the dyno at 7-10k falls from 2.13 to 1.90 N.m; the lower peak and the top end do not move. Exhaust gas temperature is not what puts the model's peaks 4-8 % high in rpm.
+
+## Scorecard (2026-10-02): the 1D model before and after the Fluent work
+
+"Before" is the 0036 calibrated model (20 plenum cells, quasi-steady venturi, dome plenum, estimated dimensions). "Now" is the all-measured geometry with 160 cells, venturi inertance and the dump plenum, same fitted recovery and driveline efficiency, not refitted. Wheel torque = brake x 0.94, team dyno, 250 rpm steps.
+
+| metric | before | now |
+|---|---|---|
+| dyno torque rms, 4.5-12.5k | 3.83 N.m (11.4 %) | 4.11 N.m (12.0 %) |
+| dyno torque rms, 5.5-12.5k | 2.25 N.m (5.2 %) | 2.67 N.m (6.5 %) |
+| same, after the best single scale factor | 2.25 N.m | 2.59 N.m |
+| dyno torque rms, 7-10k | 2.15 N.m (4.7 %) | 2.26 N.m (4.8 %) |
+| torque peaks (dyno 5.9k / 8.6k) | 6.5k / 9.0k | 6.5k / 9.0k |
+| intake pressure drop vs logged MAP, rms 7-10k | 0.83 kPa | 0.34 kPa |
+| constants fitted to car data | 3 (recovery, driveline efficiency, exhaust walls) | 3 (the same) |
+| geometry inputs estimated, not measured | about 6 | 2 (head port, cam lift law) |
+
+- **The match to the dyno torque curve has not improved.** The shape error is the same phase error; the level is about 3 % high because the corrected physics moved airflow and the driveline efficiency has not been refitted.
+- **What improved:** the intake pressure drop (two compensating boundary errors removed), plenum grid convergence (20 -> 160 cells), measured geometry, and the restrictor ranked on CFD.
+- **Known wrong, not fixed:**
+  - torque peaks 4-10 % high in rpm (lead: head port about 115 mm);
+  - single-node plenum (the as-built model dips at 8.5k where the dyno peaks);
+  - exhaust primary junction over-transmits between paired cylinders;
+  - waves through the secondaries and final merge 15-27° late against 3D;
+  - airflow level (recovery 0.572 against clean CFD 0.69);
+  - model 2-4 N.m high above 10.5k and too shallow at 7-7.5k;
+  - valve boundary flips step to step.

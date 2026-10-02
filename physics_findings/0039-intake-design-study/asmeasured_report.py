@@ -17,7 +17,8 @@ NAMES = {"model": "as modelled (0036)", "plenum": "+ real plenum (1.83 L, 141 mm
          "all": "all measured (80 mm port, 1.83 L)", "all_sharp": "all measured, sharp runner mouths",
          "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum",
          "all_port100": "all measured, 100 mm head port", "all_port120": "all measured, 120 mm head port",
-         "all_hotexh": "all measured, exhaust walls 1100/1050/1000 K", "all_adiabexh": "all measured, no exhaust heat loss"}
+         "all_hotexh": "all measured, exhaust walls 1100/1050/1000 K", "all_adiabexh": "all measured, no exhaust heat loss",
+         "all_r260": "all measured, runners 260 / 256 mm (bellmouth lip)", "all_r260_port100": "runners 260 / 256 mm, 100 mm port"}
 NOTE = "1D engine model, 160-cell plenum, venturi inertance 400 1/m, logged AFR and spark maps. Wheel torque = brake torque x 0.94. Dyno: team chassis dyno, 25 rpm bins."
 
 def curve(case):
@@ -66,6 +67,9 @@ if "all_port120" in C:
 if "all_hotexh" in C:
     panel("A4_exhaust_heat.png", [("all", "#2a78d6"), ("all_hotexh", "#eb6834"), ("all_adiabexh", "#1baf7a")], "Hotter exhaust gas in the model, against the dyno",
           "All-measured car with the calibrated exhaust walls (900 / 750 / 650 K), hotter walls, and no wall heat loss (closest to the 3D run's gas temperature).")
+if "all_r260" in C:
+    panel("A5_runner_remeasure.png", [("all", "#2a78d6"), ("all_r260", "#eb6834"), ("all_r260_port100", "#1baf7a")], "Re-measured runners (bellmouth lip to flange), against the dyno",
+          "All-measured car with runners 252 / 230 mm (floor to flange, no bellmouths) and 260 / 256 mm (lip to flange), the latter also with a 100 mm head port.")
 if "all_big" in C:
     panel("A3_plenum.png", [("all", "#2a78d6"), ("all_mid", "#eb6834"), ("all_big", "#1baf7a")], "A bigger plenum in the model, against the dyno",
           "All-measured car with the real plenum (1.83 L) and with 40 mm and 93 mm of straight section added (2.77 L, 4.03 L). The dyno is the real 1.83 L plenum.")

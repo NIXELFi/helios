@@ -49,6 +49,7 @@ def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0,
     q = os.path.join(H, "cfg", f"ASMEASURED_{name}.json"); json.dump(d, open(q, "w"), indent=1); return q
 
 OUTER14 = [0.252, 0.230, 0.230, 0.252]
+LIP = [0.2602, 0.2560, 0.2560, 0.2602]
 DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), []), "intake": (build("intake", plenum=True, runners=OUTER14), []),
         "exh": (build("exh", exhaust=True), []), "all": (build("all", plenum=True, runners=OUTER14, exhaust=True), []),
         "all_sharp": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["intake_runner_entry_k=0.5"]),
@@ -61,7 +62,10 @@ DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), 
         "all_port120": (build("all_port120", plenum=True, runners=OUTER14, exhaust=True, port=0.120), []),
         # Fluent's 3D exhaust runs 90-130 K hotter than the 1D (diag/exhaust_heat.py): hotter walls, and no wall heat loss at all
         "all_hotexh": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["primary_wall_t=1100", "secondary_wall_t=1050", "collector_wall_t=1000"]),
-        "all_adiabexh": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["exhaust_heat_transfer_multiplier=0.0"])}      # 2.77 L, 181 mm
+        "all_adiabexh": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["exhaust_heat_transfer_multiplier=0.0"]),
+        # re-measured with the bellmouths in (lip to flange): 260.2 mm on cylinders 1 and 4, 256.0 mm on 2 and 3
+        "all_r260": (build("all_r260", plenum=True, runners=LIP, exhaust=True), []),
+        "all_r260_port100": (build("all_r260_port100", plenum=True, runners=LIP, exhaust=True, port=0.100), [])}      # 2.77 L, 181 mm
 DESIGN_CFG = build("design_plenum", plenum=True, tune=False)
 VPOS = [198.1, 223.1, 248.1, 273.1, 298.1]
 

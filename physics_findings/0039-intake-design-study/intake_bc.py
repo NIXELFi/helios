@@ -26,13 +26,16 @@ GEO = {"asbuilt": base["plenum"], "big": big["plenum"]}
 # the same pair on DUMP plenums (plain cylinders: the restrictor's exit velocity is lost, diag/plenum_recovery.py) at the volumes
 # Fluent meshed (1.823 L / 140.9 mm, 3.863 L / 233.9 mm), and at more speeds: the bigger plenum moves the 8.5-9k peak down
 RPM_DUMP = [6000, 8000, 8500, 9000, 9500, 11500]
-for _n, _V, _L in [("asbuilt_dump", 1.823e-3, 0.1409), ("big_dump", 3.863e-3, 0.2339)]:
-    _d = json.loads(json.dumps(base)); _D = math.sqrt(4 * _V / (math.pi * _L)); _d["plenum"].update(volume=_V, length=_L, diameter_profile=[[0.0, round(_D, 6)], [_L, round(_D, 6)]])
+# 2026-10-02: runners re-measured bellmouth lip to flange (260.2 mm cylinders 1 and 4, 256.0 mm cylinders 2 and 3) and plenum gas
+# volume with the bellmouths in (1.807 L, 3.847 L); cfg/ASMEASURED_all_r260.json is written by asmeasured.py
+base_lip = json.load(open(os.path.join(H, "cfg", "ASMEASURED_all_r260.json")))
+for _n, _V, _L in [("asbuilt_dump", 1.807e-3, 0.1409), ("big_dump", 3.847e-3, 0.2339)]:
+    _d = json.loads(json.dumps(base_lip)); _D = math.sqrt(4 * _V / (math.pi * _L)); _d["plenum"].update(volume=_V, length=_L, diameter_profile=[[0.0, round(_D, 6)], [_L, round(_D, 6)]])
     _d["name"] = "as-measured, dump plenum " + _n; CFG[_n] = os.path.join(H, "cfg", f"ASMEASURED_{_n}.json"); json.dump(_d, open(CFG[_n], "w"), indent=1); GEO[_n] = _d["plenum"]
 
 def run(job):
     case, rpm = job; f = os.path.join(OUT, f"intake_{case}_{rpm}rpm.csv")
-    if not os.path.exists(f) or "--force" in sys.argv:
+    if not os.path.exists(f) or "--force" in sys.argv or ("--dump" in sys.argv and "dump" in case):
         p = subprocess.Popen([EXE, CFG[case], str(rpm), "20", "plenum_n_cells=160", "restrictor_inertance=400", "runner_mouth_extension=0.0000"], stdout=subprocess.PIPE, text=True)
         unthrottle(p.pid); io.open(f, "w", newline="\n").write(p.communicate()[0])
     return case, rpm, pd.read_csv(f)
