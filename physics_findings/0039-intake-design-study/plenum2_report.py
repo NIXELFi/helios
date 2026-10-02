@@ -10,8 +10,10 @@ import json, os, numpy as np, pandas as pd
 import core, vrli_common as vc
 from vrli_common import plt, head, TOP, INK, INK2, MUTED, SURF, DC, DC_LABEL, W_P1
 
-H = core.H; OUT = os.path.join(H, "charts", "plenum2"); os.makedirs(OUT, exist_ok=True); vc.OUT = OUT
-D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, "plenum2.ndjson"))]); D = D[D.bt.notna()]
+import sys
+PRE = sys.argv[1] if len(sys.argv) > 1 else "plenum2"        # "plenum3" = the dump-plenum check (plenum3.py)
+H = core.H; OUT = os.path.join(H, "charts", PRE); os.makedirs(OUT, exist_ok=True); vc.OUT = OUT
+D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, PRE + ".ndjson"))]); D = D[D.bt.notna()]
 R = np.array(sorted(D.rpm.unique()), float); TODAY = core.today()(R); assert np.array_equal(R, vc.R)
 POS = sorted(D[D.kind == "vrli"].pos.unique()); HEIGHTS = sorted(D.h.unique()); VOLS = sorted(D.V.unique())
 HC = {120: "#2a78d6", 165: "#eb6834", 213: "#1baf7a"}; HL = {120: "120 mm tall (today)", 165: "165 mm tall", 213: "213 mm tall (today + 93)"}
@@ -47,7 +49,7 @@ for h in HEIGHTS:
 T = pd.DataFrame(rows)
 
 # tip-in: full-torque time lost per snap, ms
-tp = os.path.join(H, "plenum2_tipin.ndjson"); TI = {}
+tp = os.path.join(H, PRE + "_tipin.ndjson"); TI = {}
 if os.path.exists(tp):
     for l in open(tp):
         x = json.loads(l); r0 = x["rows"][0]; rr = x["rows"][1:]; t = np.array([0.0] + [r["t"] for r in rr])
@@ -56,7 +58,7 @@ if os.path.exists(tp):
         T[f"lost_ms_{rpm}"] = [TI.get((V, h, rpm), np.nan) - TI.get((1.44, 120, rpm), np.nan) for V, h in zip(T.V, T.h)]
 cols = ["V", "h", "intake", "worst", "6-12k", "7-10.5k", "top 10.5-12.5k", "low 4-6k"] + [c for c in T if c.startswith("lost_ms")]
 pd.set_option("display.width", 220); print(T[T.intake.isin(["static 248", "VRLI 198-298"])][cols].round(2).to_string(index=False))
-T.round(3).to_csv(os.path.join(OUT, "plenum2_scores.csv"), index=False)
+T.round(3).to_csv(os.path.join(OUT, PRE + "_scores.csv"), index=False)
 
 def legend(fig, ax):
     hd, lb = ax.get_legend_handles_labels(); fig.legend(hd, lb, loc="upper left", bbox_to_anchor=(0.008, 1 - 0.95 / fig.get_figheight()), ncol=len(lb), fontsize=10, labelcolor=INK2, handlelength=1.6, columnspacing=2.2)

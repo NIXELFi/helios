@@ -486,3 +486,26 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - `exhwave.rs` and `intakewave.rs` now export the mean over each 1° interval from the cylinder's mass ledger; `exhaust_bc/` and `intake_bc/` are regenerated (no jumps over 30 g/s per degree, largest 23).
 - `exhaust_bc/exhaust_allmeasured_*.csv` adds the all-measured car (real exhaust lengths).
 - Owed: look at the valve boundary's step-to-step flip in the solver itself (it is a boundary that is not converged within the step). Not changed here.
+
+## Addendum (2026-10-02): plenum volume on the corrected (dump) plenum; the earlier pick is weakened
+
+`plenum3.py` repeats four plenums of the sweep with the plenum as a plain cylinder, so the restrictor's exit velocity is lost as the 3D run shows (432 runs + tip-in; `charts/plenum3/`). Gains are against 1.44 L / 120 mm / fixed runner on the same dump plenum.
+
+| plenum | fixed runner: worst / 6-12k / 10.5-12.5k | VRLI 198-298: worst / 6-12k / 10.5-12.5k | extra lost time per snap |
+|---|---|---|---|
+| 1.44 L, 120 mm, dome | 0 / 0 / 0 | +3.5 / +4.9 / +7.3 % | 0 |
+| 1.44 L, 120 mm, dump | 0 / 0 / 0 | +2.2 / +4.0 / +7.5 % | 0 |
+| 2.75 L, 120 mm, dome | -0.1 / +0.4 / -0.3 % | +3.9 / +5.6 / +8.1 % | +12.6 ms |
+| 2.75 L, 120 mm, dump | +0.2 / +0.7 / +0.2 % | +3.8 / +5.5 / +8.7 % | +12.2 ms |
+| 3.5 L, 120 mm, dome | 0.0 / +0.6 / -0.4 % | +3.4 / +5.7 / +7.9 % | +19.7 ms |
+| 3.5 L, 120 mm, dump | +0.3 / +0.9 / +0.3 % | +3.4 / +5.9 / +8.7 % | +19.0 ms |
+| 1.44 L, 213 mm, dome | -0.5 / -0.4 / -0.7 % | +2.5 / +4.1 / +7.0 % | 0 |
+| 1.44 L, 213 mm, dump | -0.7 / -0.6 / -1.4 % | +1.8 / +3.8 / +7.5 % | +1.4 ms |
+
+- **The sign at the top end flips.** On the dome a bigger plenum cost 0.3-0.4 % at 10.5-12.5k with a fixed runner; on the dump plenum it gains 0.2-0.3 %. Nick's objection ("the top end is where a bigger plenum should help") was right in sign; the size is small.
+- **Fixed runner: a bigger plenum is now a small gain everywhere above 6k,** +0.7 % (2.75 L) and +0.9 % (3.5 L) over 6-12k, +1.0 / +1.3 % at 7-10.5k, at the cost of 0.4 % below 6k.
+- **The VRLI loses more in a small plenum than the dome runs showed.** At 1.44 L its worst case falls from +3.5 to +2.2 % and 6-12k from +4.9 to +4.0 %; at 2.75 L and 3.5 L it is unchanged. So 1.44 -> 2.75 L is now worth about +1.5 points to the VRLI, against +0.6 on the dome.
+- **Throttle response is unchanged:** about +9.3 ms of lost full-torque time per snap per litre, roughly 1.2 % of torque-equivalent for 1.44 -> 2.75 L by the real-log estimate.
+- **Revised pick: do not go below about 1.8 L with the trumpets inside, and 2-2.75 L is defensible.** The VRLI gain (+1.5 points) and the throttle-response cost (about 1.2 %) of 1.44 -> 2.75 L roughly cancel; with a fixed runner the bigger plenum is a small net loss on the same estimate. The earlier "keep it small, do not spend the freed length on the plenum" is withdrawn as a firm recommendation.
+- A tall narrow plenum is still the worst shape (1.44 L / 213 mm).
+- Open, and decisive: the 3D check, and whether the model's single-node plenum over-couples the runners (the 4 L model fits the real 1.83 L car better). A second batch (1.83 L / 141 mm, 2.3 L / 141 mm, 2.75 L / 165 mm, 3.86 L / 234 mm on the dump plenum) is queued.

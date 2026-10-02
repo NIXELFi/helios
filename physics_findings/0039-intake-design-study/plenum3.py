@@ -8,7 +8,7 @@ from nothrottle import unthrottle
 
 H = plenum2.H; OUT, OUT_T = os.path.join(H, "plenum3.ndjson"), os.path.join(H, "plenum3_tipin.ndjson")
 def configs():
-    for V, h in [(1.44, 120), (2.75, 120), (3.5, 120), (1.44, 213)]:
+    for V, h in [(1.44, 120), (2.75, 120), (3.5, 120), (1.44, 213), (1.83, 141), (2.3, 141), (2.75, 165), (3.86, 234)]:   # second batch: the real plenum, two that house the trumpets, and Fluent's big case
         d = json.load(open(study.BASE)); d["physics"].pop("afr_map", None); d["physics"].pop("spark_advance_map", None)
         L = h / 1000; D = math.sqrt(4 * V * 1e-3 / (math.pi * L)); d["plenum"].update(volume=V * 1e-3, length=L, diameter_profile=[[0.0, round(D, 6)], [L, round(D, 6)]])
         d["name"] = f"dump plenum {V} L {h} mm"; p = os.path.join(H, "cfg", f"DUMP_V{V:.2f}_H{h}.json"); json.dump(d, open(p, "w"), indent=1)
