@@ -766,3 +766,37 @@ Fluent reran the 3D exhaust (p125, 9000 rpm) with a cylinder behind an orifice a
 - Gas temperature plus a narrower merge trunk closes about 40 % of the gap (overlap 148 -> 131 kPa, torque at 9000 +1.8 %). The exhaust grid is converged.
 - **Unexplained:** the other pair's pulse still arrives 17° late (about 570 m/s over the 2.12 m path against 640 m/s in 3D) and overlap is still 27 kPa high.
 - Requested from Fluent: section-mean pressure, density and signed velocity on six planes around the two merges, to split each signal into incoming and outgoing waves and measure what the real merge does to a pulse. The junction model is not changed until then.
+
+## Addendum (2026-10-02): the exhaust merges were placed 75.6 mm too far downstream; corrected
+
+Fluent cut the merge geometry from the wall mesh (`restrictor_opt/data/exhaust/merge_areas_cyl_p125.json`). At each 2-into-1 collector the two 36.10 mm legs run alone for 30.2 mm, then open into each other at the crotch, a figure-of-eight passage of 2.06 pipe areas. It contracts to one pipe area over the next 75.6 mm (the merge point) and then stays at 36.10 mm. The 0034 / as-measured layout put the junction at the merge point (481 mm from the valve) and the contraction after it, so both merges sat 75.6 mm too far downstream.
+
+**Corrected 1D layout** (`diag/exhaust_match2.py`): primaries end at the crotch (407.6 mm; the tube steps to 36.10 mm for the last 30.2 mm); secondaries are unchanged in length, running crotch to crotch with the measured contraction in their first 75.6 mm; the final pipe is 75.6 mm longer with the 50.7 mm neck. Total path is unchanged. Stations are matched to the 3D by distance from the valve (`driver/src/bin/exhpath.rs`).
+
+| 9000 rpm, against the 3D (real valves) | 3D | 1D as modelled | 1D, crotch | 1D, crotch + hot walls |
+|---|---|---|---|---|
+| rms over 10 stations | | 23.9 kPa | 18.9 | 9.6 |
+| other pair's pulse at the valve | 140° | 172° | 151° | 137° |
+| primary end (464 mm), first peak | 177 kPa at 208° | 154 at 230° | 174 at 227° | 175 at 211° |
+| partner's closed valve | 214 kPa at 238° | 231 at 247° | 228 at 224° | 248 at 238° |
+| returning wave at the valve | 134 kPa at 316° | 171 at 333° | 169 at 323° | 159 at 312° |
+| overlap mean (at 365°) | 105 (76) kPa | 148 (112) | 136 (91) | 115 (77) |
+| blowdown peak at the valve | 225 kPa | 168 | 206 | 254 |
+
+- **The geometry and the gas temperature together fix the timing:** every event within 3° of the 3D. Hot walls ("1100 / 1050 / 1000 K") give the 3D gas temperature. The 1D peaks at the valve face are now 25-35 kPa too high.
+- Port diameter (27.65 vs 29.75 mm), merge angle (10 vs 28°) and a linear vs measured contraction change nothing.
+- **Which gas temperature is right is still open:** the 3D mesh has no wall layers. Walls at 1000 / 900 / 800 K sit between (overlap 128 kPa, rms 13.9).
+
+**Engine level** (`exhaust_fix.py`, all-measured car, 250 rpm steps; `charts/asmeasured/exhaust_fix_bands.csv`, `exhaust_fix_map.csv`):
+
+| exhaust | 6-12k | 7-10.5k | 10.5-12.5k | 4-6k | upper peak | dyno rms 5.5-12.5k | dyno rms 7-10k | MAP drop rms 7-10k |
+|---|---|---|---|---|---|---|---|---|
+| junction at merge point (as modelled) | 0 | 0 | 0 | 0 | 46.6 N.m at 9.0k | 2.56 N.m | 1.71 N.m | 0.46 kPa |
+| junction at crotch | -0.2 % | +0.1 % | -2.9 % | -1.5 % | 47.5 at 8.75k | 2.26 | 1.58 | 0.36 |
+| crotch, walls 1000 / 900 / 800 K | +0.2 % | +0.7 % | -3.0 % | -1.4 % | 48.2 at 8.75k | 2.29 | 1.61 | 0.40 |
+| crotch, walls 1100 / 1050 / 1000 K | +0.4 % | +1.0 % | -2.9 % | -1.5 % | 48.6 at 8.5k | 2.30 | 1.65 | 0.40 |
+
+- **The corrected merges move the model toward the dyno:** the upper peak sharpens and moves to 8.5-8.75k (dyno 49.5 N.m at 8.6k), and the top end drops 3 % where the model was high.
+- The fit above 5.5k improves from 2.56 to 2.26 N.m and the MAP drop at 7-8k lands on the logs (3.19 / 4.57 against 3.24 / 4.60 kPa) with the car-fitted recovery.
+- **Not fixed:** the lower peak (dyno 47.5 N.m at 5.9k, model 44.5 at 6.0k), the trough at 7-7.5k, and the MAP drop at 9.5-10k (model 0.4-0.6 kPa short).
+- This replaces the exhaust layout of every earlier as-measured case. The primary-diameter comparison is being rerun on it (`primary_dia_crotch.py`).
