@@ -58,7 +58,10 @@ DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), 
         "model_dump": (build("model_dump", dump=True), []),
         # the head port (flange to valve seat) is an 80 mm estimate; the dyno's torque peaks sit 4-8 % lower in rpm than the model's
         "all_port100": (build("all_port100", plenum=True, runners=OUTER14, exhaust=True, port=0.100), []),
-        "all_port120": (build("all_port120", plenum=True, runners=OUTER14, exhaust=True, port=0.120), [])}      # 2.77 L, 181 mm
+        "all_port120": (build("all_port120", plenum=True, runners=OUTER14, exhaust=True, port=0.120), []),
+        # Fluent's 3D exhaust runs 90-130 K hotter than the 1D (diag/exhaust_heat.py): hotter walls, and no wall heat loss at all
+        "all_hotexh": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["primary_wall_t=1100", "secondary_wall_t=1050", "collector_wall_t=1000"]),
+        "all_adiabexh": (build("all", plenum=True, runners=OUTER14, exhaust=True), ["exhaust_heat_transfer_multiplier=0.0"])}      # 2.77 L, 181 mm
 DESIGN_CFG = build("design_plenum", plenum=True, tune=False)
 VPOS = [198.1, 223.1, 248.1, 273.1, 298.1]
 

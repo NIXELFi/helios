@@ -581,3 +581,24 @@ Fluent's transient 3D exhaust (real pipe lengths, driven by the 1D valve flow, 9
 - **Partner-pulse timing agrees (Fluent, cycle 4):** cylinder 4's blowdown peaks at cylinder 1's closed valve at 603° / 212 kPa in 3D against 605° / 232 kPa in 1D. The path between paired cylinders is right; "the 3D waves are 30° early" is withdrawn as a statement about the tuning.
 - What still differs is the open-valve period (blowdown peak, overlap mean), where the boundaries are not comparable, and the other pair's pulse through the final merge: 3D sees it at the closed valve at about 500°, 1D has steps at 465-470° (+23 kPa) and 525-530° (+46 kPa). Fluent will rerun with a cylinder-and-valve boundary on the exhaust. The overlap result is not a finding about scavenging yet.
 - No logged EGT is available to choose between the two gas temperatures. `exhaust_bc/stations_allmeasured_9000rpm.csv` holds the 1D stations (`driver/src/bin/exhstations.rs`).
+
+**Corrections from Nick via the Fluent agent (2026-10-02).**
+- The runner mouths have bellmouths inside the plenum (vault part `26_06_IN_BMTH_PRT_U`: 40 mm bore flaring to a 59 mm lip, 15 mm tall); the assembly export had dropped them. The model's entry K = 0.2 stands, and the "sharp runner mouths (K 0.5)" case is not the car.
+- Nick says the runners are equal length. The 252 / 230 mm measurement was floor to flange without the bellmouths and is being re-measured lip to flange. The as-measured cases here use 252 / 230 mm; the difference between them and equal runners was 0.2 % of torque.
+- Intake cylinder 1 is on the MAP-sensor side, as assumed.
+- Fluent's steady flow split and "the jet feeds the mouths" numbers were without bellmouths and are provisional.
+
+**Hotter exhaust gas in the 1D model (`diag/exhaust_heat.py`, 9000 rpm, all-measured car).**
+
+| case | gas T primary / secondary / final (K) | other pair's step at the closed valve | own blowdown peak | overlap mean at the valve | torque |
+|---|---|---|---|---|---|
+| as calibrated (walls 900 / 750 / 650 K) | 1026 / 970 / 940 | 528°, +46 kPa | 167 kPa | 147 kPa | 49.2 N.m |
+| half the wall heat loss | 1044 / 1015 / 1004 | 527°, +52 | 202 | 143 | 49.4 |
+| no wall heat loss | 1062 / 1085 / 1097 | 517°, +70 | 213 | 136 | 49.8 |
+| walls 1100 / 1050 / 1000 K | 1069 / 1074 / 1080 | 518°, +67 | 209 | 137 | 49.8 |
+| Fluent 3D | 1120 / 1099 / 1053 | 496-503°, +73 | 233 | 101-103 | |
+
+- With the 3D gas temperature the 1D model reproduces the size of the other pair's pulse (+70 against +73 kPa) and most of the blowdown peak, so those two differences were temperature, not the boundary type.
+- Timing: temperature moves the step 11° of the 27°. The rest is already present at the final merge (3D peaks there 16° ahead of 1D).
+- **Overlap pressure is not explained by temperature** (147 -> 136 kPa against 101-103). Fluent's stations show why: the wave returning from the partner's closed valve is 125-129 kPa as it leaves the primary collector in 3D, 146-148 kPa in 1D. The 1D junction (momentum-mixing merge, finding 0035) passes too much of a pulse from one primary into its partner and back. This is the part that bears on scavenging.
+- Which gas temperature is right is open: the 3D mesh has no wall layers (too little heat loss); the 1D walls were fitted to the car's MAP ripple in 0036, not to a measured EGT.

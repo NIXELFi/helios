@@ -16,7 +16,8 @@ dy = core.dyno(); ETA = 0.94
 NAMES = {"model": "as modelled (0036)", "plenum": "+ real plenum (1.83 L, 141 mm)", "intake": "+ real runners (252 / 230 mm)", "exh": "model intake + real exhaust",
          "all": "all measured (80 mm port, 1.83 L)", "all_sharp": "all measured, sharp runner mouths",
          "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum",
-         "all_port100": "all measured, 100 mm head port", "all_port120": "all measured, 120 mm head port"}
+         "all_port100": "all measured, 100 mm head port", "all_port120": "all measured, 120 mm head port",
+         "all_hotexh": "all measured, exhaust walls 1100/1050/1000 K", "all_adiabexh": "all measured, no exhaust heat loss"}
 NOTE = "1D engine model, 160-cell plenum, venturi inertance 400 1/m, logged AFR and spark maps. Wheel torque = brake torque x 0.94. Dyno: team chassis dyno, 25 rpm bins."
 
 def curve(case):
@@ -62,6 +63,9 @@ def panel(fname, show, title, sub):
 if "all_port120" in C:
     panel("A2_port_length.png", [("all", "#2a78d6"), ("all_port100", "#eb6834"), ("all_port120", "#1baf7a")], "A longer head port moves the model's torque peaks onto the dyno's",
           "All-measured car with the head port (flange to valve seat) at the model's 80 mm estimate, 100 mm and 120 mm.")
+if "all_hotexh" in C:
+    panel("A4_exhaust_heat.png", [("all", "#2a78d6"), ("all_hotexh", "#eb6834"), ("all_adiabexh", "#1baf7a")], "Hotter exhaust gas in the model, against the dyno",
+          "All-measured car with the calibrated exhaust walls (900 / 750 / 650 K), hotter walls, and no wall heat loss (closest to the 3D run's gas temperature).")
 if "all_big" in C:
     panel("A3_plenum.png", [("all", "#2a78d6"), ("all_mid", "#eb6834"), ("all_big", "#1baf7a")], "A bigger plenum in the model, against the dyno",
           "All-measured car with the real plenum (1.83 L) and with 40 mm and 93 mm of straight section added (2.77 L, 4.03 L). The dyno is the real 1.83 L plenum.")
