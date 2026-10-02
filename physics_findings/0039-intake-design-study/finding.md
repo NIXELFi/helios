@@ -509,3 +509,25 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - **Revised pick: do not go below about 1.8 L with the trumpets inside, and 2-2.75 L is defensible.** The VRLI gain (+1.5 points) and the throttle-response cost (about 1.2 %) of 1.44 -> 2.75 L roughly cancel; with a fixed runner the bigger plenum is a small net loss on the same estimate. The earlier "keep it small, do not spend the freed length on the plenum" is withdrawn as a firm recommendation.
 - A tall narrow plenum is still the worst shape (1.44 L / 213 mm).
 - Open, and decisive: the 3D check, and whether the model's single-node plenum over-couples the runners (the 4 L model fits the real 1.83 L car better). A second batch (1.83 L / 141 mm, 2.3 L / 141 mm, 2.75 L / 165 mm, 3.86 L / 234 mm on the dump plenum) is queued.
+
+## Addendum (2026-10-02): the VRLI window if the head port is 115 mm
+
+`portshift.py` (288 runs): real plenum (1.826 L, 141 mm, dome), neutral tune, inertance on, trumpet positions 148-298 mm in 25 mm steps, with the head port at 80 mm and at 115 mm. Each window is scored against the fixed 248 mm runner with the same port. Tables `charts/asmeasured/portshift.csv`, `portshift_all.csv`.
+
+| port | window | stroke | worst | 6-12k | 7-10.5k | 10.5-12.5k |
+|---|---|---|---|---|---|---|
+| 80 mm | 198-298 | 100 | +2.9 % | +4.6 % | +2.9 % | +7.8 % |
+| 80 mm | 173-273 | 100 | +1.8 % | +4.1 % | +1.8 % | +10.3 % |
+| 80 mm | 148-248 | 100 | +0.8 % | +3.3 % | +0.8 % | +10.3 % |
+| 115 mm | 198-298 | 100 | +2.9 % | +3.4 % | +4.9 % | +1.3 % |
+| 115 mm | 173-273 | 100 | +2.7 % | +3.8 % | +4.2 % | +2.7 % |
+| 115 mm | 148-248 | 100 | +2.5 % | +3.7 % | +3.0 % | +6.5 % |
+| 115 mm | 148-298 | 150 | +3.0 % | +4.8 % | +4.9 % | +6.5 % |
+
+- **The simple "shift everything 35 mm shorter" was wrong.** With the longer port the best window by worst case is still 198-298 mm, the best by 6-12k is 173-273 mm, and the three 100 mm windows are within 0.5 points of each other. The earlier statement that the window becomes about 163-263 mm is withdrawn.
+- **What a longer port does change:**
+  - The 100 mm stroke is worth less: +3.4 to +3.8 % over 6-12k instead of +4.6 %. A given travel is a smaller fraction of the total length.
+  - The engine wants a wider range, long (298) at 7-8k and short (148) at 11.5-12k, so a 100 mm stroke has to choose between midrange and top end. The top-end gain needs the 148 mm end.
+  - The full 150 mm range recovers +4.8 %.
+- **Design consequence:** the worst-case gain (+2.5 to +2.9 %) barely depends on the window, so the VRLI case does not hinge on the port length. Make the window adjustable by about 25 mm (spacers or trumpet length) and set it on the dyno.
+- These runs use the dome plenum; the window ranking is a comparison inside one model.
