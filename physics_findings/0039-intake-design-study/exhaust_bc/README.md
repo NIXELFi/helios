@@ -51,3 +51,21 @@ Firing order 1-2-4-3 at 180° intervals. At `theta_deg` = 0, cylinder 1 is at it
 | 9000 | 51.1 g/s | 110 g/s | 30-245 kPa | 1296 K |
 | 6000 | 30.1 g/s | 77 g/s | 44-161 kPa | 1119 K |
 | 11500 | 51.5 g/s | 100 g/s | 46-223 kPa | 1199 K |
+
+## Stations along the exhaust (added 2026-10-02)
+
+`stations_allmeasured_9000rpm.csv` (driver `driver/src/bin/exhstations.rs`): static pressure, static temperature and velocity at the start, middle and end of every primary, secondary and the final pipe, one cycle at 1°. `theta_deg` is cylinder 1's own crank angle.
+
+All-measured car, 9000 rpm, cylinder 1's path:
+
+| station | T mean (K) | T range (K) | flow-weighted T (K) | steepest pressure rise (deg) |
+|---|---|---|---|---|
+| primary start (valve) | 986 | 779-1203 | | 170 |
+| primary middle | 1026 | 864-1203 | 1085 | 181 |
+| primary end | 1012 | 877-1157 | 1050 | 199 |
+| secondary middle | 970 | 842-1048 | 985 | 226 |
+| secondary end | 949 | 902-1011 | 951 | 251 |
+| final middle | 940 | 894-1017 | 938 | 278 |
+| final end | 908 | 892-936 | | 307 |
+
+The blowdown front takes 137° (2.54 ms) from valve to open end over 1.722 m: 678 m/s.
