@@ -124,8 +124,8 @@ function RestoreCard({ client, fin, pur, reload, flash, empty }: FinanceProps & 
           A restore only fills an empty Agora, and this one has {blockers.map(([n, what]) => `${n} ${what}`).join(", ")}.
           {onlyParts ? <>
             {" "}If those parts are test rows or a first try, clear Abacus and restore.
-            <div className="mt-2 flex items-center gap-2"><Button kind="danger" disabled={!file} onClick={() => void clearAbacus()}>Delete all {pur.items.length} parts in Abacus</Button>
-              {!file && <span className="text-helios-dim">Pick the export first.</span>}</div>
+            <div className="mt-2 flex items-center gap-2"><Button kind="danger" disabled={!file || !count("line_items")} onClick={() => void clearAbacus()}>Delete all {pur.items.length} parts in Abacus</Button>
+              {(!file || !count("line_items")) && <span className="text-helios-dim">Pick the export first (one with its parts list).</span>}</div>
           </> : <> Ledger lines, statements and balances can't be deleted here (that keeps the books safe), so use the Airtable upload below for parts lists, or ask Nick to clear the finance data first.</>}
         </div>
       )}

@@ -286,8 +286,8 @@ describe("agora follow-ups", () => {
 
     expect((await member.p.rpc("delete_items", { p_ids: [test] })).error).not.toBeNull();
     // matched to a charge, or approved/ordered (spending that counts toward a budget): no
-    expect((await cfo.p.rpc("delete_items", { p_ids: [test, charged] })).error?.message).toMatch(/never approved or ordered/);
-    expect((await cfo.p.rpc("delete_items", { p_ids: [ordered] })).error?.message).toMatch(/never approved or ordered/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [test, charged] })).error?.message).toMatch(/can't be deleted/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [ordered] })).error?.message).toMatch(/can't be deleted/);
     expect((await cfo.p.rpc("delete_items", { p_ids: [reimbursed] })).error?.message).toMatch(/reimbursement/);
     const { data: n, error } = await cfo.p.rpc("delete_items", { p_ids: [test] });
     expect(error).toBeNull();

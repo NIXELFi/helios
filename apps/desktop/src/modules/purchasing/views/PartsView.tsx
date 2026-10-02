@@ -165,7 +165,8 @@ export function PartsView({
     const patch = toPatch(key, raw);
     if (!patch) { flash(`"${raw.trim()}" isn't a valid ${COLS.find((c) => c.key === key)?.label.toLowerCase() ?? "value"}. Nothing was changed.`, true); return; }
     savedPatch.current.set(i.id, { ...savedPatch.current.get(i.id), ...patch });
-    const p = run("", () => updateItem(client, i.id, patch));
+    // a refused save leaves nothing for a fill to copy
+    const p = run("", async () => { try { await updateItem(client, i.id, patch); } catch (e) { savedPatch.current.delete(i.id); throw e; } });
     pendingSave.current = p;
     return p;
   }
@@ -312,7 +313,7 @@ export function PartsView({
       const tax = requireCents(draft.tax_shipping_cents, "tax/shipping"); if (tax !== null) row.tax_shipping_cents = tax;
       const tot = requireCents(draft.total, "total"); if (tot !== null) row.total_estimate_cents = tot;
     } catch (e) { flash((e as Error).message, true); return; }
-    for (const k of ["vendor", "part_number", "product_url", "notes", "needed_by", "priority"] as const) if (draft[k]) row[k] = draft[k];
+    for (const k of ["vendor", "funding_source", "part_number", "product_url", "notes", "needed_by", "priority"] as const) if (draft[k]) row[k] = draft[k];
     await run(`Added ${row.title}`, () => addItems(client, projectId, tab, [row], false));
     setDraft({});
     window.setTimeout(() => tableRef.current?.querySelector<HTMLInputElement>("tr[data-new] input")?.focus(), 50);
@@ -382,7 +383,7 @@ export function PartsView({
     } else if (bulk === "delete") {
       const pick = rows.filter((r) => selected.has(r.id));
       const ok = await ask({ title: `Delete ${pick.length} part${pick.length === 1 ? "" : "s"}?`, confirmLabel: "Delete", danger: true,
-        body: <>They're removed from Abacus for good (the parts history keeps the whole part and who deleted it). Only parts that were never approved or ordered, or were cancelled, can be deleted: approved and ordered parts count toward budgets, so cancel them or undo the order first.
+        body: <>They're removed from Abacus for good (the parts history keeps the whole part and who deleted it). Approved and ordered parts can't be deleted (they count toward budgets): cancel them, or undo the order, first. Nor can parts matched to a ledger charge or a reimbursement.
           {pick.length <= 8 && <span className="mt-2 block text-xs">{pick.map((r) => `${r.code} ${r.title}`).join(", ")}</span>}</> });
       if (!ok) return;
       await run("", async () => { const n = await deleteItems(client, ids); flash(`Deleted ${n} part${n === 1 ? "" : "s"}.`); });
@@ -401,9 +402,9 @@ export function PartsView({
       return;
     } else if (bulk === "copy") {
       const pick = rows.filter((r) => selected.has(r.id));
-      const lines = [["Item", "Qty", "Unit $", "Tax/ship $", "Vendor", "Part #", "Link", "Needed by", "Notes"].join("\t")].concat(
+      const lines = [["Item", "Qty", "Unit $", "Tax/ship $", "Vendor", "Funding", "Part #", "Link", "Needed by", "Notes"].join("\t")].concat(
         pick.map((r) => [r.title, r.quantity ?? "", centsToInput(r.unit_price_cents), centsToInput(r.tax_shipping_cents), r.vendor ?? "",
-          r.part_number, r.product_url, r.needed_by ?? "", r.notes].map((v) => String(v).replace(/[\t\n]/g, " ")).join("\t")));
+          r.funding_source ?? "", r.part_number, r.product_url, r.needed_by ?? "", r.notes].map((v) => String(v).replace(/[\t\n]/g, " ")).join("\t")));
       await navigator.clipboard.writeText(lines.join("\n"));
       flash(`Copied ${pick.length} row(s). Paste them into another tab's blank row, or into Excel.`);
       return;

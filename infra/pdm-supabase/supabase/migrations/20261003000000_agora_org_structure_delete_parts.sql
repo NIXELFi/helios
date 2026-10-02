@@ -258,8 +258,8 @@ end; $$;
 -- Execs: delete parts that never got as far as spending money: planned,
 -- waiting for approval, denied, cancelled, or already had. An approved or
 -- ordered part is committed or spent and counts toward its budget, so it is
--- cancelled (or its order undone) first; one exec deleting it would hide that
--- spending. Not a part a reimbursement points at either. The parts history
+-- cancelled (or its order undone) first, a separate step that shows in its
+-- history. Not a part a reimbursement points at either. The parts history
 -- (purchasing.events, which has no foreign key to items) keeps who deleted it
 -- and the whole part as it was; approvals and notifications go with it.
 create or replace function purchasing.delete_items(p_ids uuid[])
@@ -271,7 +271,7 @@ begin
   select string_agg(code, ', ' order by code) into v_codes from purchasing.items
   where id = any (p_ids) and (finance_txn_id is not null or status not in ('PLANNED', 'READY', 'DENIED', 'CANCELLED', 'HAVE'));
   if v_codes is not null then
-    raise exception 'only parts that were never approved or ordered (or were cancelled) can be deleted: %. Cancel them, or undo the order, first.', v_codes
+    raise exception 'approved, ordered and charge-matched parts can''t be deleted: %. Cancel them, or undo the order, first.', v_codes
       using errcode = '22023';
   end if;
   select string_agg(i.code, ', ' order by i.code) into v_codes from purchasing.items i
