@@ -59,6 +59,13 @@ follow [semver](https://semver.org/).
   subteams; pick SDM27e and it shows the EV ones. Execs add a subteam to a car
   from the tab bar or Budgets > Set up budgets, and members can only add parts
   to a subteam that's on that car.
+- **Agora: What if?** (Finance, execs only). List big possible expenses (and
+  money expected in), each paid from checking, the card or another account and
+  optionally against a budget line, and see what Available, the card's room
+  this cycle, the budget line and that account would be after each one,
+  building on the ones above. It warns when anything goes negative, over the
+  card's limit or below a cushion you set; untick a line to leave it out. It
+  never touches the books, and "Copy as text" gives a summary for the meeting.
 - **Agora: undo an order.** An order recorded by mistake can be undone (Orders &
   tracking, or the parts list's actions): the parts go back to Approved.
 - **Agora: change an account's type, or delete it.** Accounts can now be

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconBuildingBank, IconCheckbox, IconChartPie, IconFileInvoice, IconInbox, IconLayoutDashboard, IconListDetails,
-  IconAlertTriangle, IconBook2, IconCloudUpload, IconDatabaseImport, IconMap2, IconReceipt2, IconScale, IconTable, IconTruckDelivery, type TablerIcon,
+  IconAlertTriangle, IconBook2, IconCalculator, IconCloudUpload, IconDatabaseImport, IconMap2, IconReceipt2, IconScale, IconTable, IconTruckDelivery, type TablerIcon,
 } from "@tabler/icons-react";
 import { useHeliosAuth, userDisplayName } from "../../auth/AuthShell";
 import { useModuleLive } from "../../shell/module-activity";
@@ -24,13 +24,14 @@ import { MyReimbursementsView } from "./finance/views/MyReimbursementsView";
 import type { FinanceProps } from "./finance/views/shared";
 import { ImportView } from "./finance/views/ImportView";
 import { BringInDataView } from "./finance/views/BringInDataView";
+import { WhatIfView } from "./finance/views/WhatIfView";
 import { ExecGuide, MemberGuide, useGuideAnchor } from "./views/GuideView";
 
 type PurchasingView = "parts" | "approvals" | "orders" | "budgets" | "myreimb" | "inbox" | "guide";
-type View = PurchasingView | FinanceView | "import" | "bring" | "execguide";
+type View = PurchasingView | FinanceView | "import" | "bring" | "whatif" | "execguide";
 const PROJECT_KEY = "helios:purchasing:project";
 const VIEW_KEY = "helios:purchasing:view";
-const FINANCE_VIEWS: string[] = ["overview", "balances", "ledger", "reimbursements", "discrepancies", "accounts", "import", "bring", "execguide"];
+const FINANCE_VIEWS: string[] = ["overview", "balances", "ledger", "reimbursements", "discrepancies", "accounts", "import", "bring", "whatif", "execguide"];
 
 const SUBTITLE: Record<View, string> = {
   parts: "Abacus, the team's parts list: add parts when you know you'll need them, send them for approval when the design is settled.",
@@ -41,6 +42,7 @@ const SUBTITLE: Record<View, string> = {
   inbox: "Requests, approvals, shipments, deliveries and reimbursements that involve you.",
   guide: "How buying a part works, step by step, and how to get paid back.",
   import: "Upload bank, card and Square exports and invoice lists. Execs only.",
+  whatif: "What Available, the card and the budgets would look like after each big possible expense. Execs only.",
   bring: "Restore the old ledger, or bring Airtable parts lists into Abacus a folder at a time. Execs only.",
   execguide: "The weekly routine and the rules behind the numbers. Execs only.",
   overview: "What the team can actually spend, the card, and what needs attention.",
@@ -110,12 +112,13 @@ export function AgoraModule() {
     { id: "inbox", label: "Inbox", Icon: IconInbox, count: unread, show: true },
     { id: "guide", label: "How it works", Icon: IconMap2, show: true },
   ];
-  const financeNav: { id: FinanceView | "import" | "bring" | "execguide"; label: string; Icon: TablerIcon; count?: number }[] = [
+  const financeNav: { id: FinanceView | "import" | "bring" | "whatif" | "execguide"; label: string; Icon: TablerIcon; count?: number }[] = [
     { id: "overview", label: "Overview", Icon: IconLayoutDashboard },
     { id: "balances", label: "Weekly balances", Icon: IconScale },
     { id: "ledger", label: "Ledger", Icon: IconListDetails },
     { id: "reimbursements", label: "Reimbursements", Icon: IconFileInvoice, count: toReview },
     { id: "discrepancies", label: "Discrepancies", Icon: IconAlertTriangle },
+    { id: "whatif", label: "What if?", Icon: IconCalculator },
     { id: "import", label: "Upload files", Icon: IconCloudUpload },
     { id: "bring", label: "Bring in data", Icon: IconDatabaseImport },
     { id: "accounts", label: "Accounts", Icon: IconBuildingBank },
@@ -197,6 +200,7 @@ export function AgoraModule() {
             : shown === "discrepancies" ? <DiscrepanciesView {...fp} />
             : shown === "import" ? <ImportView {...fp} />
             : shown === "bring" ? <BringInDataView {...fp} go={go} />
+            : shown === "whatif" ? <WhatIfView {...fp} />
             : shown === "guide" ? <MemberGuide go={go} />
             : shown === "execguide" ? <ExecGuide go={go} />
             : <AccountsView {...fp} />}

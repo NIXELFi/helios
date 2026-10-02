@@ -225,6 +225,10 @@ export function ExecGuide({ go }: { go: Go }) {
       </Card>
       <div className="flex flex-col gap-3">{BUY_STEPS.map((s, i) => <StepCard key={s.id} s={s} n={i + 1} prefix={p} go={go} />)}</div>
 
+      <Extra id="whatif" prefix={p} title="Weighing up a big expense">
+        <p>Finance &gt; <b>What if?</b>: list the big things you're considering (a new engine, a trailer, registration) and any money you expect in. Each line shows what Available, the card's room this cycle, the subteam's budget line, or the account it comes from would be after it, building on the lines above, with a warning if anything goes negative or below your cushion. Untick a line to see the picture without it. It never touches the books.</p>
+        <button className="text-asu-gold hover:underline" onClick={() => go("whatif")}>Open What if?</button>
+      </Extra>
       <Extra id="budgets" prefix={p} title="Setting budgets">
         <p>Budgets &gt; <b>Set up budgets</b>. Create the season (it starts after competition and design freeze; it becomes the current one), then add a line per car: its name, amount, and the subteams whose spending counts toward it. One line can cover several subteams; a subteam counts toward one line per car.</p>
         <button className="text-asu-gold hover:underline" onClick={() => go("budgets")}>Open Budgets</button>
