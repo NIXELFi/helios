@@ -297,3 +297,20 @@ This error lowers the model's plenum pressure at a given flow, so it cannot expl
 - The gap to clean-flow CFD is real: about 2 kPa at 9-10k, of which the bare inlet is about 0.4.
 - **Leading candidate now: a bore rougher than the assumed 60 um.** On the as-built wall R falls 0.773 / 0.742 / 0.696 at 0 / 20 / 60 um; extrapolated, 0.57 needs roughly 170 um of sand-grain, which is plausible for printed layer lines across the flow. Fluent runs at 120 and 200 um are requested.
 - If confirmed, finishing the bore is worth about +3 % at the top end, not +1.2 %.
+
+**Two consistent readings of the car data (2026-10-01).** Throat undersize (printed about 19.8 mm) explains only 0.2 kPa of the 2 kPa gap, and bore roughness is unlikely to be much above 60 um (PPA-CF, 0.08 mm layers). The whole gap is equivalent to the car flowing 7-14 % more air than the model at 7-10k, with clean-flow recovery (Fluent, 19.8 mm throat, bare inlet).
+
+| | A: as calibrated (0036) | B |
+|---|---|---|
+| airflow, 7-10k | model's (37-53 g/s) | +8-14 % (41-58 g/s, VE 1.05-1.10 atm-referenced) |
+| venturi recovery | 0.572, cause unknown | about 0.70, as clean CFD |
+| drivetrain efficiency | 0.94 | 0.82-0.87 at the same brake efficiency (fsae-sim uses 0.85) |
+| fits dyno power and baro - MAP | yes | yes |
+
+- 0036 fitted two numbers, recovery and drivetrain efficiency, and they trade against each other; dyno power and MAP cannot separate them.
+- B needs the model to under-breathe by about 10 %. The model does not do that by itself: with R 0.69 it gains only about 3 %.
+- **What would settle it:** fuel flow (injector pulse width and injector rating; the 4-26 CSV export has no pulse-width channel), a coast-down or driveline-loss measurement, or the pressure tap ahead of the throat.
+- **What depends on it:**
+  - The restrictor and VRLI rankings do not: they are ratios.
+  - The absolute "+3-4 % available from the restrictor" exists only under A.
+  - Under B the engine runs nearer choke at the top end (about 87 % of choked flow at 10k, against 77 %), so top-end gains from runner tuning would be smaller than modelled and the restrictor's Cd and recovery would matter more.
