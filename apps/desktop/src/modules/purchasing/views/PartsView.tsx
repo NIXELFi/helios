@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
   ON_THE_WAY, ORDERED_STATUSES, REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
@@ -11,6 +11,7 @@ import { normalizeVendor } from "../finance/importers";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { PasteDialog } from "../components/PasteDialog";
 import { OrderDialog } from "../components/OrderDialog";
+import { inRange, rangeBounds, rangeSize, summarize, type CellRange, type CellValue } from "../lib/cellRange";
 import { Button, Empty, PrioritySelect, StatusSelect, SubteamChip, useConfirm } from "../components/ui";
 
 type Filter = "all" | "planning" | "moving" | "done";
@@ -30,6 +31,7 @@ const COLS: Col[] = [
   { key: "tax_shipping_cents", label: "Tax/ship $", field: "tax_shipping", className: "min-w-[90px]" },
   { key: "total", label: "Total", field: "total", className: "min-w-[96px]" },
   { key: "vendor", label: "Vendor", field: "vendor", className: "min-w-[130px]" },
+  { key: "funding_source", label: "Funding", field: "funding_source", className: "min-w-[130px]" },
   { key: "part_number", label: "Part #", field: "part_number", className: "min-w-[150px]" },
   { key: "product_url", label: "Link", field: "product_url", className: "min-w-[160px]" },
   { key: "status", label: "Status", field: null, className: "min-w-[150px]" },
@@ -40,6 +42,27 @@ const COLS: Col[] = [
 const MONEY = new Set(["unit_price_cents", "tax_shipping_cents"]);
 /** The checkbox and code columns come before COLS. */
 const FIRST_COL = 2;
+
+/** What a cell holds, for the status bar's sum, average and count. */
+function cellValue(i: Item, key: string): CellValue {
+  if (key === "total") return { money: itemCost(i) };
+  if (MONEY.has(key)) { const v = i[key as "unit_price_cents" | "tax_shipping_cents"]; return v === null ? null : { money: v }; }
+  if (key === "quantity") return i.quantity === null ? null : { number: Number(i.quantity) };
+  return { text: String((i as unknown as Record<string, unknown>)[key] ?? "") };
+}
+/** The same cell as text, for copying a range (tab-separated, like Excel). */
+function cellText(i: Item, key: string): string {
+  const v = cellValue(i, key);
+  return !v ? "" : "money" in v ? centsToInput(v.money) : "number" in v ? String(v.number) : v.text.replace(/[\t\n]/g, " ");
+}
+/** The update_item patch that copies one cell's value onto another part (the fill handle). null = can't be filled. */
+function fillPatch(from: Item, key: string): Record<string, unknown> | null {
+  if (key === "status" || key === "total") return null;
+  if (key === "quantity" || MONEY.has(key) || key === "priority" || key === "needed_by") {
+    return { [key]: (from as unknown as Record<string, unknown>)[key] ?? null };
+  }
+  return { [key]: String((from as unknown as Record<string, unknown>)[key] ?? "") };
+}
 
 /** A typed cell value -> the update_item patch for it. null = not a valid value. */
 function toPatch(key: string, raw: string): Record<string, unknown> | null {
@@ -82,6 +105,14 @@ export function PartsView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [paste, setPaste] = useState<{ matrix: string[][]; start: number } | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  // a rectangle of cells, as in a spreadsheet: [row in `rows`, column in COLS]
+  const [range, setRange] = useState<CellRange | null>(null);
+  const [fillTo, setFillTo] = useState<number | null>(null);   // the row the fill handle is dragged to
+  const drag = useRef<"select" | "fill" | null>(null);
+  // the handlers read the range from here: a fast drag can fire before React redraws
+  const rangeRef = useRef(range);
+  const select = (r: CellRange | null) => { rangeRef.current = r; setRange(r); };
+  const fillRef = useRef(fillTo);
 
   const subteamOf = (i: Item) => i.item_allocations[0]?.subteam_id;
   // a car shows its own subteams, as set in Admin > Org Structure
@@ -129,8 +160,87 @@ export function PartsView({
     return run("", () => updateItem(client, i.id, patch));
   }
 
+  // ---- cell ranges: drag across cells (or shift-click) to add them up; drag
+  // the corner square down to copy the cells into the rows below
+  useEffect(() => { select(null); }, [tab, filter, q, projectId]);
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  useEffect(() => {
+    const up = () => { if (drag.current === "fill") void applyFill(); drag.current = null; };
+    const outside = (e: MouseEvent) => { if (!tableRef.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest?.("[data-sheet-bar]")) select(null); };
+    const copy = (e: globalThis.ClipboardEvent) => {
+      const r = rangeRef.current;
+      if (!r || rangeSize(r) < 2 || (document.activeElement && tableRef.current?.contains(document.activeElement))) return;
+      const { r0, r1, c0, c1 } = rangeBounds(r);
+      const lines = rowsRef.current.slice(r0, r1 + 1).map((i) => COLS.slice(c0, c1 + 1).map((c) => cellText(i, c.key)).join("\t"));
+      e.clipboardData?.setData("text/plain", lines.join("\n"));
+      e.preventDefault();
+      flash(`Copied ${rangeSize(r)} cells.`);
+    };
+    document.addEventListener("mouseup", up);
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("copy", copy);
+    return () => { document.removeEventListener("mouseup", up); document.removeEventListener("mousedown", outside); document.removeEventListener("copy", copy); };
+  });
+  function cellAt(target: EventTarget): [number, number] | null {
+    const td = (target as HTMLElement).closest?.("td");
+    const id = (td?.parentElement as HTMLElement | null)?.dataset.id;
+    if (!td || !id) return null;
+    const r = rows.findIndex((x) => x.id === id), k = td.cellIndex - FIRST_COL;
+    return r < 0 || k < 0 || k >= COLS.length ? null : [r, k];
+  }
+  function onMouseDown(e: ReactMouseEvent<HTMLTableElement>) {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("input[type=checkbox]")) return;
+    const c = cellAt(e.target);
+    if (!c) return;
+    const r = rangeRef.current;
+    if (e.shiftKey && r) { e.preventDefault(); select({ a: r.a, b: c }); return; }
+    select({ a: c, b: c });
+    drag.current = "select";
+  }
+  function onMouseOver(e: ReactMouseEvent<HTMLTableElement>) {
+    if (!drag.current) return;
+    if (!(e.buttons & 1)) { drag.current = null; return; }
+    const c = cellAt(e.target);
+    const r = rangeRef.current;
+    if (!c || !r) return;
+    if (drag.current === "fill") { const to = c[0] > rangeBounds(r).r1 ? c[0] : null; fillRef.current = to; setFillTo(to); return; }
+    if (c[0] === r.b[0] && c[1] === r.b[1]) return;
+    select({ a: r.a, b: c });
+    // more than one cell: it's a range, not typing in a cell
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    window.getSelection()?.removeAllRanges();
+  }
+  async function applyFill() {
+    const r = rangeRef.current, to = fillRef.current;
+    fillRef.current = null;
+    setFillTo(null);
+    if (!r || to === null) return;
+    const { r0, r1, c0, c1 } = rangeBounds(r);
+    const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    let skipped = 0;
+    for (let t = r1 + 1; t <= to; t++) {
+      // like Excel: the selected rows repeat down
+      const target = rows[t], from = rows[r0 + ((t - r0) % (r1 - r0 + 1))];
+      if (!target || !from) continue;
+      if (!canEdit(target)) { skipped++; continue; }
+      const patch: Record<string, unknown> = {};
+      for (let k = c0; k <= c1; k++) Object.assign(patch, fillPatch(from, COLS[k]!.key) ?? {});
+      if (Object.keys(patch).length) updates.push({ id: target.id, patch });
+    }
+    if (!updates.length) { if (skipped) flash(`You can't edit ${skipped === 1 ? "that part" : "those parts"} (approved already, or another subteam's).`, true); return; }
+    await run(`Filled ${updates.length} row${updates.length === 1 ? "" : "s"}${skipped ? `; ${skipped} you can't edit were skipped` : ""}.`, async () => {
+      for (const u of updates) await updateItem(client, u.id, u.patch);
+    });
+    select({ a: [r0, c0], b: [to, c1] });
+  }
+  const bounds = range ? rangeBounds(range) : null;
+  const summary = range && rangeSize(range) > 1 && bounds
+    ? summarize(rows.slice(bounds.r0, bounds.r1 + 1).flatMap((i) => COLS.slice(bounds.c0, bounds.c1 + 1).map((c) => cellValue(i, c.key))))
+    : null;
+
   // ---- keyboard: Enter / arrows move between rows like a spreadsheet
   function onKeyDown(e: KeyboardEvent<HTMLTableElement>) {
+    if (e.key === "Escape") { select(null); return; }
     const el = e.target as HTMLElement;
     const cell = el.closest("td");
     const tr = cell?.parentElement;
@@ -316,7 +426,8 @@ export function PartsView({
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-helios-line bg-helios-panel">
-        <table ref={tableRef} className="w-full border-separate border-spacing-0 text-[13px]" onKeyDown={onKeyDown} onPaste={onPaste}>
+        <table ref={tableRef} className="w-full select-none border-separate border-spacing-0 text-[13px] [&_input]:select-text"
+          onKeyDown={onKeyDown} onPaste={onPaste} onMouseDown={onMouseDown} onMouseOver={onMouseOver}>
           <thead className="sticky top-0 z-10 bg-helios-strip text-[11px] uppercase tracking-wider text-helios-dim">
             <tr>
               <th className="w-8 border-b border-helios-line p-2">
@@ -330,7 +441,7 @@ export function PartsView({
             </tr>
           </thead>
           <tbody>
-            {rows.map((i) => {
+            {rows.map((i, r) => {
               const edit = canEdit(i);
               return (
                 <tr key={i.id} data-id={i.id} className={`hover:bg-white/[0.02] ${i.status === "CANCELLED" || i.status === "HAVE" ? "opacity-55" : ""}`}>
@@ -339,8 +450,17 @@ export function PartsView({
                       onChange={(e) => setSelected((s) => { const n = new Set(s); if (e.target.checked) n.add(i.id); else n.delete(i.id); return n; })} />
                   </td>
                   <td className="border-b border-helios-line px-2 font-mono text-[11px] text-helios-muted" title={i.code}>{i.code.slice(4)}</td>
-                  {COLS.map((c) => (
-                    <td key={c.key} className={`border-b border-l border-helios-line ${c.className}`}>
+                  {COLS.map((c, k) => {
+                    const on = inRange(range, r, k);
+                    const filling = fillTo !== null && bounds !== null && r > bounds.r1 && r <= fillTo && k >= bounds.c0 && k <= bounds.c1;
+                    const corner = !!bounds && fillTo === null && r === bounds.r1 && k === bounds.c1;
+                    return (
+                    <td key={c.key} className={`relative border-b border-l border-helios-line ${c.className} ${on ? "bg-asu-gold/15" : filling ? "bg-asu-gold/[0.07] outline-dashed outline-1 -outline-offset-1 outline-asu-gold/60" : ""}`}>
+                      {corner && (
+                        <span title="Drag down to copy into the rows below" data-fill-handle=""
+                          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); drag.current = "fill"; fillRef.current = null; setFillTo(null); }}
+                          className="absolute -bottom-[3px] -right-[3px] z-20 size-[7px] cursor-crosshair border border-helios-base bg-asu-gold" />
+                      )}
                       {c.key === "status" ? (
                         <div className="px-1"><StatusSelect status={i.status} options={statusOptions(i)}
                           onChange={(s) => void run(`${i.code}: ${s.toLowerCase()}`, () => setStatus(client, [i.id], s))} /></div>
@@ -355,7 +475,8 @@ export function PartsView({
                         <Cell item={i} col={c.key} edit={edit} onSave={(v) => void save(i, c.key, v)} />
                       )}
                     </td>
-                  ))}
+                    );
+                  })}
                   {!tab && <td className="border-b border-l border-helios-line px-2">
                     <SubteamChip subteam={subteams.find((s) => s.id === subteamOf(i))} /></td>}
                   <td className="border-b border-l border-helios-line px-2 text-xs text-helios-dim">{i.requester_name}</td>
@@ -395,9 +516,21 @@ export function PartsView({
         </table>
       </div>
 
+      {/* the status bar, as in Excel: what the selected cells add up to */}
+      <div data-sheet-bar="" className="-mt-1 flex min-h-[22px] flex-wrap items-center justify-end gap-x-4 px-1 text-xs text-helios-dim">
+        {summary ? <>
+          {summary.moneyCount > 0 && <>
+            <span>Sum <b className="tabular-nums text-helios-text">{fmtCents(summary.moneySum)}</b></span>
+            <span>Average <b className="tabular-nums text-helios-text">{fmtCents(Math.round(summary.moneySum / summary.moneyCount))}</b></span>
+          </>}
+          {summary.numberCount > 0 && <span>{summary.moneyCount > 0 ? "Qty total" : "Sum"} <b className="tabular-nums text-helios-text">{summary.numberSum}</b></span>}
+          <span>Count <b className="tabular-nums text-helios-text">{summary.count}</b></span>
+        </> : range ? <span>Drag across cells (or shift-click) to add them up; drag the gold corner down to fill the rows below. Ctrl+C copies a range.</span> : null}
+      </div>
+
       {ids.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-strip px-4 py-2 shadow-lg">
-          <b className="text-asu-gold">{ids.length} selected</b>
+          <b className="text-asu-gold">{ids.length} selected | {fmtCents(rows.filter((r) => selected.has(r.id)).reduce((t, r) => t + itemCost(r), 0))}</b>
           <select className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" value={bulk} onChange={(e) => setBulk(e.target.value)}>
             <option value="">Choose an action...</option>
             <option value="status:READY">Send for approval</option>

@@ -258,6 +258,18 @@ describe("agora follow-ups", () => {
     expect((await pur().from("car_subteams").select("*")).error).not.toBeNull();
   });
 
+  it("parts carry a funding source that members fill in and Airtable uploads keep", async () => {
+    const cfo = await person("cfo", "executive");
+    const member = await person("member", "engineer", daq);
+    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "ADC", funding_source: "Chase Account" }] });
+    const id = (ids as string[])[0]!;
+    expect((await member.p.rpc("update_item", { p_id: id, p_patch: { funding_source: "IC Dean's funding" } })).error).toBeNull();
+    await cfo.p.rpc("import_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Old part", status: "RECEIVED", funding_source: "Chase Account" }] });
+    expect((await pur().from("items").select("title,funding_source").order("title")).data).toEqual([
+      { title: "ADC", funding_source: "IC Dean's funding" }, { title: "Old part", funding_source: "Chase Account" },
+    ]);
+  });
+
   it("execs delete parts, except ones matched to a ledger charge, and the history says so", async () => {
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);

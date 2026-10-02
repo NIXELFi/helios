@@ -37,6 +37,14 @@ follow [semver](https://semver.org/).
 
 ### Added
 
+- **Abacus works more like a spreadsheet.** Drag across cells (or click one
+  and shift-click another) and the bar under the sheet shows their sum,
+  average and count, as in Excel, Sheets or Airtable, so you can add up what
+  an order will cost. Drag the gold corner of a selection down to copy it into
+  the rows below (priority, vendor, funding, prices...), and Ctrl+C copies the
+  range. Ticked rows show their combined total too.
+- **Abacus: a Funding column**, like the Airtable sheets' "Funding Source".
+  Members fill it in for their own parts, and Airtable uploads bring it in.
 - **Agora: execs can delete parts from Abacus** (select, then Delete), except
   parts matched to a ledger charge. The parts history notes who deleted what.
   Bring in data offers to clear Abacus when its parts are all that stand in the

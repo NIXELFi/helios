@@ -76,6 +76,7 @@ const PART_STEPS: Step[] = [
     page: ["parts", "Open Abacus"] },
   { id: "ready", title: "Ready to order", tone: "ready", who: "You",
     what: <><p>When the design is settled and the part is priced, change its status to <b>Ready to order</b>. That sends it to the execs and they get a notification with your name on it.</p>
+      <p>To add up a few parts (what will this order cost?), drag across their cells: the sum shows under the sheet. Drag the gold corner of a cell down to copy it into the rows below, like Excel.</p>
       <p>Add a <b>shipping estimate</b> in Tax/ship if you can. You don't need to work out sales tax: the execs see a rough figure with tax added.</p>
       <p>Several parts in one cart? Tick them, choose <b>Split one cart's shipping & tax over these</b>, and paste the cart page or order email (or type the shipping). Each part gets its share by price.</p>
       <p>Changed your mind? Move it back to Not ready, or Cancel it. You can edit it until it's approved.</p></>,

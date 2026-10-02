@@ -4,17 +4,17 @@
 import { parseCents } from "./money";
 
 export type PasteField =
-  | "title" | "quantity" | "unit_price" | "tax_shipping" | "total" | "vendor"
+  | "title" | "quantity" | "unit_price" | "tax_shipping" | "total" | "vendor" | "funding_source"
   | "part_number" | "product_url" | "priority" | "needed_by" | "date_needed_raw" | "notes" | "status";
 
 export const PASTE_FIELDS: PasteField[] = [
-  "title", "quantity", "unit_price", "tax_shipping", "total", "vendor",
+  "title", "quantity", "unit_price", "tax_shipping", "total", "vendor", "funding_source",
   "part_number", "product_url", "priority", "needed_by", "date_needed_raw", "notes", "status",
 ];
 
 export const PASTE_LABELS: Record<PasteField, string> = {
   title: "Item", quantity: "Qty", unit_price: "Unit $", tax_shipping: "Tax/ship $", total: "Total $",
-  vendor: "Vendor", part_number: "Part #", product_url: "Link", priority: "Priority",
+  vendor: "Vendor", funding_source: "Funding", part_number: "Part #", product_url: "Link", priority: "Priority",
   needed_by: "Needed by", date_needed_raw: "Date needed (as written)", notes: "Notes", status: "Status",
 };
 
@@ -29,6 +29,7 @@ const ALIASES: Record<PasteField, string[]> = {
   tax_shipping: ["tax shipping", "tax and shipping", "shipping", "tax & shipping"],
   total: ["total", "total cost", "ext price", "extended price", "total price", "ext price usd", "line total", "extended price usd"],
   vendor: ["vendor", "supplier", "distributor", "store"],
+  funding_source: ["funding source", "funding", "paid from", "funding account"],
   part_number: ["mfr #", "mfr part #", "mfr part number", "manufacturer part number", "mpn", "part #", "part number",
     "part no", "mouser #", "digi key part number", "digikey part number", "sku", "customer reference"],
   product_url: ["link", "url", "product link", "product url"],
@@ -129,6 +130,8 @@ export interface NewRow {
   notes?: string;
   /** From an Airtable Status column: PLANNED, READY, ORDERED, RECEIVED or HAVE. */
   status?: string;
+  /** Airtable's "Funding Source" as written ("Chase Account"). */
+  funding_source?: string;
   /** Airtable's "DATE NEEDED" as written (its meaning isn't settled). */
   date_needed_raw?: string;
   /** Where the row came from, e.g. "airtable:IC Team/Aero-Grid view.csv row 4". */
@@ -184,6 +187,7 @@ export function toRows(matrix: string[][], mapping: (PasteField | null)[], defau
     if (o.priority) row.priority = ({ high: "HIGH", medium: "Medium", low: "Low" } as Record<string, string>)[o.priority.trim().toLowerCase()];
     if (o.needed_by) row.needed_by = parseDate(o.needed_by);
     if (o.date_needed_raw) row.date_needed_raw = o.date_needed_raw.trim().slice(0, 100);
+    if (o.funding_source) row.funding_source = o.funding_source.trim().slice(0, 100);
     const note = leftOut.length ? `Pasted ${leftOut.join(", ")} left out: check it.` : "";
     if (o.notes || note) row.notes = [o.notes, note].filter(Boolean).join(" ");
     if (o.status) { const s = AIRTABLE_STATUS[o.status.trim().toLowerCase()]; if (s) row.status = s; }

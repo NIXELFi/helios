@@ -50,9 +50,9 @@ describe("purchasing paste", () => {
     const header = ["Item Name", "Sub-System", "Priority", "Status", "Quantity", "Cost per Unit", "Tax + Shipping", "Total Cost",
       "Funding Source", "Date Ordered", "DATE NEEDED", "Vendor", "LINK", "Notes"];
     expect(mapHeaders(header)).toEqual(["title", null, "priority", "status", "quantity", "unit_price", "tax_shipping", "total",
-      null, null, "date_needed_raw", "vendor", "product_url", "notes"]);
-    const rows = toRows([["ADC", "", "HIGH", "Ordered", "2", "9.26", "", "18.52", "", "", "9/11/2026", "Mouser", "", ""]], mapHeaders(header));
-    expect(rows[0]).toMatchObject({ title: "ADC", status: "ORDERED", date_needed_raw: "9/11/2026" });
+      "funding_source", null, "date_needed_raw", "vendor", "product_url", "notes"]);
+    const rows = toRows([["ADC", "", "HIGH", "Ordered", "2", "9.26", "", "18.52", "Chase Account", "", "9/11/2026", "Mouser", "", ""]], mapHeaders(header));
+    expect(rows[0]).toMatchObject({ title: "ADC", status: "ORDERED", date_needed_raw: "9/11/2026", funding_source: "Chase Account" });
     expect(rows[0]!.needed_by).toBeUndefined();
     expect(mapHeaders(["Item Name (short)", "Unit Cost ($)", "Qty.", "Needed by"])).toEqual(["title", "unit_price", "quantity", "needed_by"]);
   });

@@ -59,6 +59,7 @@ export interface Item {
   tax_shipping_cents: number | null;
   total_estimate_cents: number | null;
   notes: string;
+  funding_source?: string;          // where the money is meant to come from, as written
   ready_at: string | null;
   vendor_order_id: string | null;
   actual_total_cents: number | null;
