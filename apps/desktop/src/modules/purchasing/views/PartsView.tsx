@@ -11,7 +11,7 @@ import { normalizeVendor } from "../finance/importers";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { PasteDialog } from "../components/PasteDialog";
 import { OrderDialog } from "../components/OrderDialog";
-import { Button, Empty, PrioritySelect, StatusSelect, SubteamChip } from "../components/ui";
+import { Button, Empty, PrioritySelect, StatusSelect, SubteamChip, useConfirm } from "../components/ui";
 
 type Filter = "all" | "planning" | "moving" | "done";
 const FILTERS: { id: Filter; label: string; test: (s: Status) => boolean }[] = [
@@ -208,6 +208,7 @@ export function PartsView({
   const ids = [...selected].filter((id) => rows.some((r) => r.id === id));
   const [bulk, setBulk] = useState("");
   const [cart, setCart] = useState<Item[] | null>(null);
+  const [ask, confirmDialog] = useConfirm();
   const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [track, setTrack] = useState({ number: "", carrier: "", eta: "" });
   async function applyBulk() {
@@ -224,7 +225,12 @@ export function PartsView({
       await run(`Tracking added to ${ids.length} item(s)`, () =>
         addTracking(client, ids, track.number, track.carrier || detectCarrier(track.number), track.eta || null));
     } else if (bulk === "undo-order") {
-      await run(`Order undone: ${ids.length} part(s) back to approved`, () => undoOrder(client, ids));
+      const ok = await ask({
+        title: `Undo the order on ${ids.length} part${ids.length === 1 ? "" : "s"}?`,
+        body: "Approved parts go back to Approved, parts that never had approvals (imported) to Ready to order. The order number, cost, payment and tracking are cleared.",
+        confirmLabel: "Undo order", danger: true,
+      });
+      if (ok) await run(`Order undone on ${ids.length} part(s)`, () => undoOrder(client, ids));
     } else if (bulk === "cart") {
       const pick = rows.filter((r) => selected.has(r.id));
       const locked = pick.filter((r) => !canEdit(r));
@@ -394,7 +400,7 @@ export function PartsView({
             {exec && <>
               <option value="approve">Approve</option>
               <option value="order">Record order (bought together)</option>
-              <option value="undo-order">Undo order (back to approved)</option>
+              <option value="undo-order">Undo order</option>
               <option value="tracking">Add tracking</option>
               <option value="status:DELIVERED">Mark delivered</option>
               <option value="status:CANCELLED">Cancel</option>
@@ -421,6 +427,7 @@ export function PartsView({
         </div>
       )}
 
+      {confirmDialog}
       {cart && (
         <OrderDialog client={client} items={cart} canOrder={can(caps, "purchasing.order")} vendorNames={data.vendors.map((v) => v.name)}
           reload={reload} flash={flash} onClose={() => { setCart(null); setSelected(new Set()); }} />

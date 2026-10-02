@@ -336,7 +336,10 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     const sameScheme = (t: Txn) => t.source === source && (t.source_key ?? "").startsWith(keyPrefix);
     const dup = mine.find((t) => !used.has(t.id) && !sameScheme(t) && t.amount_cents === l.amount_cents
       && [t.date, t.post_date].some((d) => d && [l.date, l.post_date].some((e) => e && days(d, e) <= 3))
-      && (t.date === l.date || sameMerchant(t.description || t.vendor || "", `${l.description} ${dec.vendor ?? ""}`)));
+      // a card payment's two sides are described differently ("Card payment for
+      // statement closing ..." vs "AUTOMATIC PAYMENT - THANK YOU") and often post a day apart
+      && (t.date === l.date || (dec.transfer === "card" && t.kind === "transfer")
+        || sameMerchant(t.description || t.vendor || "", `${l.description} ${dec.vendor ?? ""}`)));
     if (dup) {
       used.add(dup.id);
       plan.lines.push({ line: l, action: "duplicate", txn, matchId: dup.id, why: "Already in the ledger" });
@@ -377,7 +380,9 @@ export function planImport(format: Format, lines: Line[], account: Account, o: P
     const checking = o.accounts.find((a) => a.id === account.paid_from_account_id);
     // the checking statement may already show this statement's payment (uploaded
     // first): then the card just needs its side of that payment, not an expected one
-    const paid = checking && spend > 0 ? paymentAlreadyIn(o.existing, checking.id, account.id, closing, spend) : null;
+    // with more than one card paid from that checking account, only the exact amount says which card a payment was for
+    const sharesChecking = !!checking && o.accounts.filter((a) => a.kind === "credit_card" && a.paid_from_account_id === checking.id).length > 1;
+    const paid = checking && spend > 0 ? paymentAlreadyIn(o.existing, checking.id, account.id, closing, spend, sharesChecking) : null;
     if (paid) {
       plan.extra.push({ account_id: account.id, date: paid.date, post_date: paid.date, cleared_date: paid.date, amount_cents: -paid.amount_cents,
         description: `Card payment for statement closing ${closing}`, vendor: "Chase card autopay", kind: "transfer", category: "Transfer: card payment",
@@ -434,11 +439,11 @@ export function listedOldestFirst(rows: Pick<Line, "date" | "amount_cents" | "ba
  * A card payment already on checking, 0-45 days after the statement closed,
  * with no card side yet: the exact amount first, else the only one in the window.
  */
-function paymentAlreadyIn(existing: Txn[], checkingId: number, cardId: number, closing: string, spend: number): Txn | null {
+function paymentAlreadyIn(existing: Txn[], checkingId: number, cardId: number, closing: string, spend: number, exactOnly: boolean): Txn | null {
   const waiting = existing.filter((t) => t.account_id === checkingId && t.kind === "transfer" && t.status === "posted"
     && t.amount_cents < 0 && t.transfer_group?.startsWith("card-payment:") && t.date >= closing && days(t.date, closing) <= 45
     && !existing.some((x) => x.account_id === cardId && x.transfer_group === t.transfer_group));
-  return waiting.find((t) => t.amount_cents === -spend) ?? (waiting.length === 1 ? waiting[0]! : null);
+  return waiting.find((t) => t.amount_cents === -spend) ?? (waiting.length === 1 && !exactOnly ? waiting[0]! : null);
 }
 
 // ------------------------------------------------------------ invoices

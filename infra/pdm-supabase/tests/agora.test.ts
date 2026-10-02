@@ -174,6 +174,8 @@ describe("agora follow-ups", () => {
     expect((await cfo.p.rpc("record_order", order)).error?.message).toMatch(/another exec/);
     expect((await cfo.p.rpc("record_order_lines", { p_lines: [{ id: logger!.id, actual_total_cents: 600000 }], p_order_id: "W9", p_payment: "SAE card" }))
       .error?.message).toMatch(/another exec/);
+    // nor through update_item's buyer fields
+    expect((await cfo.p.rpc("update_item", { p_id: logger!.id, p_patch: { actual_total_cents: 999999 } })).error?.message).toMatch(/another exec/);
     expect((await chief.p.rpc("record_order", { ...order, p_total_cents: 1900 })).error).toBeNull();
   });
 
@@ -249,6 +251,12 @@ describe("agora follow-ups", () => {
     expect((await pur().from("items").select("date_needed_raw").eq("title", "y").single()).data!.date_needed_raw).toBe("9/11/2026");
     const { data: pairs } = await member.p.from("car_subteams").select("project_id,subteam_id");
     expect(pairs).toHaveLength(2);
+    // EV gets set up by an exec with Engine only: DAQ already has a part there, so its member keeps adding
+    await cfo.p.rpc("set_car_subteam", { p_project: ev, p_subteam: eng, p_on: true });
+    expect((await member.p.rpc("add_items", { p_project: ev, p_subteam: daq, p_rows: [{ title: "w" }] })).error).toBeNull();
+    const aero = await subteam("Aero", "AERO");
+    const aeroMember = await person("aero", "engineer", aero);
+    expect((await aeroMember.p.rpc("add_items", { p_project: ev, p_subteam: aero, p_rows: [{ title: "v" }] })).error?.message).toMatch(/isn't on this car/);
   });
 
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {
@@ -287,13 +295,16 @@ describe("agora follow-ups", () => {
     const team = { ...data, line_item_allocations: [{ item_id: 1, program: "Team", subteam: "Data AQ", percent: 100 }] };
     expect((await cfo.f.rpc("restore_ledger", { ...args, p_data: team })).error?.message).toMatch(/whole-team/);
 
-    const { data: r, error } = await cfo.f.rpc("restore_ledger", args);
+    // a part split IC + whole team, with the team's parts under IC, is one share
+    const split = { ...data, line_item_allocations: [{ item_id: 1, program: "IC", subteam: "Data AQ", percent: 60 }, { item_id: 1, program: "Team", subteam: "Data AQ", percent: 40 }] };
+    const { data: r, error } = await cfo.f.rpc("restore_ledger", { ...args, p_data: split, p_cars: { IC: ic, EV: ev, Team: ic } });
     expect(error).toBeNull();
     expect(r).toMatchObject({ transactions: 2, parts: 1, budget_lines: 1, reimbursements: 2 });
     const { data: card } = await fin().from("accounts").select("paid_from_account_id").eq("id", 8).single();
     expect(card!.paid_from_account_id).toBe(1);
     const { data: item } = await pur().from("items").select("code,status,finance_txn_id,payment_method,item_allocations(subteam_id)").single();
     expect(item).toMatchObject({ code: "SDM-0042", status: "RECONCILED", finance_txn_id: 10, payment_method: "SAE card", item_allocations: [{ subteam_id: daq }] });
+    expect((await pur().from("item_allocations").select("percent")).data).toEqual([{ percent: 100 }]);
     const { data: reimb } = await fin().from("reimbursements").select("id,status,paid_with").order("id");
     expect(reimb).toEqual([{ id: 7, status: "paid", paid_with: "check" }, { id: 9, status: "owed", paid_with: null }]);
     expect((await pur().from("seasons").select("name,is_current,starts_on")).data).toEqual([{ name: "2026-27", is_current: true, starts_on: "2026-07-01" }]);

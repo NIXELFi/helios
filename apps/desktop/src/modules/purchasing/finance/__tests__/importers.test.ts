@@ -160,6 +160,25 @@ DEBIT,09/19/2026,"LOAN REPAYMENT",-5.00,ACH_DEBIT,1432.49,,`;
     ]);
   });
 
+  it("the card's side of a payment already paired isn't added again when the statement shows it a day later", () => {
+    const side = txn({ account_id: 2, date: "2026-10-22", amount_cents: 6888, kind: "transfer", source: "chase-card",
+      description: "Card payment for statement closing 2026-09-25", transfer_group: "card-payment:2026-10-22:6888" });
+    const csv = `Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+10/23/2026,10/23/2026,AUTOMATIC PAYMENT - THANK YOU,,Payment,68.88,`;
+    const plan = planImport("chase-card", parseChaseCard(parseCsv(csv)), CARD, opts([side]));
+    expect(plan.lines[0]).toMatchObject({ action: "duplicate", matchId: side.id });
+  });
+
+  it("with two cards paid from checking, a payment of another amount isn't claimed by the wrong card", () => {
+    const other: Account = { ...CARD, id: 4, name: "Second card", last4: "0002" };
+    const paid = txn({ account_id: 1, date: "2026-10-22", amount_cents: -9999, kind: "transfer", transfer_group: "card-payment:2026-10-22:9999" });
+    const csv = `Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+09/20/2026,09/21/2026,MOUSER ELECTRONICS,Shopping,Sale,-68.88,`;
+    const plan = planImport("chase-card", parseChaseCard(parseCsv(csv)), CARD,
+      { ...opts([paid]), accounts: [CHECKING, CARD, other, SQUARE], cardStatement: { periodStart: "2026-08-26", closing: "2026-09-25" } });
+    expect(plan.extra.map((t) => t.status)).toEqual(["expected", "expected"]);
+  });
+
   it("keeps each day's closing balance whether the file lists newest or oldest first", () => {
     const newest = `Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #,
 DEBIT,09/21/2026,"B",-2.00,ACH_DEBIT,96.00,,

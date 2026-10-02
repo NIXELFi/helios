@@ -230,8 +230,11 @@ export async function setCarSubteam(c: SupabaseClient, projectId: string, subtea
 export function subteamsOfCar(subteams: Subteam[], carSubteams: CarSubteam[], items: Item[], projectId: string | null): Subteam[] {
   if (!projectId) return subteams;
   const on = new Set(carSubteams.filter((x) => x.project_id === projectId).map((x) => x.subteam_id));
+  // as add_items(): a car nobody has set up takes any subteam; once it is set
+  // up, its subteams plus any that already have parts on it
+  if (!on.size) return subteams;
   for (const i of items) for (const a of i.item_allocations) if (a.project_id === projectId) on.add(a.subteam_id);
-  return on.size ? subteams.filter((s) => on.has(s.id)) : subteams;
+  return subteams.filter((s) => on.has(s.id));
 }
 
 // ---- seasons and budget lines (execs)

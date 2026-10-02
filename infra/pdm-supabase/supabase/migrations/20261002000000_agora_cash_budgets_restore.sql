@@ -256,6 +256,22 @@ begin
   end if;
 end; $$;
 
+-- The same rule for every other way an order's details get onto a part
+-- (update_item's buyer fields, say). Undoing the order is still allowed.
+create or replace function purchasing.guard_own_import()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.history_imported_by = auth.uid() and old.approved_at is null and new.status not in ('PLANNED', 'READY')
+     and (new.actual_total_cents is distinct from old.actual_total_cents or new.vendor_order_id is distinct from old.vendor_order_id
+          or new.payment_method is distinct from old.payment_method or new.paid_by is distinct from old.paid_by
+          or new.ordered_at is distinct from old.ordered_at) then
+    raise exception 'you imported % without approvals, so another exec has to record its order', old.code using errcode = '42501';
+  end if;
+  return new;
+end; $$;
+create trigger items_guard_own_import before update on purchasing.items
+  for each row execute function purchasing.guard_own_import();
+
 -- Bring in Airtable rows with their history. add_items() starts every row
 -- at PLANNED or READY, and set_status() rightly refuses to move an unapproved
 -- part to ORDERED, so rows Airtable already had as Ordered or Received could
@@ -525,11 +541,14 @@ begin
   get diagnostics v_items = row_count;
 
   insert into purchasing.item_allocations (item_id, project_id, subteam_id, percent)
-  select i.id, finance.restore_car(p_cars, a ->> 'program'), (p_subteams ->> (a ->> 'subteam'))::uuid, (a ->> 'percent')::numeric
+  -- two export rows can land on the same car and subteam (Team mapped to IC,
+  -- or two old subteam names mapped to one): they become one share
+  select i.id, finance.restore_car(p_cars, a ->> 'program'), (p_subteams ->> (a ->> 'subteam'))::uuid, sum((a ->> 'percent')::numeric)
   from jsonb_array_elements(p_data -> 'line_item_allocations') a
   join jsonb_array_elements(p_data -> 'line_items') x on x ->> 'id' = a ->> 'item_id'
   join purchasing.items i on i.code = x ->> 'item_code'
-  where finance.restore_car(p_cars, a ->> 'program') is not null;
+  where finance.restore_car(p_cars, a ->> 'program') is not null
+  group by 1, 2, 3;
 
   perform finance.sync_ids();
 
@@ -625,8 +644,11 @@ begin
   if not (v_exec or pm.has_capability(v_uid, 'purchasing.request', p_subteam)) then
     raise exception 'you can only request parts for your own subteam' using errcode = '42501';
   end if;
+  -- a subteam that already has parts on the car keeps adding to it, even when
+  -- an exec set the car up without it
   if not v_exec and exists (select 1 from purchasing.car_subteams where project_id = p_project)
-     and not exists (select 1 from purchasing.car_subteams where project_id = p_project and subteam_id = p_subteam) then
+     and not exists (select 1 from purchasing.car_subteams where project_id = p_project and subteam_id = p_subteam)
+     and not exists (select 1 from purchasing.item_allocations where project_id = p_project and subteam_id = p_subteam) then
     raise exception 'that subteam isn''t on this car' using errcode = '42501';
   end if;
   if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
@@ -775,7 +797,7 @@ end; $$;
 -- 6. Grants -----------------------------------------------------------------------------
 
 revoke all on function purchasing.car_subteam_from_part(), purchasing.car_subteam_from_budget() from public, anon, authenticated;
-revoke all on function purchasing.check_not_own_import(uuid[]) from public, anon, authenticated;
+revoke all on function purchasing.check_not_own_import(uuid[]), purchasing.guard_own_import() from public, anon, authenticated;
 revoke all on function purchasing.set_car_subteam(uuid, uuid, boolean), purchasing.undo_order(uuid[]), finance.delete_account(bigint)
   from public, anon;
 grant execute on function purchasing.set_car_subteam(uuid, uuid, boolean), purchasing.undo_order(uuid[]), finance.delete_account(bigint)
