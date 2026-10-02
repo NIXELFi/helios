@@ -443,3 +443,19 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - Below 5.5k the dyno rises from 30 to 48 N.m in 1000 rpm and the model does not follow (rms 6.2 N.m over 4.5-7k). Whether that is the engine or the start of the dyno pull is not known.
 - The model is 3 % high overall in these runs (scale 0.97): the inertance raised airflow, and the dome plenum over-recovers (previous addendum). A drivetrain-efficiency refit is owed.
 - **VRLI in the real plenum** (1.826 L, 141 mm, neutral tune): worst case +2.9 %, 6-12k +4.6 %, 10.5-12.5k +7.8 % with the 200 mm/s schedule, against the fixed 248 mm runner in the same plenum. This matches the sweep's values for that size.
+
+**Engine runs with the rough bore as today's part (2026-10-02, `charts/fluent/fluent_engine_refA_CAD_KS200.csv`).** If reading C is right (today's bore behaves like 200 um), the gains against today are:
+
+| change | top end 10.5-12.5k | 6-12k | 4-6k |
+|---|---|---|---|
+| same shape, 120 um wall | +0.9 % | +0.6 % | +0.2 % |
+| same shape, 60 um wall | +2.1 % | +1.4 % | +0.5 % |
+| same shape, 20 um wall | +3.3 % | +2.1 % | +0.9 % |
+| same shape, smooth wall | +4.0 % | +2.5 % | +1.1 % |
+| G: 140 mm, 60 um wall | +2.8 % | +1.8 % | +0.7 % |
+| L127: 127 mm, 60 um wall | +3.3 % | +2.1 % | +0.8 % |
+| L140: 136 mm, 60 um wall | +3.7 % | +2.3 % | +1.0 % |
+
+- Under this reading wall finish is worth as much as the shape: a 20 um bore on today's shape equals the optimizer's short part at 60 um.
+- These are conditional on the bore actually being that rough. Against a 60 um part the same shapes give the smaller gains in the earlier table (L140 +1.5 % / +1.0 %).
+- Fluent's L140 at 20 and 200 um (queued) will show whether the short part keeps its lead across finish.
