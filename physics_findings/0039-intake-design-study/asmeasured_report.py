@@ -15,7 +15,8 @@ D = pd.DataFrame([json.loads(l) for l in open(os.path.join(H, "asmeasured.ndjson
 dy = core.dyno(); ETA = 0.94
 NAMES = {"model": "as modelled (0036)", "plenum": "+ real plenum (1.83 L, 141 mm)", "intake": "+ real runners (252 / 230 mm)", "exh": "model intake + real exhaust",
          "all": "all measured", "all_sharp": "all measured, sharp runner mouths",
-         "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum"}
+         "all_mid": "all measured, plenum + 40 mm (2.77 L)", "all_big": "all measured, plenum + 93 mm (4.03 L)", "model_dump": "as modelled, dump plenum", "all_dump": "all measured, dump plenum",
+         "all_port100": "all measured, 100 mm head port", "all_port120": "all measured, 120 mm head port"}
 NOTE = "1D engine model, 160-cell plenum, venturi inertance 400 1/m, logged AFR and spark maps. Wheel torque = brake torque x 0.94. Dyno: team chassis dyno, 25 rpm bins."
 
 def curve(case):
@@ -26,9 +27,10 @@ for c in NAMES:
     r, t = curve(c); m = (r >= 4500) & (r <= 12500); r, t = r[m], t[m]; d = np.interp(r, dy.rpm, dy.Nm); C[c] = (r, t)
     k = float(np.sum(t * d) / np.sum(t * t))                                    # best single scale factor
     pk = r[np.argmax(t)]; hi = (r >= 9000)
+    u = r >= 5500; k2 = float(np.sum(t[u] * d[u]) / np.sum(t[u] ** 2))             # the dyno's first 1000 rpm (30 -> 48 N.m) may be the pull's ramp-in; score without it too
     rows.append(dict(case=c, n=len(r), rms_Nm=np.sqrt(np.mean((t - d) ** 2)), bias_Nm=np.mean(t - d), scale=k, shape_rms_Nm=np.sqrt(np.mean((k * t - d) ** 2)),
                      shape_rms_pct=100 * np.sqrt(np.mean((k * t / d - 1) ** 2)), peak_rpm=pk, peak_Nm=t.max(), peak_power_kW=(t * r * np.pi / 30 / 1000).max(),
-                     rms_4p5_7k=np.sqrt(np.mean((t - d)[r <= 7000] ** 2)), rms_7_10k=np.sqrt(np.mean((t - d)[(r > 7000) & (r <= 10000)] ** 2)), rms_10_12p5k=np.sqrt(np.mean((t - d)[r > 10000] ** 2))))
+                     rms_5p5k_up=np.sqrt(np.mean((t - d)[u] ** 2)), scale_5p5k_up=k2, shape_rms_5p5k_up=np.sqrt(np.mean((k2 * t - d)[u] ** 2)), peak_rpm_8_10k=r[(r >= 8000) & (r <= 10000)][np.argmax(t[(r >= 8000) & (r <= 10000)])], rms_4p5_7k=np.sqrt(np.mean((t - d)[r <= 7000] ** 2)), rms_7_10k=np.sqrt(np.mean((t - d)[(r > 7000) & (r <= 10000)] ** 2)), rms_10_12p5k=np.sqrt(np.mean((t - d)[r > 10000] ** 2))))
 T = pd.DataFrame(rows); pd.set_option("display.width", 220)
 print(f"dyno: peak {dy.Nm.max():.1f} Nm at {dy.rpm[dy.Nm.idxmax()]:.0f} rpm, peak power {dy.kW.max():.1f} kW at {dy.rpm[dy.kW.idxmax()]:.0f} rpm")
 print(T.round(3).to_string(index=False)); T.round(4).to_csv(os.path.join(OUT, "dyno_fit.csv"), index=False)

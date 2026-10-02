@@ -22,7 +22,7 @@ PORT = 0.080; INERT = 400.0; V_REAL, H_REAL = 1.826e-3, 140.9
 RPM_DYNO = list(range(4000, 12501, 250)); RPM_DESIGN = list(range(4000, 12501, 500))
 BASE = json.load(open(study.BASE))
 
-def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0, dump=False):
+def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0, dump=False, port=PORT):
     if plenum:
         _, p = study.make_cfg(V=V_REAL, lenfac=H_REAL / 120.0); d = json.load(open(p))
     else:
@@ -36,7 +36,7 @@ def build(name, plenum=False, runners=None, exhaust=False, tune=True, extra=0.0,
         for k in ("afr_map", "spark_advance_map"): d["physics"][k] = BASE["physics"][k]
     if runners:
         for pipe, L in zip(d["intake_pipes"], runners):
-            pipe["length"] = round(L + PORT, 4); pipe["diameter_profile"] = [[0.0, 0.040], [round(L, 4), 0.036], [round(L + PORT, 4), 0.033]]
+            pipe["length"] = round(L + port, 4); pipe["diameter_profile"] = [[0.0, 0.040], [round(L, 4), 0.036], [round(L + port, 4), 0.033]]
     if exhaust:
         for pipe in d["exhaust_primaries"]:
             pipe.update(length=0.4812, diameter=0.02765, diameter_out=0.0361, n_points=53,
@@ -55,7 +55,10 @@ DYNO = {"model": (build("model"), []), "plenum": (build("plenum", plenum=True), 
         "all_big": (build("all_big", plenum=True, runners=OUTER14, exhaust=True, extra=0.093), []),      # 4.03 L, 234 mm: the 3D plenum check's big case
         "all_mid": (build("all_mid", plenum=True, runners=OUTER14, exhaust=True, extra=0.040), []),
         "all_dump": (build("all_dump", plenum=True, runners=OUTER14, exhaust=True, dump=True), []),               # diag/plenum_recovery.py
-        "model_dump": (build("model_dump", dump=True), [])}      # 2.77 L, 181 mm
+        "model_dump": (build("model_dump", dump=True), []),
+        # the head port (flange to valve seat) is an 80 mm estimate; the dyno's torque peaks sit 4-8 % lower in rpm than the model's
+        "all_port100": (build("all_port100", plenum=True, runners=OUTER14, exhaust=True, port=0.100), []),
+        "all_port120": (build("all_port120", plenum=True, runners=OUTER14, exhaust=True, port=0.120), [])}      # 2.77 L, 181 mm
 DESIGN_CFG = build("design_plenum", plenum=True, tune=False)
 VPOS = [198.1, 223.1, 248.1, 273.1, 298.1]
 

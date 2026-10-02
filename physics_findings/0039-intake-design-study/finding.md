@@ -422,3 +422,24 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
 - The car-implied recovery at the exit plane stays 0.57. The gap to clean-wall CFD (0.69 in 2D, 0.65-0.66 in this coarser 3D mesh) is unchanged by the plenum and the sensor position; it stays with bore roughness or airflow.
 - **Consistent boundary to carry forward:** Cd 0.95, R 0.572, inertance 400 1/m, dump plenum, 160 cells. The drivetrain efficiency then needs a refit against the dyno (airflow falls about 2 %).
 - **Not modelled in 1D:** the jet feeding the runner mouths. One-runner-open 3D cases (planned) will give a usable mouth loss coefficient.
+
+## Addendum (2026-10-02): the as-measured car against the dyno
+
+`asmeasured.py` (318 runs, logged AFR and spark, 250 rpm steps, inertance on) swaps the model's estimated dimensions for the CAD's one group at a time; `asmeasured_report.py` scores each against the team dyno (wheel = brake x 0.94). Chart `charts/asmeasured/A1_dyno.png`, table `dyno_fit.csv`.
+
+| geometry | rms error, 5.5-12.5k | best single scale | shape error after scaling | 7-10.5k vs model | 10.5-12.5k vs model |
+|---|---|---|---|---|---|
+| as modelled (0036) | 2.63 N.m | 0.970 | 2.29 N.m | 0 | 0 |
+| + real plenum (1.83 L, 141 mm) | 2.57 | 0.970 | 2.22 | +0.2 % | -0.2 % |
+| + real runners (252 / 230 mm) | 2.56 | 0.971 | 2.24 | -0.1 % | +0.2 % |
+| model intake + real exhaust | 2.90 | 0.974 | 2.67 | -1.5 % | +2.6 % |
+| all measured | 2.87 | 0.975 | 2.66 | -1.6 % | +2.8 % |
+| all measured, sharp runner mouths (K 0.5) | 2.81 | 0.981 | 2.69 | -2.6 % | +2.4 % |
+
+- **Correcting the dimensions does not improve the match.** The measured plenum and runner lengths change nothing (0.2 %). The longer real exhaust moves about 1.5 % of torque from 7-10.5k to above 10.5k and makes the fit slightly worse, because the model was already high above 10.5k.
+- **The model's shape error is about 2.3-2.7 N.m (5-6 %) and it is a phase error.** The dyno peaks at 5.9k (47.5 N.m) and 8.6k (49.7 N.m) with a trough at 7-7.5k (42 N.m). The model peaks at 6.5k and 9.0k, 4-8 % higher in rpm, and its peaks and troughs are shallower. Above 10.5k the model is 2-4 N.m high.
+- This is the known "model sits about 4 % high in rpm" that the 0039 scores already carry as the rpm-shifted duty cycles. The CAD dimensions do not explain it.
+- **Remaining candidates:** the head port length (80 mm is an estimate; a longer port lowers the peaks), cam timing and lift, and the runner end correction. Two cases with 100 and 120 mm ports are queued. If one lines the peaks up, every VRLI position in this finding shifts shorter by the same amount.
+- Below 5.5k the dyno rises from 30 to 48 N.m in 1000 rpm and the model does not follow (rms 6.2 N.m over 4.5-7k). Whether that is the engine or the start of the dyno pull is not known.
+- The model is 3 % high overall in these runs (scale 0.97): the inertance raised airflow, and the dome plenum over-recovers (previous addendum). A drivetrain-efficiency refit is owed.
+- **VRLI in the real plenum** (1.826 L, 141 mm, neutral tune): worst case +2.9 %, 6-12k +4.6 %, 10.5-12.5k +7.8 % with the 200 mm/s schedule, against the fixed 248 mm runner in the same plenum. This matches the sweep's values for that size.
