@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import { decide, fetchSetting, itemCost, type BudgetRow, type Item } from "../lib/api";
+import { can, decide, fetchSetting, itemCost, setStatus, type BudgetRow, type Item } from "../lib/api";
 import { fmtCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, PrioritySelect, SubteamChip } from "../components/ui";
@@ -38,6 +38,8 @@ export function ApprovalsView({
       .then(([n, self]) => setRule({ required: Number(n) > 0 ? Number(n) : 2, selfCounts: self === "true" }));
   }, [client]);
   const now = Date.now();
+  // the CFO approves alone when the approvals were given in person
+  const override = can(data.caps, "purchasing.override");
 
   const waiting = items
     .filter((i) => i.status === "READY")
@@ -56,6 +58,14 @@ export function ApprovalsView({
       await reload();
       flash(result === "APPROVED" ? `${i.code} approved: it's on the To order list.`
         : result === "DENIED" ? `${i.code} denied.` : `Your approval is in. ${i.code} is waiting for more.`);
+    } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
+  }
+
+  async function approveNow(i: Item) {
+    try {
+      await setStatus(client, [i.id], "APPROVED", notes[i.id]?.trim() || "approved in person");
+      await reload();
+      flash(`${i.code} approved: it's on the To order list.`);
     } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
   }
 
@@ -132,6 +142,8 @@ export function ApprovalsView({
                 onChange={(e) => setNotes((n) => ({ ...n, [i.id]: e.target.value }))} />
               {mine && <span className={`text-xs ${mine.decision === "approve" ? "text-helios-success" : "text-helios-danger"}`}>You {mine.decision === "approve" ? "approved" : "denied"}</span>}
               <Button kind="good" disabled={mine?.decision === "approve"} onClick={() => void act(i, "approve")}>Approve</Button>
+              {override && <Button kind="good" title="Approved in person: no second exec needed. Your note goes in its history."
+                onClick={() => void approveNow(i)}>Approve now</Button>}
               <Button kind="danger" onClick={() => void act(i, "deny")}>Deny</Button>
             </div>
           </Card>

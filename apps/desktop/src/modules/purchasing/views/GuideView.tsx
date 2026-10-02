@@ -82,7 +82,7 @@ const PART_STEPS: Step[] = [
       <p>Changed your mind? Move it back to Not ready, or Cancel it. You can edit it until it's approved.</p></>,
     page: ["parts", "Open Abacus"] },
   { id: "approval", title: "Two execs approve", tone: "exec", who: "Execs",
-    what: <><p>Two different execs must approve before anything is bought. If an exec asked for it, their own approval doesn't count. One "deny" stops it, and you're told why in your Inbox.</p>
+    what: <><p>Two different execs must approve before anything is bought. If an exec asked for it, their own approval doesn't count. One "deny" stops it, and you're told why in your Inbox. If execs said yes in person, the CFO can approve it alone.</p>
       <p>Nothing to do but wait. Stuck for days? Ask in person; the approval queue shows how long it's waited.</p></>,
     page: ["inbox", "Open your inbox"] },
   { id: "ordered", title: "Ordered", tone: "move", who: "Execs",
@@ -187,7 +187,8 @@ const WEEK_STEPS: Step[] = [
   { id: "reimburse", title: "Reimbursements", tone: "money", who: "CFO",
     what: <><p>Review new requests (look at the receipt), approve or decline. To pay: tick the rows, then choose how it was paid.</p>
       <p><b>By check</b> (one person at a time): enter the check number and keep <b>Write the check into the ledger</b> on. The check counts against Available until it clears.</p>
-      <p><b>Cash from the cash box</b>: the cash comes out of the Cash Box account in the ledger. <b>Cash withdrawn at Chase</b>: the withdrawal goes into the ledger now; when the statement comes in, its withdrawal line is matched to it, not counted twice.</p></>,
+      <p><b>Cash from the cash box</b>: the cash comes out of the Cash Box account in the ledger. <b>Cash withdrawn at Chase</b>: the withdrawal goes into the ledger now; when the statement comes in, its withdrawal line is matched to it, not counted twice.</p>
+      <p>Entered by mistake? Press <b>Delete</b> on its row (it's gone with its receipts). If it was already paid, its check or withdrawal stays in the ledger: delete that there too if it was also wrong.</p></>,
     page: ["reimbursements", "Open Reimbursements"] },
   { id: "meeting", title: "Read the Overview", tone: "done", who: "All execs",
     what: <><p>For the meeting: <b>Available to spend</b> (the real number, not the bank balance), <b>card credit used</b> this cycle, and Needs attention.</p></>,
@@ -196,7 +197,8 @@ const WEEK_STEPS: Step[] = [
 
 const BUY_STEPS: Step[] = [
   { id: "approve", title: "Approve (2 execs)", tone: "exec", who: "Execs",
-    what: <p>Approvals shows each request with the requester's name and what it does to the subteam's budget. Two different execs must approve; the requester's own approval doesn't count.</p>,
+    what: <><p>Approvals shows each request with the requester's name and what it does to the subteam's budget. Two different execs must approve; the requester's own approval doesn't count.</p>
+      <p>Approved in person (at the exec meeting, say)? The CFO presses <b>Approve now</b>, or in Abacus picks Approved in the Status column, and no second exec is needed. The CFO can also set any status, move parts to another subteam or car, and delete any part not matched to a ledger charge (tick them, then the action menu). It all goes in each part's history.</p></>,
     page: ["approvals", "Open Approvals"] },
   { id: "order", title: "Buy it", tone: "exec", who: "CFO / President",
     what: <><p>Orders & tracking: tick the parts bought together and press <b>From the order confirmation</b>. Paste the order email or page (or drop its PDF): the subtotal, shipping, tax and total are read off it and each part gets its share by price, so every part shows what it really cost.</p>
@@ -250,6 +252,7 @@ export function ExecGuide({ go }: { go: Go }) {
         <p>Only the six execs see Finance (this section), all budgets, and all reimbursements.</p>
         <p>Members see all of Abacus (the parts list), <b>only their own subteam's budget</b>, and only their own reimbursement requests.</p>
         <p>Only execs can upload statements. Only the last four digits of any account or card number are stored.</p>
+        <p>The CFO's extra powers in Abacus (approving alone, any status, moving and deleting any part) come from the <b>Purchasing: override</b> permission on the CFO role in Admin, so a future CFO gets them too.</p>
       </Extra>
       <Extra id="statuses" prefix={p} title="Received vs Reconciled">
         <p><b>Received</b>: the requester has the part in hand (they click it). <b>Reconciled</b>: the charge for it is matched to a statement line (you do it, by attaching the part to the ledger line). The first is about the part, the second about the money.</p>

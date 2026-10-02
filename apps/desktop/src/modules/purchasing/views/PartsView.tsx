@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type Keyboar
 import type { SupabaseClient } from "@helios/auth";
 import {
   ON_THE_WAY, ORDERED_STATUSES, REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
-  deleteItems, setCarSubteam, setStatus, subteamsOfCar, undoOrder, updateItem, type Item, type Priority, type Status,
+  deleteItems, moveItems, setCarSubteam, setStatus, subteamsOfCar, undoOrder, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
 import { today } from "../lib/dates";
 import { centsToInput, fmtCents, parseCents, requireCents } from "../lib/money";
@@ -99,6 +99,8 @@ export function PartsView({
 }) {
   const { items, subteams, caps } = data;
   const exec = can(caps, "purchasing.approve");
+  // the CFO: approves alone (approvals given in person), any status, moves and deletes any part
+  const override = can(caps, "purchasing.override");
   const [tab, setTab] = useState<string | null>(null);   // subteam id, null = All
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -142,6 +144,7 @@ export function PartsView({
   const canEdit = (i: Item) =>
     exec || ((i.status === "PLANNED" || i.status === "READY") && i.item_allocations.some((a) => can(caps, "purchasing.request", a.subteam_id)));
   const statusOptions = (i: Item): Status[] => {
+    if (override) return STATUSES;
     // Execs may set any status the server allows: APPROVED only comes from two
     // approvals, and nothing unapproved can jump to ordered/shipped/received.
     if (exec) {
@@ -367,11 +370,18 @@ export function PartsView({
   const [ask, confirmDialog] = useConfirm();
   const [order, setOrder] = useState({ id: "", payment: "SAE card", total: "", on: today(), paidBy: "" });
   const [track, setTrack] = useState({ number: "", carrier: "", eta: "" });
+  const [move, setMove] = useState("");   // car id and subteam id, joined by |
   async function applyBulk() {
     if (!ids.length || !bulk) return;
     if (bulk.startsWith("status:")) {
       const s = bulk.slice(7) as Status;
       await run(`${ids.length} item(s) updated`, () => setStatus(client, ids, s));
+    } else if (bulk === "approve-now") {
+      await run(`Approved ${ids.length} item(s)`, () => setStatus(client, ids, "APPROVED", "approved in person"));
+    } else if (bulk === "move") {
+      const [p, st] = move.split("|");
+      if (!p || !st) { flash("Pick the car and subteam to move them to.", true); return; }
+      await run("", async () => { const n = await moveItems(client, ids, p, st); flash(`Moved ${n} part${n === 1 ? "" : "s"}.`); });
     } else if (bulk === "approve") {
       await run(`Approved ${ids.length} item(s)`, async () => { for (const id of ids) await decide(client, id, "approve"); });
     } else if (bulk === "order") {
@@ -383,7 +393,9 @@ export function PartsView({
     } else if (bulk === "delete") {
       const pick = rows.filter((r) => selected.has(r.id));
       const ok = await ask({ title: `Delete ${pick.length} part${pick.length === 1 ? "" : "s"}?`, confirmLabel: "Delete", danger: true,
-        body: <>They're removed from Abacus for good (the parts history keeps the whole part and who deleted it). Approved and ordered parts can't be deleted (they count toward budgets): cancel them, or undo the order, first. Nor can parts matched to a ledger charge or a reimbursement.
+        body: <>They're removed from Abacus for good (the parts history keeps the whole part and who deleted it). {override
+          ? "Approved and ordered parts go too, and stop counting toward budgets. Parts matched to a ledger charge can't be deleted: unmatch them in the ledger first."
+          : "Approved and ordered parts can't be deleted (they count toward budgets): cancel them, or undo the order, first. Nor can parts matched to a ledger charge or a reimbursement."}
           {pick.length <= 8 && <span className="mt-2 block text-xs">{pick.map((r) => `${r.code} ${r.title}`).join(", ")}</span>}</> });
       if (!ok) return;
       await run("", async () => { const n = await deleteItems(client, ids); flash(`Deleted ${n} part${n === 1 ? "" : "s"}.`); });
@@ -587,8 +599,12 @@ export function PartsView({
             <option value="status:RECEIVED">Mark received</option>
             <option value="cart">Split one cart's shipping & tax over these</option>
             <option value="copy">Copy as spreadsheet rows</option>
+            {override && <>
+              <option value="approve-now">Approve now (in person, no second exec)</option>
+              <option value="move">Move to another subteam or car</option>
+            </>}
             {exec && <>
-              <option value="approve">Approve</option>
+              <option value="approve">{override ? "Approve (one vote of two)" : "Approve"}</option>
               <option value="order">Record order (bought together)</option>
               <option value="undo-order">Undo order</option>
               <option value="tracking">Add tracking</option>
@@ -605,6 +621,16 @@ export function PartsView({
             <input type="date" className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" value={order.on} onChange={(e) => setOrder({ ...order, on: e.target.value })} />
             <input className="w-40 rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Member who paid (if any)" value={order.paidBy} onChange={(e) => setOrder({ ...order, paidBy: e.target.value })} />
           </>}
+          {bulk === "move" && (
+            <select className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" value={move} onChange={(e) => setMove(e.target.value)} aria-label="Move to">
+              <option value="">Move to...</option>
+              {data.projects.map((p) => (
+                <optgroup key={p.id} label={p.car_code}>
+                  {subteamsOfCar(subteams, data.carSubteams, items, p.id).map((st) => <option key={st.id} value={`${p.id}|${st.id}`}>{p.car_code} {st.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          )}
           {bulk === "tracking" && <>
             <input className="rounded-md border border-helios-line bg-helios-panel px-2 py-1 text-sm" placeholder="Tracking number" value={track.number}
               onChange={(e) => setTrack({ ...track, number: e.target.value, carrier: detectCarrier(e.target.value) || track.carrier })} />
@@ -620,7 +646,7 @@ export function PartsView({
 
       {confirmDialog}
       {cart && (
-        <OrderDialog client={client} items={cart} canOrder={can(caps, "purchasing.order")} vendorNames={data.vendors.map((v) => v.name)}
+        <OrderDialog client={client} items={cart} canOrder={can(caps, "purchasing.order")} canOverride={override} vendorNames={data.vendors.map((v) => v.name)}
           reload={reload} flash={flash} onClose={() => { setCart(null); setSelected(new Set()); }} />
       )}
 

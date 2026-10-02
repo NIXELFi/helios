@@ -27,6 +27,20 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agora: the CFO can change anything in Abacus.** Approvals often happen in
+  person, so the CFO can approve a part alone (**Approve now** in Approvals, or
+  Approved in Abacus's Status column) without a second exec. The CFO can also
+  set any status, record an order on parts not yet approved (or imported by
+  themselves), move parts to another subteam or car, and delete any part not
+  matched to a ledger charge. It comes from a new permission, **Purchasing:
+  override**, given to the CFO role (Admin can give it to another role), and
+  every step goes in the part's history.
+- **Agora: delete a reimbursement entered by mistake** (Finance >
+  Reimbursements, Delete on its row or request), with its receipts. A check or
+  cash withdrawal already in the ledger for it stays there.
+
 ## [6.0.2] - 2026-10-02
 
 ### Changed

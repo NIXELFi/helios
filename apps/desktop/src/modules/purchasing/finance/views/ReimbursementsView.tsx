@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { centsToInput, fmtCents, parseCents } from "../../lib/money";
 import { Button, Card, Empty, useConfirm } from "../../components/ui";
 import {
-  addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, recordReimbursementPayment, updateReimbursement, uploadReceipts,
+  addReimbursement, attachReceiptsOrUndo, decideReimbursement, deleteReceipt, deleteReimbursement, recordReimbursementPayment, updateReimbursement, uploadReceipts,
   type ReimbursementWithReceipts,
 } from "../api";
 import { today } from "../../lib/dates";
@@ -10,7 +10,7 @@ import { PAID_WITH_LABEL, type PaidWith } from "../ledger";
 import { Badge, attempt, input, shortDate, whereLabel, type FinanceProps } from "./shared";
 import { ReceiptList, ReceiptPicker, removeReceiptQuestion } from "./Receipts";
 
-/** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check or in cash. */
+/** Execs: everyone the team owes money, per person, with receipts; review requests; pay by check or in cash; delete mistakes. */
 export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }: FinanceProps) {
   const where = whereLabel(pur);
   const requests = fin.reimbursements.filter((r) => r.status === "requested");
@@ -126,8 +126,10 @@ const LEDGER_HINT: Record<PaidWith, string> = {
 
 function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "client" | "reload" | "flash"> & { r: ReimbursementWithReceipts; where: string }) {
   const [note, setNote] = useState("");
+  const [ask, confirmDialog] = useConfirm();
   return (
     <Card>
+      {confirmDialog}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <b>{r.person_name}</b> <span className="text-helios-dim">asked {shortDate(r.created_at)}</span>
@@ -141,9 +143,21 @@ function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "cl
         <input className={`${input} min-w-[220px] flex-1`} placeholder="Note (optional, sent to them)" value={note} onChange={(e) => setNote(e.target.value)} />
         <Button kind="good" onClick={() => void attempt(flash, reload, "Approved. It's now owed.", () => decideReimbursement(client, r.id, "approve", note))}>Approve</Button>
         <Button kind="danger" onClick={() => void attempt(flash, reload, "Declined.", () => decideReimbursement(client, r.id, "deny", note))}>Decline</Button>
+        <Button kind="ghost" title="Entered by mistake: remove it without telling them" onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "Deleted.", () => deleteReimbursement(client, r)))}>Delete</Button>
       </div>
     </Card>
   );
+}
+
+/** The confirm for deleting a reimbursement entered by mistake. */
+function deleteQuestion(r: ReimbursementWithReceipts) {
+  const files = r.reimbursement_receipts.length;
+  return {
+    title: `Delete ${r.person_name}'s ${fmtCents(r.amount_cents)}${r.reason ? ` for ${r.reason.slice(0, 60)}` : ""}?`,
+    body: <>It's removed for good{files ? `, with its ${files} receipt${files === 1 ? "" : "s"}` : ""}. Use this for one entered by mistake.
+      {r.check_txn_id && <span className="mt-2 block">Its {r.paid_with === "check" || !r.paid_with ? "check" : "cash withdrawal"} stays in the ledger: delete it there too if that was a mistake as well.</span>}</>,
+    confirmLabel: "Delete", danger: true,
+  };
 }
 
 function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<FinanceProps, "client" | "reload" | "flash" | "openTxn"> & {
@@ -185,6 +199,8 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
           {r.check_number && <div className="mt-1">check #{r.check_number}</div>}
           {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger</button>}
         </> : <Badge tone="warn">owed</Badge>}
+        <div><button className="mt-1 text-helios-muted hover:text-helios-danger hover:underline" title="Entered by mistake"
+          onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "Deleted.", async () => { toggle(r.id, false); await deleteReimbursement(client, r); }))}>Delete</button></div>
       </td>
     </tr>
   );

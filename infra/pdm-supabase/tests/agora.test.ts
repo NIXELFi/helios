@@ -318,6 +318,70 @@ describe("agora follow-ups", () => {
     expect(data).toContainEqual({ project_id: ic, subteam_id: daq });
   });
 
+  it("the CFO approves alone (in person), sets any status, orders, moves and deletes any part; other execs can't", async () => {
+    const cfo = await person("cfo", "cfo");
+    const chief = await person("chief", "executive");
+    const member = await person("member", "engineer", daq);
+    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_ready: true,
+      p_rows: [{ title: "Approved in person" }, { title: "Bought at the shop" }, { title: "Ordered online", unit_price_cents: 1000 }, { title: "Misfiled" }, { title: "Charged" }] });
+    const [inPerson, shop, online, misfiled, charged] = ids as string[];
+    const status = async (id: string) => (await pur().from("items").select("status,approved_at").eq("id", id).single()).data!;
+
+    // another exec still needs a second approval
+    expect((await chief.p.rpc("set_status", { p_ids: [inPerson], p_status: "APPROVED" })).error?.message).toMatch(/two exec approvals/);
+    expect((await chief.p.rpc("set_status", { p_ids: [shop], p_status: "RECEIVED" })).error?.message).toMatch(/hasn't been approved/);
+    expect((await chief.p.rpc("record_order", { p_ids: [online], p_order_id: "A1", p_payment: "SAE card" })).error?.message).toMatch(/only approved/);
+
+    // the CFO: approved in person, with an approval in their name and the requester told
+    expect((await cfo.p.rpc("set_status", { p_ids: [inPerson], p_status: "APPROVED", p_note: "" })).error).toBeNull();
+    expect((await status(inPerson!)).status).toBe("APPROVED");
+    expect((await pur().from("approvals").select("user_id,decision,note").eq("item_id", inPerson!)).data)
+      .toEqual([{ user_id: cfo.user.id, decision: "approve", note: "approved in person" }]);
+    expect((await pur().from("notifications").select("kind").eq("user_id", member.user.id).eq("item_id", inPerson!)).data).toEqual([{ kind: "approved" }]);
+    // straight to received, or ordered, approving on the way
+    expect((await cfo.p.rpc("set_status", { p_ids: [shop], p_status: "RECEIVED" })).error).toBeNull();
+    expect(await status(shop!)).toMatchObject({ status: "RECEIVED", approved_at: expect.any(String) });
+    expect((await cfo.p.rpc("record_order", { p_ids: [online], p_order_id: "A1", p_payment: "SAE card", p_total_cents: 1081 })).error).toBeNull();
+    expect((await status(online!)).status).toBe("ORDERED");
+    // and back again: any status
+    expect((await cfo.p.rpc("set_status", { p_ids: [online], p_status: "APPROVED" })).error).toBeNull();
+    expect((await status(online!)).status).toBe("APPROVED");
+
+    // parts the CFO imported already ordered: the CFO records the order too; another exec importing can't
+    await cfo.p.rpc("import_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "CFO import", status: "ORDERED" }] });
+    await chief.p.rpc("import_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Chief import", status: "ORDERED" }] });
+    const imported = async (t: string) => (await pur().from("items").select("id").eq("title", t).single()).data!.id as string;
+    expect((await cfo.p.rpc("record_order", { p_ids: [await imported("CFO import")], p_order_id: "B2", p_payment: "SAE card", p_total_cents: 500 })).error).toBeNull();
+    expect((await chief.p.rpc("record_order", { p_ids: [await imported("Chief import")], p_order_id: "C3", p_payment: "SAE card", p_total_cents: 500 })).error?.message).toMatch(/another exec/);
+
+    // moving to another subteam (and car): the CFO only, logged
+    const aero = await subteam("Aero", "AERO");
+    expect((await chief.p.rpc("move_items", { p_ids: [misfiled], p_project: ev, p_subteam: aero })).error).not.toBeNull();
+    expect((await cfo.p.rpc("move_items", { p_ids: [misfiled], p_project: ev, p_subteam: aero })).data).toBe(1);
+    expect((await pur().from("item_allocations").select("project_id,subteam_id,percent").eq("item_id", misfiled!)).data)
+      .toEqual([{ project_id: ev, subteam_id: aero, percent: 100 }]);
+    expect((await pur().from("events").select("old_value,new_value").eq("item_id", misfiled!).eq("field", "subteam").single()).data)
+      .toEqual({ old_value: "SDM27 DAQ", new_value: "SDM27e AERO" });
+
+    // deleting: the CFO deletes approved and received parts, not one matched to a charge
+    const { data: acct } = await fin().from("accounts").insert({ name: "Card", kind: "credit_card" }).select("id").single();
+    const { data: t } = await fin().from("transactions").insert({ account_id: acct!.id, date: "2026-09-01", amount_cents: -500, kind: "charge" }).select("id").single();
+    await pur().from("items").update({ finance_txn_id: t!.id }).eq("id", charged!);
+    expect((await chief.p.rpc("delete_items", { p_ids: [inPerson] })).error?.message).toMatch(/can't be deleted/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [inPerson, charged] })).error?.message).toMatch(/Unmatch them in the ledger/);
+    expect((await cfo.p.rpc("delete_items", { p_ids: [inPerson, shop] })).data).toBe(2);
+  });
+
+  it("execs delete a reimbursement entered by mistake; members can't", async () => {
+    const cfo = await person("cfo", "cfo");
+    const member = await person("member", "engineer", daq);
+    const { data: wrong } = await fin().from("reimbursements").insert({ person_name: "Demo Person", reason: "typo", amount_cents: 99999 }).select("id").single();
+    const { data: mine } = await member.f.rpc("request_reimbursement", { p_amount_cents: 1200, p_reason: "Zip ties" });
+    expect((await member.f.from("reimbursements").delete().eq("id", wrong!.id).select("id")).data ?? []).toEqual([]);
+    expect((await cfo.f.from("reimbursements").delete().in("id", [wrong!.id, mine as number]).select("id")).error).toBeNull();
+    expect((await fin().from("reimbursements").select("id")).data).toEqual([]);
+  });
+
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);

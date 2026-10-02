@@ -134,6 +134,16 @@ export async function addReimbursement(c: SupabaseClient, r: Partial<Reimburseme
 export async function updateReimbursement(c: SupabaseClient, id: number, fields: Partial<Reimbursement>): Promise<void> {
   unwrap(await F(c).from("reimbursements").update(fields).eq("id", id));
 }
+/**
+ * Execs: delete a reimbursement entered by mistake, with its receipts. A check
+ * or cash withdrawal already in the ledger for it stays there. The row goes
+ * first: an exec can still remove its receipt files afterwards.
+ */
+export async function deleteReimbursement(c: SupabaseClient, r: ReimbursementWithReceipts): Promise<void> {
+  const gone = unwrap(await F(c).from("reimbursements").delete().eq("id", r.id).select("id")) as { id: number }[];
+  if (!gone.length) throw new Error("That reimbursement couldn't be deleted (it may already be gone).");
+  if (r.reimbursement_receipts.length) await c.storage.from("receipts").remove(r.reimbursement_receipts.map((x) => x.object_path));
+}
 
 export const RECEIPT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
 export const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;

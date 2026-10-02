@@ -186,15 +186,16 @@ describe("purchasing", () => {
   });
 
   it("one exec can't approve, order or ship an unapproved item on their own", async () => {
-    const cfo = await member("cfo", "cfo");
-    const { data: ids } = await cfo.client.rpc("add_items", {
+    // (the CFO can: purchasing.override, tested in agora.test.ts)
+    const pres = await member("pres", "president");
+    const { data: ids } = await pres.client.rpc("add_items", {
       p_project: ic, p_subteam: daq, p_ready: true, p_rows: [{ title: "Scope", total_estimate_cents: 50000 }],
     });
-    expect((await cfo.client.rpc("set_status", { p_ids: ids, p_status: "APPROVED" })).error?.message).toMatch(/two exec approvals/);
-    expect((await cfo.client.rpc("set_status", { p_ids: ids, p_status: "ORDERED" })).error?.message).toMatch(/hasn't been approved/);
-    expect((await cfo.client.rpc("record_order", { p_ids: ids, p_order_id: "1", p_payment: "card" })).error?.message)
+    expect((await pres.client.rpc("set_status", { p_ids: ids, p_status: "APPROVED" })).error?.message).toMatch(/two exec approvals/);
+    expect((await pres.client.rpc("set_status", { p_ids: ids, p_status: "ORDERED" })).error?.message).toMatch(/hasn't been approved/);
+    expect((await pres.client.rpc("record_order", { p_ids: ids, p_order_id: "1", p_payment: "card" })).error?.message)
       .toMatch(/only approved items/);
-    expect((await cfo.client.rpc("add_tracking", { p_ids: ids, p_number: "1Z" })).error?.message).toMatch(/only approved items/);
+    expect((await pres.client.rpc("add_tracking", { p_ids: ids, p_number: "1Z" })).error?.message).toMatch(/only approved items/);
     const { data: still } = await pur().from("items").select("status").eq("id", ids![0]).single();
     expect(still!.status).toBe("READY");
   });
