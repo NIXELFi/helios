@@ -1,0 +1,51 @@
+# Exhaust-port boundary traces from the 1D engine model (for the Fluent 3D exhaust run)
+
+Files: `exhaust_ports_9000rpm.csv`, `exhaust_ports_6000rpm.csv`, `exhaust_ports_11500rpm.csv`. Each covers one 720° cycle at 1° of crank, the 20th cycle, WOT.
+
+**Source run.** Config `sdm26_asbuilt_cal` with the logged AFR and spark maps, a 160-cell plenum and the venturi inertance on (400 1/m). Driver: `driver/src/bin/exhwave.rs`.
+
+## Columns
+
+`theta_deg` is the global crank angle and `t_s` the time. Then, for each cylinder i = 1..4:
+
+| column | meaning |
+|---|---|
+| `phase{i}_deg` | that cylinder's own crank angle: 0 = firing TDC; exhaust valve opens at 140°, closes at 365° |
+| `mdot_valve{i}_kg_s` | mass flow through the exhaust valve, positive out of the cylinder, negative = backflow |
+| `T_valve{i}_K` | static temperature of the gas crossing the valve |
+| `p_cyl{i}_Pa`, `T_cyl{i}_K` | cylinder pressure and temperature |
+| `p_port{i}_Pa`, `T_port{i}_K`, `u_port{i}_m_s`, `mdot_port{i}_kg_s` | static pressure, static temperature, velocity and mass flow in the first cell of the primary (at the valve) |
+
+Total temperature = T + u² / (2 cp), with cp = 1278 J/kg/K.
+
+## Phasing
+
+Firing order 1-2-4-3 at 180° intervals. At `theta_deg` = 0, cylinder 1 is at its firing TDC, and cylinders 3, 4 and 2 are at 180°, 360° and 540° of their own cycles. The columns are already phased.
+
+## Model facts
+
+- **Pairing:** primaries 1 & 4 and 2 & 3 join (360° apart), then the two secondaries join. This is unconfirmed from CAD.
+- **Gas:** exhaust pipes use a constant gamma = 1.30 and R = 295 J/kg/K (cp 1278 J/kg/K). There is no cp(T).
+- **Walls:** primaries 900 K, secondaries 750 K, final collector 650 K. Convective wall heat transfer and friction are on, with roughness 46 µm. The walls are not adiabatic.
+- **Primary** (each): 423.9 mm in total.
+  - 65 mm head port at 27.65 mm diameter (estimated)
+  - 312.3 mm of 29.26 mm ID tube, with the last 10 mm stepping to 35.61 mm
+  - 46.6 mm running side by side inside the first collector
+- **Secondary** (each): 467.3 mm in total.
+  - 59.7 mm merged cone (two 35.61 mm areas into one 35.61 mm)
+  - 361 mm of 35.61 mm ID tube
+  - 46.6 mm side by side in the second collector
+- **Final pipe:** 664.7 mm in total.
+  - 59.7 mm merged cone
+  - about 100 mm at 41.96 mm ID
+  - 48.31 mm ID to the end, including a 305 mm straight-through muffler modelled as plain pipe
+- **Termination:** open end at 97.3 kPa with a frequency-dependent reflection (Levine-Schwinger) and a 0.6133 r end correction. No muffler volume, no bend losses.
+- **Junctions:** characteristic junctions with momentum; merge half-angle is the config's `exhaust_merge_angle_deg`.
+
+## Totals
+
+| rpm | exhaust mass flow | peak valve flow | port pressure range | valve temperature at peak flow |
+|---|---|---|---|---|
+| 9000 | 51.1 g/s | 110 g/s | 30-245 kPa | 1296 K |
+| 6000 | 30.1 g/s | 77 g/s | 44-161 kPa | 1119 K |
+| 11500 | 51.5 g/s | 100 g/s | 46-223 kPa | 1199 K |
