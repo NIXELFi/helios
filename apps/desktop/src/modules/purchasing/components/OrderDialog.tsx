@@ -37,7 +37,9 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
   const [note, setNote] = useState<string | null>(null);
   const [f, setF] = useState<Record<MoneyField, string> & { orderId: string; date: string }>(() => ({
     subtotal: centsToInput(items.reduce((s, i) => s + partPrice(i), 0)), shipping: "", tax: "", fees: "", discount: "", total: "",
-    orderId: items.find((i) => i.vendor_order_id)?.vendor_order_id ?? "", date: today(),
+    orderId: items.find((i) => i.vendor_order_id)?.vendor_order_id ?? "",
+    // an order already placed keeps its date (charges are matched to parts by it); blank keeps each part's own
+    date: items.some((i) => i.ordered_at) ? (new Set(items.map((i) => i.ordered_at)).size === 1 ? items[0]!.ordered_at! : "") : today(),
   }));
   const [mode, setMode] = useState<"whole" | "share">("whole");
   const [asOrder, setAsOrder] = useState(canOrder && allApproved);

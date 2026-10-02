@@ -30,7 +30,7 @@ export function WhatIfView({ fin, pur, flash }: FinanceProps) {
   const d = useMemo(() => dashboard(fin, asOf), [fin, asOf]);
   const start: WhatIfStart = useMemo(() => ({
     available: d.summary?.available_cents ?? null,
-    cards: Object.fromEntries(d.cards.filter((c) => c.account.active).map((c) => [c.account.id, { name: accountLabel(c.account), remaining: c.headroom.remaining_cents }])),
+    cards: Object.fromEntries(d.cards.filter((c) => c.account.active && c.account.credit_limit_cents).map((c) => [c.account.id, { name: accountLabel(c.account), remaining: c.headroom.remaining_cents }])),
     accounts: Object.fromEntries(fin.accounts.filter((a) => a.active && a.kind !== "checking" && a.kind !== "credit_card")
       .map((a) => [a.id, { name: a.name, balance: latestBalance(fin.balances, a.id, asOf)?.balance_cents ?? null }])),
     budgets: Object.fromEntries(pur.budgets.filter((b) => b.budget_line_id).map((b) => [b.budget_line_id!, { name: `${b.project_code} ${b.name}`, remaining: remaining(b) }])),

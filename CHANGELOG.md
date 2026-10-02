@@ -67,7 +67,10 @@ follow [semver](https://semver.org/).
   card's limit or below a cushion you set; untick a line to leave it out. It
   never touches the books, and "Copy as text" gives a summary for the meeting.
 - **Agora: undo an order.** An order recorded by mistake can be undone (Orders &
-  tracking, or the parts list's actions): the parts go back to Approved.
+  tracking, or the parts list's actions): the parts go back to Approved, or to
+  Ready to order if they never had approvals (imported from Airtable already
+  ordered). Parts imported already ordered skipped approvals, so the exec who
+  imported them can't also record their order or cost; another exec does.
 - **Agora: change an account's type, or delete it.** Accounts can now be
   retyped (a funding account added as "holding", say), and deleted while
   nothing is recorded against them.

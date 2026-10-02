@@ -146,7 +146,7 @@ export function OrdersView({
                 <Button kind="ghost" onClick={() => setCart(group)}>Costs from the invoice...</Button>
                 <Button kind="danger" onClick={() => void ask({
                   title: `Undo order ${first.vendor_order_id ?? ""}?`.replace(" ?", "?"),
-                  body: `${group.length} part${group.length === 1 ? "" : "s"} go back to Approved (still approved, ready to buy again). The order number, cost, payment and tracking are cleared.`,
+                  body: `${group.length} part${group.length === 1 ? "" : "s"} go back to Approved, ready to buy again (parts imported already ordered, which never had approvals, go to Ready to order). The order number, cost, payment and tracking are cleared.`,
                   confirmLabel: "Undo order", danger: true,
                 }).then((ok) => { if (ok) void run("Order undone. The parts are back on To order.", () => undoOrder(client, ids)); })}>Undo order</Button>
               </div>

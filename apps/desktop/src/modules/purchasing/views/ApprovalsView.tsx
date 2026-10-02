@@ -4,6 +4,7 @@ import { decide, fetchSetting, itemCost, type BudgetRow, type Item } from "../li
 import { fmtCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, PrioritySelect, SubteamChip } from "../components/ui";
+import { partPrice } from "../components/OrderDialog";
 
 const PRIORITY_ORDER = { HIGH: 0, Medium: 1, Low: 2 } as const;
 
@@ -90,9 +91,9 @@ export function ApprovalsView({
                 <div className="text-xs text-helios-dim">
                   {i.quantity !== null && i.unit_price_cents !== null ? `${i.quantity} x ${fmtCents(i.unit_price_cents)}` : ""}{i.vendor ? ` | ${i.vendor}` : ""}
                 </div>
-                {taxPct !== null && i.tax_shipping_cents === null && i.actual_total_cents === null && itemCost(i) > 0 && (
-                  <div className="text-xs text-helios-info" title="No tax or shipping was entered. This adds the estimated sales tax rate (an Agora setting); shipping isn't included.">
-                    about {fmtCents(Math.round(itemCost(i) * (1 + taxPct / 100)))} with ~{taxPct}% tax
+                {taxPct !== null && i.actual_total_cents === null && partPrice(i) > 0 && (
+                  <div className="text-xs text-helios-info" title="Adds the estimated sales tax rate (an Agora setting) on the part's price. Members usually enter only shipping in Tax/ship, if anything.">
+                    about {fmtCents(itemCost(i) + Math.round(partPrice(i) * taxPct / 100))} with ~{taxPct}% tax{i.tax_shipping_cents !== null ? ", if Tax/ship has none" : ""}
                   </div>
                 )}
               </div>
