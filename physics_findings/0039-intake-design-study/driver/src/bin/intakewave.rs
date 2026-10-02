@@ -2,7 +2,8 @@
 // Settles cycles-1 cycles, then samples the last 720 deg every 1 deg of crank (global crank angle; cylinders are
 // phased by the firing order). Columns: restrictor mass flow, plenum static pressure at the restrictor exit, at the
 // MAP port (110 mm downstream), at the runner junction (floor) and its volume mean, plenum-floor temperature; then per
-// cylinder i: intake-valve mass flow INTO the cylinder (kg/s, negative = backflow), its temperature, cylinder pressure
+// cylinder i: intake-valve mass flow INTO the cylinder (kg/s, negative = backflow; mean over the sample interval, from
+// the cylinder's mass ledger), its temperature, cylinder pressure
 // and temperature, and static pressure / static temperature / velocity (positive toward the cylinder) / mass flow in
 // three runner cells: port = valve end (last cell), head flange (80 mm upstream of the valve) and mouth (first cell).
 use engine_sim::config::loader::load_v1_json_with_warnings;
@@ -28,10 +29,11 @@ fn main() {
     // (static p, static T, u, mdot) of cell k
     let cell = |p: &engine_sim::solver::state::PipeState, k: usize| { let ar = p.area[k]; let rho = p.q[k*4]/ar; let u = p.q[k*4+1]/(rho*ar); let e = p.q[k*4+2]/ar; let ps = (p.gamma-1.0)*(e-0.5*rho*u*u); (ps, ps/(rho*p.r_gas), u, p.q[k*4+1]) };
     let end = cycles as f64 * 720.0; let mut next = st.theta;
+    let mut m_prev: Vec<f64> = eng.cylinders.iter().map(|c| c.state.m_intake_total).collect(); let mut th_prev = st.theta;
     while st.theta < end {
         next += 1.0;
         let _ = eng.advance_one_cycle(rpm, &mut st, Some(next.min(end)), None, None);
-        let th = st.theta - settle;
+        let th = st.theta - settle; let dts = (st.theta - th_prev) / (6.0 * rpm); th_prev = st.theta;
         let pl = &eng.pipes[eng.plenum_idx]; let g = pl.n_ghost; let last = g + pl.n_cells - 1;
         let kmap = (g + (0.110 / pl.dx) as usize).min(last);
         let (mut s, mut m) = (0.0, 0.0); for c in g..=last { s += cell(pl, c).0; m += 1.0; }
@@ -40,7 +42,9 @@ fn main() {
         for i in 0..n {
             let c = &eng.cylinders[i]; let p = &eng.pipes[eng.runner_idx[i]]; let g = p.n_ghost; let last = g + p.n_cells - 1;
             let kf = last - ((0.080 / p.dx).round() as usize).min(p.n_cells - 1);
-            line += &format!(",{:.1},{:.6},{:.1},{:.0},{:.1}", c.local_theta(st.theta), c.state.mdot_intake, c.state.t_intake, c.state.p, c.state.t);
+            let dm = c.state.m_intake_total - m_prev[i]; m_prev[i] = c.state.m_intake_total;
+            let mv = if dts > 0.0 && (dm / dts - c.state.mdot_intake).abs() < 0.5 { dm / dts } else { c.state.mdot_intake };
+            line += &format!(",{:.1},{:.6},{:.1},{:.0},{:.1}", c.local_theta(st.theta), mv, c.state.t_intake, c.state.p, c.state.t);
             for k in [last, kf, g] { let (ps, ts, u, md) = cell(p, k); line += &format!(",{:.0},{:.1},{:.2},{:.6}", ps, ts, u, md); }
         }
         println!("{line}");

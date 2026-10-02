@@ -1,6 +1,8 @@
 # Exhaust-port boundary traces from the 1D engine model (for the Fluent 3D exhaust run)
 
-Files: `exhaust_ports_9000rpm.csv`, `exhaust_ports_6000rpm.csv`, `exhaust_ports_11500rpm.csv`. Each covers one 720° cycle at 1° of crank, the 20th cycle, WOT.
+Files: `exhaust_ports_{9000,6000,11500}rpm.csv` (the model as calibrated in 0036: primaries 424 mm, secondaries 467 mm) and `exhaust_allmeasured_{9000,6000,11500}rpm.csv` (the all-measured car, `cfg/ASMEASURED_all.json`: primaries 481 mm, secondaries 576 mm, real plenum and runners). Made by `exhaust_bc.py`.
+
+Regenerated 2026-10-02: `mdot_valve` is the mean over each 1° interval. The earlier point samples flipped between two branches from step to step when cylinder and port pressure were within a few kPa (jumps over 30 g/s per degree on up to 35 samples per cylinder); the cycle mass was right, the instantaneous value was not. Each covers one 720° cycle at 1° of crank, the 20th cycle, WOT.
 
 **Source run.** Config `sdm26_asbuilt_cal` with the logged AFR and spark maps, a 160-cell plenum and the venturi inertance on (400 1/m). Driver: `driver/src/bin/exhwave.rs`.
 
@@ -11,7 +13,7 @@ Files: `exhaust_ports_9000rpm.csv`, `exhaust_ports_6000rpm.csv`, `exhaust_ports_
 | column | meaning |
 |---|---|
 | `phase{i}_deg` | that cylinder's own crank angle: 0 = firing TDC; exhaust valve opens at 140°, closes at 365° |
-| `mdot_valve{i}_kg_s` | mass flow through the exhaust valve, positive out of the cylinder, negative = backflow |
+| `mdot_valve{i}_kg_s` | mass flow through the exhaust valves, mean over the 1° interval, positive out of the cylinder, negative = backflow |
 | `T_valve{i}_K` | static temperature of the gas crossing the valve |
 | `p_cyl{i}_Pa`, `T_cyl{i}_K` | cylinder pressure and temperature |
 | `p_port{i}_Pa`, `T_port{i}_K`, `u_port{i}_m_s`, `mdot_port{i}_kg_s` | static pressure, static temperature, velocity and mass flow in the first cell of the primary (at the valve) |

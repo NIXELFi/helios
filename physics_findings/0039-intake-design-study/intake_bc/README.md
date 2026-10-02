@@ -28,7 +28,7 @@ Then, for each cylinder i = 1..4:
 | column | meaning |
 |---|---|
 | `phase{i}_deg` | that cylinder's own crank angle: 0 = firing TDC, gas-exchange TDC at 360°, BDC at 540° |
-| `mdot_valve{i}_kg_s` | mass flow through the intake valves, positive into the cylinder, negative = backflow |
+| `mdot_valve{i}_kg_s` | mass flow through the intake valves, mean over the 1° interval, positive into the cylinder, negative = backflow |
 | `T_valve{i}_K` | temperature of the gas crossing the valve |
 | `p_cyl{i}_Pa`, `T_cyl{i}_K` | cylinder pressure and temperature |
 | `p_port{i}_Pa`, `T_port{i}_K`, `u_port{i}_m_s`, `mdot_port{i}_kg_s` | static pressure, static temperature, velocity and mass flow in the runner's last cell (at the valve) |
@@ -54,8 +54,10 @@ Firing order 1-2-4-3 at 180° intervals. At `theta_deg` = 0, cylinder 1 is at it
 
 | rpm | VE as-built | VE big | change | plenum swing at the mouths, as-built / big |
 |---|---|---|---|---|
-| 6000 | 0.926 | 0.932 | +0.6 % | 4.0 / 2.9 kPa |
-| 9000 | 0.947 | 0.959 | +1.3 % | 11.2 / 6.6 kPa |
-| 11500 | 0.817 | 0.815 | -0.2 % | 3.0 / 3.6 kPa |
+| 6000 | 0.932 | 0.940 | +0.9 % | 4.0 / 2.9 kPa |
+| 9000 | 0.947 | 0.955 | +0.8 % | 11.2 / 6.6 kPa |
+| 11500 | 0.826 | 0.819 | -0.8 % | 3.0 / 3.6 kPa |
 
-VE is referenced to ambient density. At 9000 rpm the gain is on the inner cylinders (2 and 3: +1.9 % and +2.3 %); the outer ones change by under 0.7 %.
+VE is referenced to ambient density. At 9000 rpm the gain is on the inner cylinders (2 and 3: +2.0 % and +2.2 %); the outer ones lose 0.4 %.
+
+Regenerated 2026-10-02: `mdot_valve` is now the mean over each 1° interval (from the cylinder's mass ledger). The earlier point samples chattered by 10-30 g/s between neighbouring degrees when cylinder and port pressure were close, which also put up to 0.6 % of error in the trapped-mass sums; the numbers above are the corrected ones.
