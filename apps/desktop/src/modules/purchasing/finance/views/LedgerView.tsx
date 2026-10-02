@@ -199,6 +199,8 @@ function TxnPanel({ client, fin, pur, reload, flash, t, evidence, close }: Finan
     if (!Object.keys(fields).length) { flash("Nothing changed."); return; }
     const oldSplit = t.txn_allocations.reduce((n, a) => n + a.amount_cents, 0);
     const ok = await attempt(flash, reload, "Saved.", () => updateTxn(client, t.id, fields));
+    // what was just saved is the new starting point, so the form follows the server again
+    if (ok) setBase(form);
     // a split is in dollars: a new amount needs a new split
     if (ok && fields.amount_cents !== undefined && oldSplit && oldSplit !== Math.abs(fields.amount_cents) && t.kind !== "transfer") {
       flash(`Saved. The subteam split still adds up to ${fmtCents(oldSplit)}: fix it below so the budgets match the new amount.`, true);

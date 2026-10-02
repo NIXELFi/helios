@@ -197,21 +197,30 @@ function AirtableCard({ client, pur, reload, flash }: FinanceProps) {
     }
     return m;
   }, [pur.items]);
-  // only parts already in Abacus are skipped: two rows with the same name in
-  // one file (a reorder) are both kept
-  const fresh = (f: CsvFile) => {
-    const there = onTab.get(`${f.car}|${f.subteam}`);
-    return there ? f.rows.filter((r) => !there.has(r.title.trim().toLowerCase())) : f.rows;
-  };
-  const ready = files.filter((f) => f.car && f.subteam);
-  const toAdd = ready.reduce((s, f) => s + fresh(f).length, 0);
+  // Parts already in Abacus are skipped, and so are names an earlier file in
+  // this upload puts on the same tab ("Aero-Grid view.csv" and its "(1)" copy).
+  // Two rows with the same name in one file (a reorder) are both kept.
+  const ready = useMemo(() => files.filter((f) => f.car && f.subteam), [files]);
+  const plan = useMemo(() => {
+    const seen = new Map<string, Set<string>>();
+    return ready.map((f) => {
+      const k = `${f.car}|${f.subteam}`;
+      const there = onTab.get(k);
+      const earlier = seen.get(k) ?? new Set<string>();
+      const rows = f.rows.filter((r) => { const t = r.title.trim().toLowerCase(); return !there?.has(t) && !earlier.has(t); });
+      for (const r of rows) earlier.add(r.title.trim().toLowerCase());
+      seen.set(k, earlier);
+      return { f, rows };
+    });
+  }, [ready, onTab]);
+  const fresh = (f: CsvFile) => plan.find((p) => p.f === f)?.rows ?? [];
+  const toAdd = plan.reduce((s, p) => s + p.rows.length, 0);
 
   async function run() {
     setBusy(true);
     let added = 0;
     try {
-      for (const f of ready) {
-        const rows = fresh(f);
+      for (const { f, rows } of plan) {
         if (rows.length) added += await importItems(client, f.car, f.subteam, rows);
       }
       setFiles([]);

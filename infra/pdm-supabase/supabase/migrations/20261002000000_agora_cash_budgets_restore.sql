@@ -34,6 +34,10 @@ begin
     if new.status not in ('owed', 'requested') then
       raise exception 'a new reimbursement is owed or requested' using errcode = '42501';
     end if;
+    if new.paid_with is not null or new.check_txn_id is not null or new.paid_date is not null
+       or nullif(btrim(coalesce(new.check_number, '')), '') is not null then
+      raise exception 'a new reimbursement isn''t paid yet: pay it with the buttons' using errcode = '42501';
+    end if;
     return new;
   end if;
   if old.user_id = auth.uid() then
@@ -76,6 +80,10 @@ begin
     from finance.reimbursements where id = any (coalesce(p_ids, '{}')) and coalesce(amount_cents, 0) <= 0;
   if v_names is not null then
     raise exception 'enter the amount first: %', v_names using errcode = '22023';
+  end if;
+  -- the cash box has no statement: its withdrawal line is the only record of the cash going out
+  if p_method = 'cash_box' and not coalesce(p_add_to_ledger, false) then
+    raise exception 'cash from the cash box has to go in the ledger' using errcode = '22023';
   end if;
   if p_method = 'check' then
     v_txn := finance.pay_reimbursements(p_ids, v_date, v_check, coalesce(p_add_to_ledger, false));
@@ -205,9 +213,14 @@ begin
     raise exception 'the parts add up to $%, not the order total of $%',
       to_char(v_sum / 100.0, 'FM999999990.00'), to_char(p_total_cents / 100.0, 'FM999999990.00') using errcode = '22023';
   end if;
-  if (select count(*) from purchasing.items where id = any (v_ids)) <> (select count(distinct x) from unnest(v_ids) x) then
+  if cardinality(v_ids) <> (select count(distinct x) from unnest(v_ids) x) then
+    raise exception 'a part is in the order twice' using errcode = '22023';
+  end if;
+  perform 1 from purchasing.items where id = any (v_ids) for update;
+  if (select count(*) from purchasing.items where id = any (v_ids)) <> cardinality(v_ids) then
     raise exception 'some of those parts don''t exist' using errcode = 'P0002';
   end if;
+  perform purchasing.check_not_own_import(v_ids);
   if exists (select 1 from purchasing.items x where x.id = any (v_ids)
              and x.status not in ('APPROVED', 'ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED', 'RECEIVED', 'RECONCILED')) then
     raise exception 'only approved items can be ordered' using errcode = '42501';
@@ -223,6 +236,24 @@ begin
     tax_shipping_cents = coalesce(nullif(l ->> 'tax_shipping_cents', '')::bigint, i.tax_shipping_cents)
   from jsonb_array_elements(p_lines) l
   where i.id = (l ->> 'id')::uuid;
+end; $$;
+
+-- Parts imported already Ordered or Received never went through approvals.
+-- Whoever imported them can't also put an order and its cost on them;
+-- another exec has to (the two-person rule that approvals give other parts).
+alter table purchasing.items add column history_imported_by uuid;
+comment on column purchasing.items.history_imported_by is
+  'The exec who imported this part already ordered or received (import_items), skipping approvals';
+
+create or replace function purchasing.check_not_own_import(p_ids uuid[])
+returns void language plpgsql stable security definer set search_path = '' as $$
+declare v_codes text;
+begin
+  select string_agg(code, ', ') into v_codes from purchasing.items
+  where id = any (p_ids) and approved_at is null and history_imported_by = auth.uid();
+  if v_codes is not null then
+    raise exception 'you imported % without approvals, so another exec has to record its order', v_codes using errcode = '42501';
+  end if;
 end; $$;
 
 -- Bring in Airtable rows with their history. add_items() starts every row
@@ -254,7 +285,7 @@ begin
     insert into purchasing.items (
       title, status, priority, season_id, requester_id, requester_name, justification, needed_by, date_needed_raw,
       vendor, product_url, part_number, quantity, unit_price_cents, tax_shipping_cents, total_estimate_cents,
-      notes, ready_at, source)
+      notes, ready_at, source, history_imported_by)
     values (
       left(btrim(v_row ->> 'title'), 200), v_status,
       case when v_row ->> 'priority' in ('HIGH', 'Medium', 'Low') then v_row ->> 'priority' else 'Medium' end,
@@ -268,7 +299,8 @@ begin
                      * nullif(v_row ->> 'unit_price_cents', '')::bigint)::bigint
                + coalesce(nullif(v_row ->> 'tax_shipping_cents', '')::bigint, 0)),
       coalesce(v_row ->> 'notes', ''), case when v_status <> 'PLANNED' then now() end,
-      coalesce(nullif(v_row ->> 'source', ''), 'import'))
+      coalesce(nullif(v_row ->> 'source', ''), 'import'),
+      case when v_status in ('ORDERED', 'RECEIVED') then v_uid end)
     returning id into v_id;
     insert into purchasing.item_allocations (item_id, project_id, subteam_id, percent) values (v_id, p_project, p_subteam, 100);
     n := n + 1;
@@ -547,7 +579,11 @@ on conflict do nothing;
 create or replace function purchasing.car_subteam_from_part()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  insert into purchasing.car_subteams (project_id, subteam_id) values (new.project_id, new.subteam_id) on conflict do nothing;
+  -- only an exec's part puts a subteam on a car: the first member to add a
+  -- part to a new car would otherwise lock every other subteam out of it
+  if purchasing.is_exec() then
+    insert into purchasing.car_subteams (project_id, subteam_id) values (new.project_id, new.subteam_id) on conflict do nothing;
+  end if;
   return new;
 end; $$;
 create trigger item_allocations_car_subteam after insert on purchasing.item_allocations
@@ -665,6 +701,7 @@ begin
     raise exception 'only approved items can be ordered' using errcode = '42501';
   end if;
   if p_total_cents < 0 then raise exception 'an order total can''t be negative' using errcode = '22023'; end if;
+  perform purchasing.check_not_own_import(p_ids);
   select coalesce(sum(greatest(purchasing.item_cost(x), 1)), 0), count(*) into v_sum, n
     from purchasing.items x where x.id = any (p_ids);
   v_left := p_total_cents;
@@ -697,6 +734,7 @@ begin
   if not pm.has_capability(auth.uid(), 'purchasing.order', null) then
     raise exception 'only execs undo orders' using errcode = '42501';
   end if;
+  perform 1 from purchasing.items where id = any (p_ids) for update;
   select string_agg(code, ', ') into v_codes from purchasing.items
   where id = any (p_ids) and (finance_txn_id is not null or status not in ('ORDERED', 'BACKORDERED', 'SHIPPED', 'DELIVERED'));
   if v_codes is not null then
@@ -737,6 +775,7 @@ end; $$;
 -- 6. Grants -----------------------------------------------------------------------------
 
 revoke all on function purchasing.car_subteam_from_part(), purchasing.car_subteam_from_budget() from public, anon, authenticated;
+revoke all on function purchasing.check_not_own_import(uuid[]) from public, anon, authenticated;
 revoke all on function purchasing.set_car_subteam(uuid, uuid, boolean), purchasing.undo_order(uuid[]), finance.delete_account(bigint)
   from public, anon;
 grant execute on function purchasing.set_car_subteam(uuid, uuid, boolean), purchasing.undo_order(uuid[]), finance.delete_account(bigint)

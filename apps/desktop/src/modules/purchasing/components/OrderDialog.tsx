@@ -53,6 +53,9 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
       orderId: o.orderId ?? x.orderId, date: o.date ?? x.date,
       ...Object.fromEntries(MONEY_FIELDS.map(([k]) => [k, o[k] !== null ? centsToInput(o[k]) : (k === "subtotal" ? x.subtotal : "")])),
     }));
+    // a cart with more in it than these parts: give them their fraction, not the whole total
+    const sum = items.reduce((s, i) => s + partPrice(i), 0);
+    if (o.subtotal !== null && o.subtotal > sum + items.length) setMode("share");
     const got = MONEY_FIELDS.filter(([k]) => o[k] !== null).map(([, l]) => l.toLowerCase());
     setNote(got.length ? `Read ${got.join(", ")}${o.orderId ? `, order ${o.orderId}` : ""}. Check them against the order.` : "Couldn't find any totals in that. Type them in below.");
   }

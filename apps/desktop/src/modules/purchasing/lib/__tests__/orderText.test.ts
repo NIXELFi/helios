@@ -77,4 +77,17 @@ describe("splitOrder", () => {
     const o = parseOrderText("Subtotal - $20.00\nShipping - $5.00\nTax - $1.62\nTotal - $26.62", []);
     expect(o).toMatchObject({ subtotal: 2000, shipping: 500, tax: 162, total: 2662 });
   });
+
+  it("ignores free-shipping banners and savings summaries on a cart page", () => {
+    const o = parseOrderText(
+      "Free shipping on orders over $35.00\nYou're $15.00 away from free shipping\nSubtotal $20.00\nYour Savings: $12.00\nShipping $5.99\nTax $1.62\nTotal $27.61", []);
+    expect(o).toMatchObject({ subtotal: 2000, shipping: 599, tax: 162, discount: null, total: 2761 });
+    // a real free-shipping credit still cancels the charge
+    expect(parseOrderText("Subtotal $20.00\nShipping $5.99\nFree Shipping: -$5.99\nTotal $20.00", [])).toMatchObject({ shipping: 0, total: 2000 });
+  });
+
+  it("reads a total that mentions tax as the total, and the tax as the tax", () => {
+    expect(parseOrderText("Subtotal $100.00\nShipping $10.00\nTotal (incl. tax) $118.10", [])).toMatchObject({ tax: null, total: 11810 });
+    expect(parseOrderText("Subtotal $100.00\nTotal tax $8.10\nEstimated total $108.10", [])).toMatchObject({ tax: 810, total: 10810 });
+  });
 });

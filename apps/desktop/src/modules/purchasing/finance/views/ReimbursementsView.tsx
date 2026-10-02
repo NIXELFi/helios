@@ -94,13 +94,14 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
           </select>
           {pay.method === "check" && <input className={`${input} w-28`} placeholder="Check #" value={pay.check} onChange={(e) => setPay({ ...pay, check: e.target.value })} />}
           <label className="flex items-center gap-1 text-sm" title={LEDGER_HINT[pay.method]}>
-            <input type="checkbox" checked={pay.addToLedger} disabled={pay.method === "check" && pickedPeople.size !== 1}
+            <input type="checkbox" checked={pay.addToLedger || pay.method === "cash_box"}
+              disabled={pay.method === "cash_box" || (pay.method === "check" && pickedPeople.size !== 1)}
               onChange={(e) => setPay({ ...pay, addToLedger: e.target.checked })} />
             {LEDGER_LABEL[pay.method]}
           </label>
           <Button onClick={() => void attempt(flash, reload, `${picked.size} marked paid ${pay.method === "check" ? "by check" : "in cash"}.`, async () => {
             const txn = await recordReimbursementPayment(client, [...picked], pay.method, pay.date || null, pay.check,
-              pay.addToLedger && (pay.method !== "check" || pickedPeople.size === 1));
+              pay.method === "cash_box" || (pay.addToLedger && (pay.method !== "check" || pickedPeople.size === 1)));
             setPicked(new Set());
             if (txn) openTxn(txn);
           })}>Mark paid</Button>
@@ -119,7 +120,7 @@ const LEDGER_LABEL: Record<PaidWith, string> = {
 };
 const LEDGER_HINT: Record<PaidWith, string> = {
   check: "Adds the check to the ledger as uncashed, so Available stays right until it clears",
-  cash_box: "Adds a withdrawal to the Cash Box account (made if there isn't one), so its balance stays right",
+  cash_box: "Always added: the cash box has no statement, so this withdrawal on the Cash Box account (made if there isn't one) is its record",
   bank_cash: "Adds the cash withdrawal to checking now, so Available is right straight away. When the statement comes in, its withdrawal line is matched to this one, not added twice",
 };
 

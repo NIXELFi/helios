@@ -137,6 +137,9 @@ describe("agora follow-ups", () => {
     for (const id of [adc, tvs]) for (const exec of [cfo, chief]) await exec.p.rpc("decide", { p_id: id, p_decision: "approve" });
     expect((await member.p.rpc("record_order_lines", args)).error).not.toBeNull();
     expect((await cfo.p.rpc("record_order_lines", { ...args, p_total_cents: 7500 })).error?.message).toMatch(/add up/);
+    // the same part twice would count twice in the sum but be stored once
+    const twice = [{ id: adc, actual_total_cents: 100 }, { id: adc, actual_total_cents: 6272 }, { id: tvs, actual_total_cents: 1062 }];
+    expect((await cfo.p.rpc("record_order_lines", { ...args, p_lines: twice })).error?.message).toMatch(/twice/);
     expect((await cfo.p.rpc("record_order_lines", args)).error).toBeNull();
     const { data: rows } = await pur().from("items").select("title,status,vendor_order_id,actual_total_cents,tax_shipping_cents").order("title");
     expect(rows).toEqual([
@@ -162,6 +165,16 @@ describe("agora follow-ups", () => {
     expect(data!.map((r) => [r.title, r.status])).toEqual([["FDCAN transceivers", "PLANNED"], ["Logger ADC", "ORDERED"], ["UV flashlight", "RECEIVED"]]);
     expect(data![2]).toMatchObject({ source: "airtable:IC/Data AQ row 2", date_needed_raw: "2026-09-03", total_estimate_cents: 659,
       item_allocations: [{ project_id: ic, subteam_id: daq }] });
+
+    // a part imported already ordered skipped approvals: whoever imported it
+    // can't also put an order and its cost on it, another exec can
+    const chief = await person("chief", "executive");
+    const { data: logger } = await pur().from("items").select("id").eq("title", "Logger ADC").single();
+    const order = { p_ids: [logger!.id], p_order_id: "W9", p_payment: "SAE card", p_total_cents: 600000 };
+    expect((await cfo.p.rpc("record_order", order)).error?.message).toMatch(/another exec/);
+    expect((await cfo.p.rpc("record_order_lines", { p_lines: [{ id: logger!.id, actual_total_cents: 600000 }], p_order_id: "W9", p_payment: "SAE card" }))
+      .error?.message).toMatch(/another exec/);
+    expect((await chief.p.rpc("record_order", { ...order, p_total_cents: 1900 })).error).toBeNull();
   });
 
   it("won't mark a reimbursement paid that has no amount", async () => {
@@ -174,6 +187,14 @@ describe("agora follow-ups", () => {
       expect(error?.message).toMatch(/amount first/);
     }
     expect((await fin().from("reimbursements").select("status").eq("id", r!.id).single()).data!.status).toBe("owed");
+
+    // the cash box has no statement, so its payment has to go in the ledger
+    await fin().from("reimbursements").update({ amount_cents: 1200 }).eq("id", r!.id);
+    expect((await cfo.f.rpc("record_reimbursement_payment",
+      { p_ids: [r!.id], p_method: "cash_box", p_paid_date: null, p_check_number: null, p_add_to_ledger: false })).error?.message).toMatch(/ledger/);
+    // and a new row can't arrive already paid
+    expect((await cfo.f.from("reimbursements").insert({ person_name: "Demo Member", reason: "x", amount_cents: 5, paid_with: "cash_box" })).error).not.toBeNull();
+    expect((await cfo.f.from("reimbursements").insert({ person_name: "Demo Member", reason: "x", amount_cents: 5, check_number: "1001" })).error).not.toBeNull();
   });
 
   it("an order recorded by mistake can be undone; recording it again keeps what was there", async () => {
@@ -214,9 +235,12 @@ describe("agora follow-ups", () => {
     const eng = await subteam("Engine", "ENG");
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);
-    // before any car is set up, anyone adds as before
+    // before any car is set up, anyone adds as before, and a member's part
+    // doesn't set the car up (it would lock every other subteam out)
     expect((await member.p.rpc("add_items", { p_project: ev, p_subteam: daq, p_rows: [{ title: "x" }] })).error).toBeNull();
-    // EV now has DAQ (from that part); IC gets Engine from an exec
+    const other = await person("other", "engineer", eng);
+    expect((await other.p.rpc("add_items", { p_project: ev, p_subteam: eng, p_rows: [{ title: "z" }] })).error).toBeNull();
+    // IC gets Engine from an exec
     await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: eng, p_on: true });
     expect((await member.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true })).error).not.toBeNull();
     expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y" }] })).error?.message).toMatch(/isn't on this car/);
@@ -224,7 +248,7 @@ describe("agora follow-ups", () => {
     expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y", date_needed_raw: "9/11/2026" }] })).error).toBeNull();
     expect((await pur().from("items").select("date_needed_raw").eq("title", "y").single()).data!.date_needed_raw).toBe("9/11/2026");
     const { data: pairs } = await member.p.from("car_subteams").select("project_id,subteam_id");
-    expect(pairs).toHaveLength(3);
+    expect(pairs).toHaveLength(2);
   });
 
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {

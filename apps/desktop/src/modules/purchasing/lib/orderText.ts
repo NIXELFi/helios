@@ -26,7 +26,7 @@ export const extrasOf = (o: OrderTotals) => (o.shipping ?? 0) + (o.tax ?? 0) + (
 
 // A minus only counts touching the amount ("-$2.96", "$-2.96"); in
 // "Shipping - $5.00" the dash just separates the label.
-const MONEY = /([-−](?=\$?\d))?\$?([-−])?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})\b/;
+const MONEY = /([-\u2212](?=\$?\d))?\$?([-\u2212])?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})\b/;
 const amount = (s: string): number | null => {
   const m = s.match(MONEY);
   if (!m) return null;
@@ -37,14 +37,17 @@ const amount = (s: string): number | null => {
 type Field = "subtotal" | "shipping" | "tax" | "fees" | "discount" | "total" | "skip";
 // The first pattern that matches a line's label decides what the amount is.
 const LABELS: [RegExp, Field][] = [
-  [/total before tax|pre-?tax total|tax\s*exempt|taxable|you saved|savings to date|refund|reward|points|balance|per (item|unit)|unit price/i, "skip"],
+  [/total before tax|pre-?tax total|tax\s*exempt|taxable|you saved|(your|total) savings|savings to date|refund|reward|points|balance|per (item|unit)|unit price/i, "skip"],
+  // promo banners ("Free shipping on orders over $35.00", "You're $15.00 away from free shipping")
+  [/orders? (of|over|above)|away from|qualif|eligible|spend \$?\d|add \$?\d/i, "skip"],
   [/free shipping|shipping (discount|savings|promotion)/i, "discount"],
   [/discount|promo(tion)?|coupon|savings|gift card/i, "discount"],
   [/sub-?total|merchandise( total)?|items?\s*(\(s\))?\s*total|item\(s\)/i, "subtotal"],
   [/tariff|duty|duties|surcharge|import|(handling|processing|service|environmental|small order|hazmat|cut tape|reel)\s*(fee|charge)|\bfees?\b/i, "fees"],
   [/shipping|freight|delivery|postage|s\s*&\s*h|handling/i, "shipping"],
+  // before tax, so "Total (incl. tax)" is the total; "Total tax" is still the tax
+  [/grand total|order total|total (charged|paid|due|amount)|amount (charged|paid|due)|payment total|invoice total|^\s*(estimated\s+)?total\b(?!\s*(sales\s+)?tax)/i, "total"],
   [/\btax(es)?\b|\bvat\b|\bgst\b|\bhst\b/i, "tax"],
-  [/grand total|order total|total (charged|paid|due|amount)|amount (charged|paid|due)|payment total|invoice total|^\s*total\b/i, "total"],
 ];
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -88,7 +91,11 @@ export function parseOrderText(text: string, vendorNames: string[] = []): OrderT
     if (value === null) continue;
     if (field === "discount") {
       // "Free Shipping: -$2.96" cancels a shipping charge; any other discount lowers the total
-      if (/shipping/i.test(label)) shippingAdj += -Math.abs(value);
+      if (/shipping/i.test(label)) {
+        // only a line that is just the label, or whose amount is written negative, is a credit
+        if (value >= 0 && !/^(free shipping|shipping (discount|savings|promotion))\s*:?$/i.test(label)) continue;
+        shippingAdj += -Math.abs(value);
+      }
       else found.discount = (found.discount ?? 0) - Math.abs(value);
       continue;
     }
