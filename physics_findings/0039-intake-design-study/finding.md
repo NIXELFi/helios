@@ -353,7 +353,7 @@ Car pressure drop (engine-off MAP minus WOT MAP, Josh AX 4-26) against the ventu
 | secondary, merge to merge | 573-580 mm | 467.3 mm |
 | primary tube bore | 29.75 mm | 29.26 mm |
 | collector legs | 36.10 mm | 35.61 mm |
-| final collector | 103.9 mm | 110 mm cone + pipe |
+| final collector merge | 103.9 mm | 59.7 mm |
 
 - Pairing 1&4 / 2&3 is confirmed.
 - The model's primaries are 12 % short and its secondaries 19 % short, so its exhaust tuning sits higher in rpm than the car's. 0036 was calibrated on the short pipes.
