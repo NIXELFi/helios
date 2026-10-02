@@ -238,6 +238,8 @@ Engine torque vs today's actual restrictor (60 um wall unless noted):
 | A_NOZ: 3.2° + short nozzle | 186 mm | +1.5 % | +1.0 % | attached |
 | F: 4.0° + short nozzle | 154 mm | +1.0 % | +0.7 % | attached |
 | **G: 4.5° + short nozzle** | **140 mm** | **+0.7 %** | **+0.5 %** | attached |
+| **L140: optimizer winner, 24.8° nozzle, 4.24° diffuser to 37.3 mm** | **136 mm** | **+1.5 %** | **+1.0 %** | attached |
+| L127: optimizer, shorter | 127 mm | +1.2 % | +0.8 % | attached |
 | B: 5.5° + short nozzle | 120 mm | 0.0 % | 0.0 % | separated |
 | C: 5° to 36 mm | 117 mm | +0.1 % | +0.1 % | attached only at light flow |
 | D: 6° | 112 mm | -0.4 % | -0.3 % | separated |
