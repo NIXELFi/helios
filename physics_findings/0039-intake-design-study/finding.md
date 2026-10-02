@@ -480,3 +480,4 @@ Cycle-mean drop from ambient to the MAP station, kPa, as-modelled geometry and l
   - One reading: the model's single-node plenum couples the runners more strongly than the real plenum does, so the real plenum already behaves like a larger one in the model.
   - That would mean the model's absolute plenum effects are mis-scaled; the 3D check is the test.
 - **Dump plenum:** 1.0 % less torque over 6-12k and 1.6 % less above 10.5k, where the model is high. The overall scale moves 0.975 -> 0.985.
+- The Helios vault has no head or port geometry (only an outside packaging model of the engine with plain intake stubs), so the port length cannot be read from CAD. It needs a measurement on a head: flange face to valve seat, a bent wire down the port is enough.
