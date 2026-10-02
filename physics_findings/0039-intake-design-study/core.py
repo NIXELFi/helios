@@ -1,4 +1,5 @@
 """Shared loaders + physics helpers for the intake design study (finding 0039)."""
+import os; os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")   # numpy/scipy otherwise commit ~1 GB of per-thread BLAS buffers per driver process
 import os, json, glob, math, numpy as np, pandas as pd
 H = os.path.dirname(os.path.abspath(__file__))
 BASE_L = 328.1            # as-built runner incl. 80 mm port (mm)

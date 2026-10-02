@@ -1,4 +1,5 @@
 """Full intake design study (static + VRLI) on sdm26_asbuilt_cal, neutral tune. Resumable."""
+import os; os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")   # numpy/scipy otherwise commit ~1 GB of per-thread BLAS buffers per driver process
 import json, os, sys, math, subprocess, copy, numpy as np
 from concurrent.futures import ThreadPoolExecutor
 H = os.path.dirname(os.path.abspath(__file__))

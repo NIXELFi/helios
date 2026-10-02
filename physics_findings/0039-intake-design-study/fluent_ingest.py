@@ -7,6 +7,7 @@ values and the ratio transfer agreed with the Fluent agent:
 `--run` then simulates the engine (as-built intake and the recommended VRLI table, 1.44 L box) with each geometry's
 (Cd, R) and reports torque vs the as-built venturi.  Usage: python fluent_ingest.py [--maps DIR] [--run]
 """
+import os; os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")   # numpy/scipy otherwise commit ~1 GB of per-thread BLAS buffers per driver process
 import glob, json, math, os, re, subprocess, sys
 import numpy as np, pandas as pd
 from scipy.optimize import least_squares
