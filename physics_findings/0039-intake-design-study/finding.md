@@ -358,3 +358,30 @@ Car pressure drop (engine-off MAP minus WOT MAP, Josh AX 4-26) against the ventu
 - Pairing 1&4 / 2&3 is confirmed.
 - The model's primaries are 12 % short and its secondaries 19 % short, so its exhaust tuning sits higher in rpm than the car's. 0036 was calibrated on the short pipes.
 - `asmeasured.py` now runs a dyno set (logged AFR and spark, 250 rpm steps): model, real plenum, real intake, real exhaust, all measured, all measured with sharp runner mouths. It compares each with the dyno curve. Queued behind the plenum sweep.
+
+## Addendum (2026-10-01, night): plenum volume x height, on the corrected restrictor boundary
+
+`plenum2.py` reran the plenum on 1,404 direct runs with the venturi inertance on: volume 1.0 / 1.44 / 2.0 / 2.75 / 3.5 L, height 120 / 165 / 213 mm (213 = today + the 93 mm a 136 mm restrictor frees), fixed 248 mm runner and the VRLI at five positions (198-298 mm), plus tip-in snaps for every plenum. `plenum2_report.py` scores it; charts and `plenum2_scores.csv` in `charts/plenum2/`. All gains are against 1.44 L / 120 mm / fixed runner in the same runs.
+
+| plenum | fixed runner: worst / 6-12k | VRLI 198-298: worst / 6-12k / 10.5-12.5k | throttle: extra lost time per snap |
+|---|---|---|---|
+| 1.0 L, 120 mm | -0.3 / -0.3 % | +4.3 / +5.6 / +6.8 % | -4.6 ms |
+| 1.44 L, 120 mm | 0 / 0 | +3.5 / +4.9 / +7.3 % | 0 |
+| 2.0 L, 120 mm | -0.1 / +0.3 % | +3.3 / +4.9 / +7.8 % | +5.5 ms |
+| 2.75 L, 120 mm | -0.1 / +0.4 % | +3.9 / +5.6 / +8.1 % | +12.6 ms |
+| 3.5 L, 120 mm | 0.0 / +0.6 % | +3.4 / +5.7 / +7.9 % | +19.7 ms |
+| 1.44 L, 165 mm | -0.2 / -0.1 % | +3.3 / +4.6 / +7.1 % | 0 |
+| 2.0 L, 165 mm | -0.1 / +0.2 % | +3.5 / +4.9 / +7.7 % | +5.3 ms |
+| 2.75 L, 165 mm | -0.1 / +0.3 % | +3.8 / +5.5 / +7.9 % | +12.3 ms |
+| 1.44 L, 213 mm | -0.5 / -0.4 % | +2.5 / +4.1 / +7.0 % | 0 |
+| 2.0 L, 213 mm | -0.3 / -0.1 % | +3.3 / +4.8 / +7.7 % | +5.1 ms |
+| 2.75 L, 213 mm | -0.2 / +0.2 % | +3.2 / +5.4 / +7.9 % | +12.0 ms |
+| 3.5 L, 213 mm | -0.1 / +0.4 % | +3.3 / +5.6 / +7.8 % | +18.9 ms |
+
+- **With a fixed runner the plenum is worth nothing.** Volume 1.0-3.5 L and height 120-213 mm move the worst-case score by 0.5 % at most. Bigger volume adds up to +0.9 % at 7-10.5k and takes up to 0.6 % from 10.5-12.5k.
+- **Height at constant volume is slightly negative**, most for the narrow 1.44 L / 213 mm plenum (-0.5 % fixed, a full point off the VRLI's worst case). Height has no effect on throttle response.
+- **The VRLI gain does not depend on the plenum in any consistent way:** worst case +3.2 to +3.9 % for every plenum except the two extremes, 6-12k +4.6 to +5.7 % rising slowly with volume. The differences are within what a 500 rpm grid resolves.
+- **Throttle response is linear in volume: about +9.5 ms of lost full-torque time per snap per litre.** From the real-log estimate above, 1 ms is worth about 0.02 s per on-throttle minute, roughly 0.1 % of torque. So 2.0 L costs about 0.5 % and 2.75 L about 1.2 % in torque-equivalent, which is more than their dyno-band advantage.
+- **Pick: the smallest plenum that houses the trumpets.** A 100 mm stroke needs about 140 mm of height (stroke + 40 mm clearance to the roof), so 1.4-2.0 L at 140-165 mm. The car's real plenum (1.83 L, 141 mm) is already there. Do not grow the plenum with the length taken out of the restrictor; that length is only worth having as packaging room or runner reach.
+- The 1.0 L result is the best on paper and not buildable: the extended trumpets displace 0.5 L of it and a 120 mm box leaves 20 mm between trumpet mouth and roof, which the 1D model does not penalise. The same caveat applies to the 100 mm stroke in any 120 mm-tall row.
+- The schedule is the same in every plenum: long (298) at 7.5-9k, sweeping to short (198) by 10.5k.
