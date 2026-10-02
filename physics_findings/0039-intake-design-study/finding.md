@@ -387,3 +387,10 @@ Car pressure drop (engine-off MAP minus WOT MAP, Josh AX 4-26) against the ventu
 - **Pick: the smallest plenum that houses the trumpets.** A 100 mm stroke needs about 140 mm of height (stroke + 40 mm clearance to the roof), so 1.4-2.0 L at 140-165 mm. The car's real plenum (1.83 L, 141 mm) is already there. Do not grow the plenum with the length taken out of the restrictor; that length is only worth having as packaging room or runner reach.
 - The 1.0 L result is the best on paper and not buildable: the extended trumpets displace 0.5 L of it and a 120 mm box leaves 20 mm between trumpet mouth and roof, which the 1D model does not penalise. The same caveat applies to the 100 mm stroke in any 120 mm-tall row.
 - The schedule is the same in every plenum: long (298) at 7.5-9k, sweeping to short (198) by 10.5k.
+
+**Open challenge to the plenum result (Nick, 2026-10-01): "the model undersells a bigger plenum".** The 1D plenum is one duct with all four runners at a single node: no runner-to-runner geometry, no restrictor jet, no transverse modes. A 3D transient check in Fluent is planned, independent of the 1D pipes.
+- **Method (agreed with the Fluent agent):** whole intake in 3D, the 80 mm ports included, each runner closed by a 0D cylinder (slider-crank volume, the engine's lift law and valve Cd table, compressible orifice flow from Fluent's own port pressure). A bare piston-speed demand was rejected: it forces flow out of the runner after BDC, which removes the late filling that tuning acts on.
+- **Cases:** the as-built plenum (1.826 L, 141 mm) and the same dome with a 93 mm straight section (about 3.9-4.0 L, 234 mm).
+- **The 1D claim under test** (`intake_bc.py`, all-measured car): VE change big vs as-built +0.6 % at 6000, +1.3 % at 9000, -0.2 % at 11500 rpm. At 9000 the gain is on cylinders 2 and 3 (+1.9 / +2.3 %). Plenum pressure swing at the mouths falls 11.2 -> 6.6 kPa.
+- **What would overturn it:** more than about +3 % trapped mass at 9000, or a positive change at 11500.
+- `intake_bc/` holds the 1D valve, port, flange, mouth and plenum traces for a second, comparison run driven by the 1D valve flow.
