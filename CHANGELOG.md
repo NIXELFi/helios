@@ -27,6 +27,21 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Agora: each car's subteams come from Admin > Org Structure.** Abacus shows
+  a car the subteams the org structure puts on it (plus any that already have
+  parts there), and members can only add parts to those. Agora's own separate
+  per-car list is gone; Abacus's tab bar and Budgets > Set up budgets now edit
+  the org structure itself, for those allowed to.
+
+### Added
+
+- **Agora: execs can delete parts from Abacus** (select, then Delete), except
+  parts matched to a ledger charge. The parts history notes who deleted what.
+  Bring in data offers to clear Abacus when its parts are all that stand in the
+  way of restoring the old ledger.
+
 ## [6.0.1] - 2026-10-02
 
 ### Added

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { importItems, type Item } from "../../lib/api";
+import { deleteItems, importItems, type Item } from "../../lib/api";
 import { mapHeaders, looksLikeHeader, parseCsv, toRows, type NewRow } from "../../lib/paste";
 import { guessCar, guessSubteam } from "../../lib/airtableFiles";
 import { normalizeVendor } from "../importers";
 import { restoreLedger, type RestoreResult } from "../api";
-import { Button, Card } from "../../components/ui";
+import { Button, Card, useConfirm } from "../../components/ui";
 import { Badge, input, type FinanceProps } from "./shared";
 
 type Export = Record<string, unknown[]> & { source?: string; exported_at?: string };
@@ -17,7 +17,8 @@ type Named = { program?: string; subteam?: string };
  * and invoice files are under Upload files.
  */
 export function BringInDataView(p: FinanceProps & { go: (view: string) => void }) {
-  const empty = !p.fin.txns.length && !p.fin.reimbursements.length && !p.pur.items.length && !p.fin.balances.length;
+  const empty = !p.fin.txns.length && !p.fin.reimbursements.length && !p.pur.items.length && !p.fin.balances.length
+    && !p.fin.statements.length && !p.fin.evidence.length;
   return (
     <div className="flex max-w-5xl flex-col gap-5">
       <p className="text-sm text-helios-dim">
@@ -32,7 +33,25 @@ export function BringInDataView(p: FinanceProps & { go: (view: string) => void }
 
 // ---------------------------------------------------------------- restore
 
-function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { empty: boolean }) {
+function RestoreCard({ client, fin, pur, reload, flash, empty }: FinanceProps & { empty: boolean }) {
+  const [ask, confirmDialog] = useConfirm();
+  // what stops a restore: anything already in the books or in Abacus
+  const blockers = ([
+    [pur.items.length, "parts in Abacus"], [fin.txns.length, "ledger lines"], [fin.statements.length, "statements"],
+    [fin.balances.length, "weekly balances"], [fin.reimbursements.length, "reimbursements"], [fin.evidence.length, "invoices"],
+  ] as [number, string][]).filter(([n]) => n > 0);
+  const onlyParts = blockers.length === 1 && pur.items.length > 0;
+  const linked = pur.items.filter((i) => i.finance_txn_id).length;
+  async function clearAbacus() {
+    const ok = await ask({ title: `Delete all ${pur.items.length} parts in Abacus?`, confirmLabel: "Delete them all", danger: true,
+      body: "This empties Abacus so the old ledger can be restored (its parts list comes back with it). It can't be undone." });
+    if (!ok) return;
+    try {
+      const n = await deleteItems(client, pur.items.map((i) => i.id));
+      await reload();
+      flash(`Deleted ${n} parts. Abacus is empty: pick the export and restore.`);
+    } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
+  }
   const [file, setFile] = useState<{ name: string; data: Export } | null>(null);
   const [cars, setCars] = useState<{ IC: string; EV: string; Team: string }>({ IC: "", EV: "", Team: "" });
   const [seasonStart, setSeasonStart] = useState("");
@@ -100,7 +119,17 @@ function RestoreCard({ client, pur, reload, flash, empty }: FinanceProps & { emp
           list with its statuses. This loads all of it exactly as it was. It only works on an empty Agora, so it can't overwrite live books.
         </p>
       </div>
-      {!empty && !done && <p className="text-xs text-asu-gold">Agora already has ledger lines, reimbursements or parts, so a restore would be refused. Use the Airtable upload below for parts lists.</p>}
+      {confirmDialog}
+      {!empty && !done && (
+        <div className="rounded-md border border-asu-gold/50 bg-asu-gold/10 p-3 text-xs">
+          A restore only fills an empty Agora, and this one has {blockers.map(([n, what]) => `${n} ${what}`).join(", ")}.
+          {onlyParts ? <>
+            {" "}If those parts are test rows or a first try, clear Abacus and restore.
+            {linked > 0 && <> {linked} of them are matched to ledger charges and can't be deleted.</>}
+            <div className="mt-2"><Button kind="danger" onClick={() => void clearAbacus()}>Delete all {pur.items.length} parts in Abacus</Button></div>
+          </> : <> Ledger lines, statements and balances can't be deleted here (that keeps the books safe), so use the Airtable upload below for parts lists, or ask Nick to clear the finance data first.</>}
+        </div>
+      )}
       <label className="w-fit cursor-pointer rounded-md border border-helios-line px-3 py-1.5 text-sm hover:bg-helios-strip">
         {file ? `${file.name}: pick another` : "Pick helios-export.json"}
         <input type="file" accept=".json,application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pick(f); }} />

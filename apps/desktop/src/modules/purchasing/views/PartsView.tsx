@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type Keyboar
 import type { SupabaseClient } from "@helios/auth";
 import {
   ON_THE_WAY, ORDERED_STATUSES, REQUESTER_MOVES, STATUSES, addItems, addTracking, can, decide, detectCarrier, importItems, itemCost, recordOrder,
-  setCarSubteam, setStatus, subteamsOfCar, undoOrder, updateItem, type Item, type Priority, type Status,
+  deleteItems, setCarSubteam, setStatus, subteamsOfCar, undoOrder, updateItem, type Item, type Priority, type Status,
 } from "../lib/api";
 import { today } from "../lib/dates";
 import { centsToInput, fmtCents, parseCents, requireCents } from "../lib/money";
@@ -84,7 +84,8 @@ export function PartsView({
   const tableRef = useRef<HTMLTableElement>(null);
 
   const subteamOf = (i: Item) => i.item_allocations[0]?.subteam_id;
-  // a car shows its own subteams (IC: Engine, Data AQ...; EV: Battery, HV...)
+  // a car shows its own subteams, as set in Admin > Org Structure
+  const canStructure = can(caps, "org.manage_structure");
   const carTeams = subteamsOfCar(subteams, data.carSubteams, items, projectId);
   const notOnCar = projectId ? subteams.filter((s) => !data.carSubteams.some((x) => x.project_id === projectId && x.subteam_id === s.id)) : [];
   useEffect(() => { if (tab && !carTeams.some((s) => s.id === tab)) setTab(null); }, [projectId, carTeams, tab]);
@@ -224,6 +225,13 @@ export function PartsView({
     } else if (bulk === "tracking") {
       await run(`Tracking added to ${ids.length} item(s)`, () =>
         addTracking(client, ids, track.number, track.carrier || detectCarrier(track.number), track.eta || null));
+    } else if (bulk === "delete") {
+      const pick = rows.filter((r) => selected.has(r.id));
+      const ok = await ask({ title: `Delete ${pick.length} part${pick.length === 1 ? "" : "s"}?`, confirmLabel: "Delete", danger: true,
+        body: <>They're removed from Abacus for good (the parts history keeps a note of who deleted them). Parts matched to a ledger charge can't be deleted: unlink them in the Ledger first.
+          {pick.length <= 8 && <span className="mt-2 block text-xs">{pick.map((r) => `${r.code} ${r.title}`).join(", ")}</span>}</> });
+      if (!ok) return;
+      await run("", async () => { const n = await deleteItems(client, ids); flash(`Deleted ${n} part${n === 1 ? "" : "s"}.`); });
     } else if (bulk === "undo-order") {
       const ok = await ask({
         title: `Undo the order on ${ids.length} part${ids.length === 1 ? "" : "s"}?`,
@@ -262,9 +270,9 @@ export function PartsView({
             {s.name}<span className="text-[11px] text-helios-muted">{counts.get(s.id) ?? 0}</span>
           </TabButton>
         ))}
-        {exec && projectId && notOnCar.length > 0 && (
+        {canStructure && projectId && notOnCar.length > 0 && (
           <select className="ml-1 rounded-md border border-dashed border-helios-line bg-transparent px-1 py-1 text-xs text-helios-dim" value=""
-            title="Execs: give this car another subteam tab"
+            title="Put another subteam on this car (the same as Admin > Org Structure)"
             onChange={(e) => { const id = e.target.value; if (id) void run("Subteam added to this car.", () => setCarSubteam(client, projectId, id, true)).then(() => setTab(id)); }}>
             <option value="">+ subteam on {data.projects.find((p) => p.id === projectId)?.car_code}</option>
             {notOnCar.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -405,6 +413,7 @@ export function PartsView({
               <option value="status:DELIVERED">Mark delivered</option>
               <option value="status:CANCELLED">Cancel</option>
               <option value="status:HAVE">Already have it</option>
+              <option value="delete">Delete</option>
             </>}
           </select>
           {bulk === "order" && <>

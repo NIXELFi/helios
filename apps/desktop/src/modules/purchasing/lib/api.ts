@@ -75,7 +75,7 @@ export interface Item {
 
 export interface Approval { item_id: string; user_id: string; decision: "approve" | "deny"; note: string; at: string }
 export interface Subteam { id: string; name: string; code: string; color: string | null; sort_order: number }
-export interface Project { id: string; name: string; car_code: string; status: string }
+export interface Project { id: string; name: string; car_code: string; status: string; program?: "ic" | "ev" | null }
 export interface Notification { id: number; item_id: string | null; kind: string; message: string; created_at: string; read_at: string | null }
 export interface BudgetRow {
   budget_line_id: string | null; project_id: string | null; project_code: string; name: string; subteam_ids: string[];
@@ -125,7 +125,7 @@ export async function fetchSubteams(c: SupabaseClient): Promise<Subteam[]> {
   return unwrap(await c.schema("pm").from("subteams").select("id,name,code,color,sort_order").order("sort_order").order("name"));
 }
 export async function fetchProjects(c: SupabaseClient): Promise<Project[]> {
-  return unwrap(await c.schema("pm").from("projects").select("id,name,car_code,status").order("car_code"));
+  return unwrap(await c.schema("pm").from("projects").select("id,name,car_code,status,program").order("car_code"));
 }
 export async function fetchNotifications(c: SupabaseClient): Promise<Notification[]> {
   return unwrap(await P(c).from("notifications").select("*").order("id", { ascending: false }).limit(200));
@@ -213,19 +213,26 @@ export function trackingUrl(carrier: string, n: string): string {
   return s && urls[c] ? urls[c] : "";
 }
 
-// ---- which subteams each car has
+// ---- which subteams each car has: Helios's org structure (Admin > Org Structure)
 
 export interface CarSubteam { project_id: string; subteam_id: string }
 export async function fetchCarSubteams(c: SupabaseClient): Promise<CarSubteam[]> {
-  return unwrap(await P(c).from("car_subteams").select("project_id,subteam_id"));
+  return unwrap(await c.schema("pm").from("project_subteams").select("project_id,subteam_id"));
 }
-/** Execs: put a subteam on a car, or take it off. */
+/** Put a subteam on a car or take it off, in the org structure (needs org.manage_structure, like Admin). */
 export async function setCarSubteam(c: SupabaseClient, projectId: string, subteamId: string, on: boolean): Promise<void> {
-  unwrap(await P(c).rpc("set_car_subteam", { p_project: projectId, p_subteam: subteamId, p_on: on }));
+  unwrap(await c.schema("pm").rpc("set_project_subteam", { p_project_id: projectId, p_subteam_id: subteamId, p_present: on }));
+}
+/** Execs: delete parts (not ones matched to a ledger charge). Returns how many went. */
+export async function deleteItems(c: SupabaseClient, ids: string[]): Promise<number> {
+  let n = 0;
+  for (let k = 0; k < ids.length; k += 200) n += unwrap(await P(c).rpc("delete_items", { p_ids: ids.slice(k, k + 200) })) as number;
+  return n;
 }
 /**
- * A car's own subteams, in the usual order: the ones set up for it plus any
- * with parts on it. A car with none set up yet shows every subteam.
+ * A car's own subteams, in the usual order: the ones the org structure puts on
+ * it, plus any that already have parts on it (so nothing is hidden). A car the
+ * org structure says nothing about shows every subteam.
  */
 export function subteamsOfCar(subteams: Subteam[], carSubteams: CarSubteam[], items: Item[], projectId: string | null): Subteam[] {
   if (!projectId) return subteams;

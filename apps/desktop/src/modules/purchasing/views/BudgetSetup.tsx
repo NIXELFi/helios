@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  deleteBudgetLine, fetchBudgetLines, fetchSeasons, setCarSubteam, upsertBudgetLine, upsertSeason, type BudgetLine, type Season,
+  can, deleteBudgetLine, fetchBudgetLines, fetchSeasons, setCarSubteam, upsertBudgetLine, upsertSeason, type BudgetLine, type Season,
 } from "../lib/api";
 import { centsToInput, fmtCents, parseCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
@@ -163,19 +163,19 @@ export function BudgetSetup({ client, data, reload, flash, done }: {
       <div className="flex flex-col gap-2">
         <div>
           <b className="text-sm">Subteams on each car</b>
-          <p className="text-xs text-helios-dim">The tabs Abacus shows for each car, and where members can add parts. A budget line, or a part an exec adds, puts its subteam here by itself. Until a car has any, members can add to every subteam; after that, only to these and ones that already have parts on the car, so tick all of a car's subteams at once.</p>
+          <p className="text-xs text-helios-dim">The tabs Abacus shows for each car, and where members can add parts. This is Helios's org structure, the same list as Admin &gt; Org Structure. A subteam that already has parts on a car keeps its tab there.</p>
         </div>
         {projects.map((p) => {
           const mine = data.carSubteams.filter((x) => x.project_id === p.id).map((x) => x.subteam_id);
           return (
             <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
               <span className="w-20 font-semibold">{p.car_code}</span>
-              <SubteamPicker subteams={subteams} value={mine} taken={new Set()}
+              <SubteamPicker subteams={subteams} value={mine} taken={new Set()} readOnly={!can(data.caps, "org.manage_structure")}
                 onChange={(ids) => {
                   const added = ids.find((id) => !mine.includes(id));
                   const removed = mine.find((id) => !ids.includes(id));
                   const id = added ?? removed;
-                  if (id) void act(added ? "Subteam added." : "Subteam taken off this car (its parts stay).", () => setCarSubteam(client, p.id, id, !!added));
+                  if (id) void act(added ? "Subteam added to this car." : "Subteam taken off this car (its parts stay).", () => setCarSubteam(client, p.id, id, !!added));
                 }} />
             </div>
           );
@@ -210,10 +210,13 @@ function LineRow({ line, projects, subteams, taken, save, remove }: {
 }
 
 /** The subteams on a line as chips (click to remove), plus a list to add one. A subteam already on another line for this car can't be added. */
-function SubteamPicker({ subteams, value, taken, onChange }: {
-  subteams: PurchasingData["subteams"]; value: string[]; taken: Set<string>; onChange: (ids: string[]) => void;
+function SubteamPicker({ subteams, value, taken, onChange, readOnly }: {
+  subteams: PurchasingData["subteams"]; value: string[]; taken: Set<string>; onChange: (ids: string[]) => void; readOnly?: boolean;
 }) {
   const free = subteams.filter((s) => !value.includes(s.id) && !taken.has(s.id));
+  if (readOnly) {
+    return <div className="flex max-w-xl flex-wrap gap-1">{value.map((id) => <span key={id} className="rounded-full border border-helios-line px-2 py-0.5 text-[11px]">{subteams.find((s) => s.id === id)?.name ?? "?"}</span>)}</div>;
+  }
   return (
     <div className="flex max-w-xl flex-wrap items-center gap-1">
       {value.map((id) => (

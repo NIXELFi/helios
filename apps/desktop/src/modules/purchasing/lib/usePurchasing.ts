@@ -16,7 +16,7 @@ export interface PurchasingData {
   notifications: Notification[];
   caps: Caps | null;
   vendors: VendorRule[];   // the vendor list, for fixing spellings on import
-  carSubteams: CarSubteam[];   // which subteams each car has
+  carSubteams: CarSubteam[];   // which subteams each car has (Admin > Org Structure)
 }
 
 const EMPTY: PurchasingData = {
@@ -39,7 +39,7 @@ export function usePurchasing(client: SupabaseClient | null, active: boolean) {
         fetchBudgets(client), fetchNotifications(client), fetchCaps(client),
         // optional: an older database without the finance schema just has no vendor list
         client.schema("finance").from("vendors").select("*").then((r) => (r.data ?? []) as VendorRule[], () => []),
-        // optional too: a database from before cars had their own subteams
+        // optional: without the org structure map every car shows every subteam
         fetchCarSubteams(client).catch(() => [] as CarSubteam[]),
       ]);
       setData({ items, approvals, subteams, projects, budgets, notifications, caps, vendors, carSubteams });

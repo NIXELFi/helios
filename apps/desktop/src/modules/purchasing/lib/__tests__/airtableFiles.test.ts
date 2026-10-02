@@ -33,5 +33,9 @@ describe("Airtable export names", () => {
     expect(guessCar("EV Team/Aero-Grid view.csv", more)).toBe("ev");
     const plain = [{ id: "ic", car_code: "SDM27", name: "SDM27" }, { id: "ev", car_code: "SDM27e", name: "SDM27e" }, { id: "old", car_code: "SDM26", name: "SDM26" }];
     expect(guessCar("IC", plain)).toBe("ic");
+    // the org structure's IC/EV setting wins over names
+    const set = [{ id: "a", car_code: "Gen7", name: "Gen7", program: "ev" as const }, { id: "b", car_code: "Gen6", name: "Gen6", program: "ic" as const }];
+    expect(guessCar("EV Team/Aero.csv", set)).toBe("a");
+    expect(guessCar("IC Team/Aero.csv", set)).toBe("b");
   });
 });

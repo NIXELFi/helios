@@ -82,7 +82,6 @@ async function main() {
   await wipe(pur, "budget_lines");
   await wipe(pur, "seasons");
   await wipe(pur, "notifications");
-  await wipe(pur, "car_subteams", "project_id");
   await wipe(fin, "imports");
   for (const t of ["reimbursement_receipts", "reimbursements", "evidence", "balance_entries", "txn_allocations", "transactions", "statements"]) await wipe(fin, t);
   must(await fin.from("accounts").update({ paid_from_account_id: null }).not("id", "is", null), "unlink accounts");

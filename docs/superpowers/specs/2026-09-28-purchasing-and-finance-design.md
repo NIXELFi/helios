@@ -321,5 +321,9 @@ database. Ordering by `(ts, id)` would make it stable.
   (`purchasing.car_subteams`), undoing an order, deleting an unused account,
   and `estimated_tax_percent` (8.1, Tempe).
   It needs no dashboard changes.
+- `20261003000000_agora_org_structure_delete_parts.sql` (after 6.0.1) drops
+  `purchasing.car_subteams`: which subteams a car has now comes from Helios's
+  own `pm.project_subteams` (Admin > Org Structure), which `add_items` checks.
+  It also adds `purchasing.delete_items` (execs; not parts matched to a charge).
 - In Phase A "spent" comes from recorded orders (`actual_total`). Once the
   ledger lands in Phase B it comes from statement lines instead.

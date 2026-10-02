@@ -36,10 +36,12 @@ export function guessSubteam(path: string, subteams: Pick<Subteam, "id" | "name"
 const isEv = (p: Pick<Project, "car_code" | "name">) => /\bev\b|electric|\d+e\b/i.test(`${p.car_code} ${p.name}`);
 
 /** The car from the folder or file name ("EV Team", "IC Team"), else null. */
-export function guessCar(path: string, projects: Pick<Project, "id" | "car_code" | "name">[]): string | null {
+export function guessCar(path: string, projects: Pick<Project, "id" | "car_code" | "name" | "program">[]): string | null {
   const p = path.replace(/[_-]/g, " ");
-  const ev = projects.filter(isEv);
-  const ic = projects.filter((x) => !isEv(x));
+  // Helios's org structure says which cars are IC and which EV; else go by the names
+  const known = projects.some((x) => x.program);
+  const ev = known ? projects.filter((x) => x.program === "ev") : projects.filter(isEv);
+  const ic = known ? projects.filter((x) => x.program === "ic") : projects.filter((x) => !isEv(x));
   for (const x of projects) if (new RegExp(`\\b${x.car_code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(p)) return x.id;
   // Helios also keeps past cars and other projects, so narrow down by name
   const named = (xs: typeof projects, re: RegExp) => {

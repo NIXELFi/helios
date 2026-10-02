@@ -30,7 +30,7 @@ async function person(prefix: string, roleKey: string, subteamId: string | null 
   const { error } = await pm().from("role_memberships").insert({ user_id: user.id, role_id: role!.id, subteam_id: subteamId });
   if (error) throw error;
   const client = await signInAs(email);
-  return { user, f: client.schema("finance"), p: client.schema("purchasing") };
+  return { user, f: client.schema("finance"), p: client.schema("purchasing"), pm: client.schema("pm") };
 }
 async function reset(): Promise<void> {
   const all = (t: string) => fin().from(t).delete().gte("id", 0);
@@ -38,7 +38,6 @@ async function reset(): Promise<void> {
   await pur().from("budget_lines").delete().neq("id", NIL);
   await pur().from("seasons").delete().neq("id", NIL);
   await pur().from("notifications").delete().gte("id", 0);
-  await pur().from("car_subteams").delete().neq("project_id", NIL);
   await all("imports");
   await all("reimbursement_receipts");
   await all("reimbursements");
@@ -62,6 +61,8 @@ describe("agora follow-ups", () => {
     ev = await project("SDM27e");
   });
   afterEach(async () => {
+    // the org structure's map for the test cars (Admin > Org Structure)
+    await pm().from("project_subteams").delete().in("project_id", [ic, ev]);
     await reset();
     await resetAuthUsers();
   });
@@ -233,30 +234,47 @@ describe("agora follow-ups", () => {
     expect((await fin().from("accounts").select("name")).data).toEqual([{ name: "Chase Checking" }]);
   });
 
-  it("each car has its own subteams; members add parts only to theirs", async () => {
+  it("each car's subteams come from the org structure; members add parts only to those", async () => {
     const eng = await subteam("Engine", "ENG");
+    await pm().from("project_subteams").delete().in("project_id", [ic, ev]);
     const cfo = await person("cfo", "executive");
     const member = await person("member", "engineer", daq);
-    // before any car is set up, anyone adds as before, and a member's part
-    // doesn't set the car up (it would lock every other subteam out)
+    // a car the org structure says nothing about takes any subteam
     expect((await member.p.rpc("add_items", { p_project: ev, p_subteam: daq, p_rows: [{ title: "x" }] })).error).toBeNull();
-    const other = await person("other", "engineer", eng);
-    expect((await other.p.rpc("add_items", { p_project: ev, p_subteam: eng, p_rows: [{ title: "z" }] })).error).toBeNull();
-    // IC gets Engine from an exec
-    await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: eng, p_on: true });
-    expect((await member.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true })).error).not.toBeNull();
+    // IC gets Engine in Admin > Org Structure (the same RPC Agora's tab bar uses); members can't edit it
+    expect((await cfo.pm.rpc("set_project_subteam", { p_project_id: ic, p_subteam_id: eng, p_present: true })).error).toBeNull();
+    expect((await member.pm.rpc("set_project_subteam", { p_project_id: ic, p_subteam_id: daq, p_present: true })).error).not.toBeNull();
     expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y" }] })).error?.message).toMatch(/isn't on this car/);
-    await cfo.p.rpc("set_car_subteam", { p_project: ic, p_subteam: daq, p_on: true });
+    await cfo.pm.rpc("set_project_subteam", { p_project_id: ic, p_subteam_id: daq, p_present: true });
     expect((await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "y", date_needed_raw: "9/11/2026" }] })).error).toBeNull();
     expect((await pur().from("items").select("date_needed_raw").eq("title", "y").single()).data!.date_needed_raw).toBe("9/11/2026");
-    const { data: pairs } = await member.p.from("car_subteams").select("project_id,subteam_id");
-    expect(pairs).toHaveLength(2);
-    // EV gets set up by an exec with Engine only: DAQ already has a part there, so its member keeps adding
-    await cfo.p.rpc("set_car_subteam", { p_project: ev, p_subteam: eng, p_on: true });
+    // EV set up with Engine only: DAQ already has a part there, so its member keeps adding; Aero can't
+    await cfo.pm.rpc("set_project_subteam", { p_project_id: ev, p_subteam_id: eng, p_present: true });
     expect((await member.p.rpc("add_items", { p_project: ev, p_subteam: daq, p_rows: [{ title: "w" }] })).error).toBeNull();
     const aero = await subteam("Aero", "AERO");
     const aeroMember = await person("aero", "engineer", aero);
     expect((await aeroMember.p.rpc("add_items", { p_project: ev, p_subteam: aero, p_rows: [{ title: "v" }] })).error?.message).toMatch(/isn't on this car/);
+    // the old Agora-only map is gone
+    expect((await pur().from("car_subteams").select("*")).error).not.toBeNull();
+  });
+
+  it("execs delete parts, except ones matched to a ledger charge, and the history says so", async () => {
+    const cfo = await person("cfo", "executive");
+    const member = await person("member", "engineer", daq);
+    const { data: ids } = await member.p.rpc("add_items", { p_project: ic, p_subteam: daq, p_rows: [{ title: "Test row" }, { title: "Charged part" }] });
+    const [test, charged] = ids as string[];
+    const { data: acct } = await fin().from("accounts").insert({ name: "Card", kind: "credit_card" }).select("id").single();
+    const { data: t } = await fin().from("transactions").insert({ account_id: acct!.id, date: "2026-09-01", amount_cents: -500, kind: "charge" }).select("id").single();
+    await pur().from("items").update({ finance_txn_id: t!.id }).eq("id", charged!);
+
+    expect((await member.p.rpc("delete_items", { p_ids: [test] })).error).not.toBeNull();
+    expect((await cfo.p.rpc("delete_items", { p_ids: [test, charged] })).error?.message).toMatch(/matched to a ledger charge/);
+    const { data: n, error } = await cfo.p.rpc("delete_items", { p_ids: [test] });
+    expect(error).toBeNull();
+    expect(n).toBe(1);
+    expect((await pur().from("items").select("title")).data).toEqual([{ title: "Charged part" }]);
+    expect((await pur().from("events").select("field,old_value").eq("item_id", test!).eq("field", "deleted")).data)
+      .toEqual([{ field: "deleted", old_value: expect.stringMatching(/Test row$/) }]);
   });
 
   it("restores the standalone ledger into an empty Agora, once, for execs only", async () => {
@@ -311,8 +329,6 @@ describe("agora follow-ups", () => {
     const { data: reimb } = await fin().from("reimbursements").select("id,status,paid_with").order("id");
     expect(reimb).toEqual([{ id: 7, status: "paid", paid_with: "check" }, { id: 9, status: "owed", paid_with: null }]);
     expect((await pur().from("seasons").select("name,is_current,starts_on")).data).toEqual([{ name: "2026-27", is_current: true, starts_on: "2026-07-01" }]);
-    // the car's subteams come from the restored parts and budgets
-    expect((await pur().from("car_subteams").select("project_id,subteam_id")).data).toEqual([{ project_id: ic, subteam_id: daq }]);
     // new rows carry on after the restored ids
     const { data: next } = await fin().from("transactions").insert({ account_id: 1, date: "2026-09-30", amount_cents: -1, kind: "withdrawal" }).select("id").single();
     expect(next!.id).toBe(12);
