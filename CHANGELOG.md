@@ -34,8 +34,10 @@ follow [semver](https://semver.org/).
   each covering one or more subteams.
 - **Agora: pay reimbursements in cash.** Besides a check, an exec can mark
   reimbursements paid in cash from the cash box (taken out of the Cash Box
-  account in the ledger) or in cash withdrawn at Chase (the withdrawal goes into
-  the ledger and the statement's line is matched to it, not counted twice).
+  account in the ledger) or in cash withdrawn at Chase (the statement's
+  withdrawal line is the record; if exactly that amount was withdrawn, it can
+  go into the ledger straight away and the statement's line is matched to it).
+  Cash from the cash box always goes in the ledger.
   Members see that they were paid in cash.
 - **Agora: split a cart's shipping and tax over its parts.** Tick the parts
   bought together and paste the order confirmation or cart page (or drop its
@@ -57,8 +59,9 @@ follow [semver](https://semver.org/).
   budgets.
 - **Agora: each car has its own subteams.** Pick SDM27 and Abacus shows the IC
   subteams; pick SDM27e and it shows the EV ones. Execs add a subteam to a car
-  from the tab bar or Budgets > Set up budgets, and members can only add parts
-  to a subteam that's on that car.
+  from the tab bar or Budgets > Set up budgets (a budget line's subteams are
+  added to its car). Once a car is set up, members can only add parts to a
+  subteam that's on that car or already has parts there; until then, any.
 - **Agora: What if?** (Finance, execs only). List big possible expenses (and
   money expected in), each paid from checking, the card or another account and
   optionally against a budget line, and see what Available, the card's room

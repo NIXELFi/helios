@@ -350,6 +350,9 @@ begin
   if not (finance.can_edit() and purchasing.is_exec()) then
     raise exception 'only execs can restore the books' using errcode = '42501';
   end if;
+  if p_cars ->> 'IC' = p_cars ->> 'EV' then
+    raise exception 'IC and EV have to be different cars' using errcode = '22023';
+  end if;
   if p_data ->> 'source' is distinct from 'sdm-ledger' then
     raise exception 'that isn''t an export from the SDM ledger' using errcode = '22023';
   end if;
@@ -423,8 +426,8 @@ begin
                                   net_charges_cents, purchases_cents, credits_cents, source_file, sha256, imported_at)
   select (x ->> 'id')::bigint, (x ->> 'account_id')::bigint, finance.restore_day(x ->> 'period_start'),
          finance.restore_day(x ->> 'closing_date'), (x ->> 'opening_cents')::bigint, (x ->> 'ending_cents')::bigint,
-         (x ->> 'net_charges_cents')::bigint, (x ->> 'purchases_cents')::bigint, (x ->> 'credits_cents')::bigint,
-         x ->> 'source_file', x ->> 'sha256', coalesce((x ->> 'imported_at')::timestamptz, now())
+         coalesce((x ->> 'net_charges_cents')::bigint, 0), coalesce((x ->> 'purchases_cents')::bigint, 0),
+         coalesce((x ->> 'credits_cents')::bigint, 0), coalesce(x ->> 'source_file', ''), x ->> 'sha256', coalesce((x ->> 'imported_at')::timestamptz, now())
   from jsonb_array_elements(p_data -> 'statements') x;
 
   insert into finance.transactions (id, account_id, date, post_date, cleared_date, amount_cents, description, vendor, kind,
@@ -590,9 +593,12 @@ create policy car_subteams_read on purchasing.car_subteams for select to authent
 grant select on purchasing.car_subteams to authenticated;
 grant all on purchasing.car_subteams to service_role;
 
+-- Cars start set up from their budget lines only. Parts already on a car
+-- don't set it up: on a car with no budget lines, the subteams that happened
+-- to add parts first would lock every other subteam out (add_items still
+-- lets a subteam with parts on a car keep adding).
 insert into purchasing.car_subteams (project_id, subteam_id)
-select distinct project_id, subteam_id from purchasing.item_allocations
-union select l.project_id, ls.subteam_id from purchasing.budget_lines l join purchasing.budget_line_subteams ls on ls.budget_line_id = l.id
+select distinct l.project_id, ls.subteam_id from purchasing.budget_lines l join purchasing.budget_line_subteams ls on ls.budget_line_id = l.id
 on conflict do nothing;
 
 create or replace function purchasing.car_subteam_from_part()

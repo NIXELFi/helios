@@ -87,7 +87,7 @@ export function ReimbursementsView({ client, fin, pur, reload, flash, openTxn }:
         <div className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-xl border border-asu-gold bg-helios-panel px-4 py-2 shadow-lg">
           <b className="text-asu-gold">{picked.size} selected | {fmtCents(pickedRows.reduce((s, r) => s + (r.amount_cents ?? 0), 0))}</b>
           <label className="flex items-center gap-1 text-sm">Paid on<input type="date" className={input} value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></label>
-          <select className={input} value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value as PaidWith })} aria-label="Paid with">
+          <select className={input} value={pay.method} onChange={(e) => { const method = e.target.value as PaidWith; setPay({ ...pay, method, addToLedger: method !== "bank_cash" }); }} aria-label="Paid with">
             <option value="check">by check</option>
             <option value="cash_box">in cash from the cash box</option>
             <option value="bank_cash">in cash withdrawn at Chase</option>
@@ -121,7 +121,7 @@ const LEDGER_LABEL: Record<PaidWith, string> = {
 const LEDGER_HINT: Record<PaidWith, string> = {
   check: "Adds the check to the ledger as uncashed, so Available stays right until it clears",
   cash_box: "Always added: the cash box has no statement, so this withdrawal on the Cash Box account (made if there isn't one) is its record",
-  bank_cash: "Adds the cash withdrawal to checking now, so Available is right straight away. When the statement comes in, its withdrawal line is matched to this one, not added twice",
+  bank_cash: "Off by default: the statement's withdrawal line is the record. Tick it only if exactly this amount was withdrawn (an ATM usually gives $20s): then it's added to checking now and the statement's line of the same amount is matched to it, not added twice",
 };
 
 function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "client" | "reload" | "flash"> & { r: ReimbursementWithReceipts; where: string }) {

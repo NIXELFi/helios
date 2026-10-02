@@ -270,7 +270,9 @@ describe("agora follow-ups", () => {
         { id: 1, name: "Chase Checking", kind: "checking", last4: "0001", active: 1 },
         { id: 8, name: "SAE card", kind: "credit_card", last4: "0000", holder: "Demo CFO", credit_limit_cents: 500000, paid_from_account_id: 1, active: 1 },
       ],
-      statements: [{ id: 3, account_id: 8, period_start: "2026-08-01", closing_date: "2026-08-28", net_charges_cents: 4720, purchases_cents: 4720, credits_cents: 0, source_file: "card.pdf", sha256: "abc", imported_at: "2026-09-01T00:00:00Z" }],
+      statements: [{ id: 3, account_id: 8, period_start: "2026-08-01", closing_date: "2026-08-28", net_charges_cents: 4720, purchases_cents: 4720, credits_cents: 0, source_file: "card.pdf", sha256: "abc", imported_at: "2026-09-01T00:00:00Z" },
+        // a checking statement: only its closing and ending balance
+        { id: 4, account_id: 1, closing_date: "2026-08-31", ending_cents: 100000 }],
       transactions: [
         { id: 10, account_id: 8, date: "2026-08-20", amount_cents: -4720, description: "MOUSER", vendor: "Mouser", kind: "charge", category: "Parts & materials", status: "posted", needs_review: 0, source: "chase-card-pdf", source_key: "k10", statement_id: 3, notes: "" },
         { id: 11, account_id: 1, date: "2026-09-02", amount_cents: -2000, description: "Check 101", kind: "check", category: "Reimbursement", reference: "101", status: "posted", needs_review: 0, source: "manual", notes: "" },
@@ -291,6 +293,7 @@ describe("agora follow-ups", () => {
     expect((await member.f.rpc("restore_ledger", args)).error).not.toBeNull();
     expect((await cfo.f.rpc("restore_ledger", { ...args, p_subteams: {} })).error?.message).toMatch(/Data AQ/);
     expect((await cfo.f.rpc("restore_ledger", { ...args, p_season_start: null })).error?.message).toMatch(/season started/);
+    expect((await cfo.f.rpc("restore_ledger", { ...args, p_cars: { IC: ic, EV: ic } })).error?.message).toMatch(/different cars/);
     // whole-team parts need a car to go under
     const team = { ...data, line_item_allocations: [{ item_id: 1, program: "Team", subteam: "Data AQ", percent: 100 }] };
     expect((await cfo.f.rpc("restore_ledger", { ...args, p_data: team })).error?.message).toMatch(/whole-team/);
