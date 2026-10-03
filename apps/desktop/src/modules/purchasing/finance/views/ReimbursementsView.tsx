@@ -143,7 +143,7 @@ function RequestCard({ r, client, reload, flash, where }: Pick<FinanceProps, "cl
         <input className={`${input} min-w-[220px] flex-1`} placeholder="Note (optional, sent to them)" value={note} onChange={(e) => setNote(e.target.value)} />
         <Button kind="good" onClick={() => void attempt(flash, reload, "Approved. It's now owed.", () => decideReimbursement(client, r.id, "approve", note))}>Approve</Button>
         <Button kind="danger" onClick={() => void attempt(flash, reload, "Declined.", () => decideReimbursement(client, r.id, "deny", note))}>Decline</Button>
-        <Button kind="ghost" title="Entered by mistake: remove it without telling them" onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "Deleted.", () => deleteReimbursement(client, r)))}>Delete</Button>
+        <Button kind="ghost" title="Entered by mistake: remove it without telling them" onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "", async () => { const warn = await deleteReimbursement(client, r); flash(warn ?? "Deleted.", !!warn); }))}>Delete</Button>
       </div>
     </Card>
   );
@@ -200,7 +200,7 @@ function Row({ r, client, reload, flash, openTxn, picked, toggle, where }: Pick<
           {r.check_txn_id && <button className="mt-1 text-asu-gold hover:underline" onClick={() => openTxn(r.check_txn_id!)}>in the ledger</button>}
         </> : <Badge tone="warn">owed</Badge>}
         <div><button className="mt-1 text-helios-muted hover:text-helios-danger hover:underline" title="Entered by mistake"
-          onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "Deleted.", async () => { toggle(r.id, false); await deleteReimbursement(client, r); }))}>Delete</button></div>
+          onClick={() => void ask(deleteQuestion(r)).then((ok) => ok && attempt(flash, reload, "", async () => { toggle(r.id, false); const warn = await deleteReimbursement(client, r); flash(warn ?? "Deleted.", !!warn); }))}>Delete</button></div>
       </td>
     </tr>
   );

@@ -39,7 +39,8 @@ follow [semver](https://semver.org/).
   every step goes in the part's history.
 - **Agora: delete a reimbursement entered by mistake** (Finance >
   Reimbursements, Delete on its row or request), with its receipts. A check or
-  cash withdrawal already in the ledger for it stays there.
+  cash withdrawal already in the ledger for it stays there. If its receipt
+  files can't be removed, it says so instead of leaving them behind silently.
 
 ### Changed
 

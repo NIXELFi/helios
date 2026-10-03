@@ -137,12 +137,15 @@ export async function updateReimbursement(c: SupabaseClient, id: number, fields:
 /**
  * Execs: delete a reimbursement entered by mistake, with its receipts. A check
  * or cash withdrawal already in the ledger for it stays there. The row goes
- * first: an exec can still remove its receipt files afterwards.
+ * first: an exec can still remove its receipt files afterwards. Returns a
+ * warning when the row went but its receipt files didn't.
  */
-export async function deleteReimbursement(c: SupabaseClient, r: ReimbursementWithReceipts): Promise<void> {
+export async function deleteReimbursement(c: SupabaseClient, r: ReimbursementWithReceipts): Promise<string | null> {
   const gone = unwrap(await F(c).from("reimbursements").delete().eq("id", r.id).select("id")) as { id: number }[];
   if (!gone.length) throw new Error("That reimbursement couldn't be deleted (it may already be gone).");
-  if (r.reimbursement_receipts.length) await c.storage.from("receipts").remove(r.reimbursement_receipts.map((x) => x.object_path));
+  if (!r.reimbursement_receipts.length) return null;
+  const { error } = await c.storage.from("receipts").remove(r.reimbursement_receipts.map((x) => x.object_path));
+  return error ? `Deleted, but its receipt files couldn't be removed (${error.message}).` : null;
 }
 
 export const RECEIPT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
