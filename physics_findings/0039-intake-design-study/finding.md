@@ -800,3 +800,16 @@ Fluent cut the merge geometry from the wall mesh (`restrictor_opt/data/exhaust/m
 - The fit above 5.5k improves from 2.56 to 2.26 N.m and the MAP drop at 7-8k lands on the logs (3.19 / 4.57 against 3.24 / 4.60 kPa) with the car-fitted recovery.
 - **Not fixed:** the lower peak (dyno 47.5 N.m at 5.9k, model 44.5 at 6.0k), the trough at 7-7.5k, and the MAP drop at 9.5-10k (model 0.4-0.6 kPa short).
 - This replaces the exhaust layout of every earlier as-measured case. The primary-diameter comparison is being rerun on it (`primary_dia_crotch.py`).
+
+**Primary diameter on the corrected merges** (`primary_dia_crotch.py`, 210 runs; `charts/asmeasured/primary_dia_crotch_bands.csv`, `A6_primary_diameter_crotch.png`). Brake torque against p125:
+
+| case, walls | 4-6k | 6-12k | 7-10.5k | 10.5-12.5k | peak power | largest gain | largest loss |
+|---|---|---|---|---|---|---|---|
+| p150 (scaled system), calibrated walls | -0.5 % | +0.3 % | +0.4 % | -0.1 % | -1.9 % | +4.6 % at 5000 | -3.9 % at 5500 |
+| p150, hot walls | -0.3 % | +0.3 % | +0.4 % | +0.1 % | -1.1 % | +6.4 % at 5000 | -3.6 % at 5500 |
+| p150only, calibrated walls | +0.5 % | -0.2 % | -0.1 % | +0.6 % | -0.4 % | +3.2 % at 4750 | -2.4 % at 7500 |
+| p150only, hot walls | +0.4 % | -0.4 % | -0.7 % | +0.7 % | -1.2 % | +6.4 % at 5000 | -2.7 % at 8250 |
+
+- **The answer holds on the corrected exhaust, and gets smaller:** under 0.5 % in any band for the scaled 1.5 in system, peak power 1-2 % lower. The only larger effects are local, below 5.5k: the bigger system moves the low-speed features (+5 % at 5000, -4 % at 5500).
+- The upper peak (8750) does not move with diameter on the corrected layout.
+- **Verdict unchanged: no performance case for 1.5 in primaries.** Fluent's 3D p150 run is the check. Traces on the corrected layout: `exhaust_bc/exhaust_crotch_{p125,p150}_{9000,6000}rpm.csv`.
