@@ -813,3 +813,29 @@ Fluent cut the merge geometry from the wall mesh (`restrictor_opt/data/exhaust/m
 - **The answer holds on the corrected exhaust, and gets smaller:** under 0.5 % in any band for the scaled 1.5 in system, peak power 1-2 % lower. The only larger effects are local, below 5.5k: the bigger system moves the low-speed features (+5 % at 5000, -4 % at 5500).
 - The upper peak (8750) does not move with diameter on the corrected layout.
 - **Verdict unchanged: no performance case for 1.5 in primaries.** Fluent's 3D p150 run is the check. Traces on the corrected layout: `exhaust_bc/exhaust_crotch_{p125,p150}_{9000,6000}rpm.csv`.
+
+## Addendum (2026-10-03): the 3D plenum check at 9000 rpm agrees with the 1D model
+
+Fluent, whole intake with bellmouths and a cylinder behind each valve, as-built 1.81 L against 3.85 L, 9000 rpm, cycle 5 of 5 (`restrictor_opt/data/plenum_bm/plenum3d_{asbuilt,big}_9000rpm.csv`):
+
+| | as-built | big |
+|---|---|---|
+| fresh charge per cylinder | 189.4-190.6 mg | 181.0-182.2 mg (-4.3 %) |
+| plenum mean / swing | 90.75 / 12.75 kPa | 91.51 / 9.43 kPa |
+| intake valve pressure, minimum over the open period | 48-49 kPa | 71-73 kPa |
+| mean over 560-600° | 125-126 kPa | 123 kPa |
+| cylinder temperature at BDC | 361-364 K | 346-350 K |
+
+- The as-built run was still easing 0.4-1.9 % per cycle at cycle 5, so the settled gap may be nearer -2 to -3 %. The sign looks solid.
+
+The 1D prediction for the same pair, restated on the corrected exhaust merges (`cfg/CROTCH_p125.json` and `_big`, dump plenums at 1.807 / 3.847 L):
+
+| rpm | 1D VE change, big vs as-built | 1D torque change | 3D |
+|---|---|---|---|
+| 8000 | +8.5 % | +4.6 % | running |
+| 8500 | +0.1 % | -0.7 % | |
+| 9000 | -4.9 % | -2.2 % | -4.3 % fresh charge (settling toward about -2 to -3 %) |
+
+- **At 9000 rpm the 3D agrees with the 1D in sign and roughly in size:** the bigger plenum loses charge there.
+- This is the first independent support for the 1D plenum result: a bigger plenum moves the upper peak down in rpm rather than raising the level.
+- 8000 rpm, where the 1D predicts +8.5 %, is the decisive half of the test.
