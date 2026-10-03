@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-10-03
+
 ### Added
 
 - **Agora: the CFO can change anything in Abacus.** Approvals often happen in
