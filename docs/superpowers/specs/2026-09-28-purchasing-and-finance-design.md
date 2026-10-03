@@ -325,5 +325,14 @@ database. Ordering by `(ts, id)` would make it stable.
   `purchasing.car_subteams`: which subteams a car has now comes from Helios's
   own `pm.project_subteams` (Admin > Org Structure), which `add_items` checks.
   It also adds `purchasing.delete_items` (execs; not parts matched to a charge).
+- `20261004000000_agora_cfo_override.sql` (after 6.0.2) adds the
+  `purchasing.override` capability, granted to the `cfo` role: the holder
+  approves alone (`set_status(..., 'APPROVED')` records an approval "in
+  person"), sets any status, records orders on unapproved or self-imported
+  parts, deletes any part not matched to a charge, and moves parts between
+  subteams (`purchasing.move_items`). No dashboard changes.
+- `20261005000000_agora_abacus_views.sql` adds `purchasing.views` (Abacus's
+  saved views: config JSON read by the app's `lib/views.ts`), with
+  `save_view` / `delete_view` (owner or exec). No dashboard changes.
 - In Phase A "spent" comes from recorded orders (`actual_total`). Once the
   ledger lands in Phase B it comes from statement lines instead.

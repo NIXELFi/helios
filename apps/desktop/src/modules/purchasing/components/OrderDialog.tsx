@@ -28,11 +28,14 @@ export function partPrice(i: Item): number {
  *    own parts still in planning; execs, any);
  *  - as the order (execs): marks the parts ordered with what each really cost.
  */
-export function OrderDialog({ client, items, canOrder, vendorNames, reload, flash, onClose }: {
+export function OrderDialog({ client, items, canOrder, canOverride = false, vendorNames, reload, flash, onClose }: {
   client: SupabaseClient; items: Item[]; canOrder: boolean; vendorNames: string[];
+  /** The CFO: parts not yet approved can be marked ordered too (approved in person on the way). */
+  canOverride?: boolean;
   reload: () => Promise<void>; flash: (msg: string, error?: boolean) => void; onClose: () => void;
 }) {
   const allApproved = items.every((i) => APPROVED_OR_LATER.has(i.status));
+  const canMarkOrdered = allApproved || canOverride;
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [f, setF] = useState<Record<MoneyField, string> & { orderId: string; date: string }>(() => ({
@@ -195,8 +198,8 @@ export function OrderDialog({ client, items, canOrder, vendorNames, reload, flas
         {canOrder && (
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <label className="flex items-center gap-1"><input type="radio" checked={!asOrder} onChange={() => setAsOrder(false)} />Save as estimates (not bought yet)</label>
-            <label className={`flex items-center gap-1 ${allApproved ? "" : "opacity-50"}`} title={allApproved ? "" : "Only approved parts can be marked ordered"}>
-              <input type="radio" checked={asOrder} disabled={!allApproved} onChange={() => setAsOrder(true)} />This is the order: mark them ordered with these costs
+            <label className={`flex items-center gap-1 ${canMarkOrdered ? "" : "opacity-50"}`} title={canMarkOrdered ? "" : "Only approved parts can be marked ordered"}>
+              <input type="radio" checked={asOrder} disabled={!canMarkOrdered} onChange={() => setAsOrder(true)} />This is the order: mark them ordered with these costs{!allApproved && canOverride ? " (approves the rest in person)" : ""}
             </label>
             {asOrder && <>
               <input className={`${input} w-36`} placeholder="Paid with" value={payment} onChange={(e) => setPayment(e.target.value)} />

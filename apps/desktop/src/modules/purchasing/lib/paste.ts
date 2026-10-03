@@ -5,17 +5,17 @@ import { parseCents } from "./money";
 
 export type PasteField =
   | "title" | "quantity" | "unit_price" | "tax_shipping" | "total" | "vendor" | "funding_source"
-  | "part_number" | "product_url" | "priority" | "needed_by" | "date_needed_raw" | "notes" | "status";
+  | "part_number" | "product_url" | "priority" | "needed_by" | "date_needed_raw" | "notes" | "justification" | "status";
 
 export const PASTE_FIELDS: PasteField[] = [
   "title", "quantity", "unit_price", "tax_shipping", "total", "vendor", "funding_source",
-  "part_number", "product_url", "priority", "needed_by", "date_needed_raw", "notes", "status",
+  "part_number", "product_url", "priority", "needed_by", "date_needed_raw", "notes", "justification", "status",
 ];
 
 export const PASTE_LABELS: Record<PasteField, string> = {
   title: "Item", quantity: "Qty", unit_price: "Unit $", tax_shipping: "Tax/ship $", total: "Total $",
   vendor: "Vendor", funding_source: "Funding", part_number: "Part #", product_url: "Link", priority: "Priority",
-  needed_by: "Needed by", date_needed_raw: "Date needed (as written)", notes: "Notes", status: "Status",
+  needed_by: "Needed by", date_needed_raw: "Date needed (as written)", notes: "Notes", justification: "Why", status: "Status",
 };
 
 // Header names seen in Airtable, Excel BOMs, Mouser and Digikey cart exports.
@@ -39,6 +39,7 @@ const ALIASES: Record<PasteField, string[]> = {
   // need-by date, so it's kept as written rather than read as one.
   date_needed_raw: ["date needed"],
   notes: ["notes", "comments", "note"],
+  justification: ["why", "justification", "reason", "purpose", "why needed"],
   status: ["status"],
 };
 
@@ -130,6 +131,8 @@ export interface NewRow {
   notes?: string;
   /** From an Airtable Status column: PLANNED, READY, ORDERED, RECEIVED or HAVE. */
   status?: string;
+  /** Why it's needed, for the execs approving it. */
+  justification?: string;
   /** Airtable's "Funding Source" as written ("Chase Account"). */
   funding_source?: string;
   /** Airtable's "DATE NEEDED" as written (its meaning isn't settled). */
@@ -188,6 +191,7 @@ export function toRows(matrix: string[][], mapping: (PasteField | null)[], defau
     if (o.needed_by) row.needed_by = parseDate(o.needed_by);
     if (o.date_needed_raw) row.date_needed_raw = o.date_needed_raw.trim().slice(0, 100);
     if (o.funding_source) row.funding_source = o.funding_source.trim().slice(0, 100);
+    if (o.justification) row.justification = o.justification.trim().slice(0, 500);
     const note = leftOut.length ? `Pasted ${leftOut.join(", ")} left out: check it.` : "";
     if (o.notes || note) row.notes = [o.notes, note].filter(Boolean).join(" ");
     if (o.status) { const s = AIRTABLE_STATUS[o.status.trim().toLowerCase()]; if (s) row.status = s; }

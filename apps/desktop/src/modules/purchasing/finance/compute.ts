@@ -6,8 +6,8 @@ import type { FinanceData } from "./useFinance";
 import { evidenceFor } from "./evidence";
 import { bySeverity, findDiscrepancies, type Discrepancy, type Evidence } from "./discrepancies";
 import {
-  available, cardHeadroom, cardOwed, latestBalance, outstandingChecks, reconcile,
-  type Account, type AvailableSummary, type BalanceEntry, type CardHeadroom, type ReconRow, type Txn,
+  available, cardHeadroom, cardOwed, latestBalance, outstandingChecks, reconcile, teamFunds,
+  type Account, type AvailableSummary, type BalanceEntry, type CardHeadroom, type ReconRow, type TeamFunds, type Txn,
 } from "./ledger";
 
 export interface CardStatus { account: Account; headroom: CardHeadroom; owed: number; autopay: Txn | null }
@@ -16,6 +16,8 @@ export interface Dashboard {
   asOf: string;
   checking: Account | null;
   summary: AvailableSummary | null;
+  /** Chase's Available plus every other account's balance (ASU, cash box, GoFundMe). */
+  funds: TeamFunds;
   cards: CardStatus[];
   recon: ReconRow[];
   others: { account: Account; entry: BalanceEntry | null }[];
@@ -41,6 +43,7 @@ export function dashboard(fin: FinanceData, asOf: string): Dashboard {
   const unconfirmed = latestAny && !latestAny.confirmed && summary?.bank_balance_basis && latestAny.as_of > summary.bank_balance_basis.as_of ? latestAny : null;
   return {
     asOf, checking, summary, unconfirmed,
+    funds: teamFunds(txns, balances, accounts, checking, summary?.available_cents ?? null, asOf),
     cards: cards.map((c) => ({
       account: c,
       headroom: cardHeadroom(txns, c, asOf, closings[c.id] ?? [], balances),

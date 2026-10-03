@@ -27,6 +27,48 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agora: the CFO can change anything in Abacus.** Approvals often happen in
+  person, so the CFO can approve a part alone (**Approve now** in Approvals, or
+  Approved in Abacus's Status column) without a second exec. The CFO can also
+  set any status, record an order on parts not yet approved (or imported by
+  themselves), move parts to another subteam or car, and delete any part not
+  matched to a ledger charge. It comes from a new permission, **Purchasing:
+  override**, given to the CFO role (Admin can give it to another role), and
+  every step goes in the part's history.
+- **Agora: delete a reimbursement entered by mistake** (Finance >
+  Reimbursements, Delete on its row or request), with its receipts. A check or
+  cash withdrawal already in the ledger for it stays there. If its receipt
+  files can't be removed, it says so instead of leaving them behind silently.
+
+### Changed
+
+- **Agora: Available to spend counts every account.** The Overview's headline
+  figure is now Chase's Available plus the latest balance of each ASU account
+  (dean's funding, the Foundation gift account), the cash box and GoFundMe,
+  with a "Where the money is" breakdown. Chase's own Available is still shown
+  next to it, and What if? starts from the same total.
+- **Agora: Abacus is quicker to fill in.** The new-part row is pinned at the
+  top of the sheet (no more scrolling to the bottom), and Enter adds the part
+  and keeps the row ready for the next one, with its priority, status and
+  vendor. Parts can be added from any tab: Abacus opens on a lead's own
+  subteam, and the car and subteam new parts go to are picked beside **+ New
+  part**. A new part can be sent for approval straight away. Empty price,
+  vendor and link cells on planned parts say "price?", "vendor?" and "link?".
+  The Item column stays put when scrolling sideways, and a **Why** column
+  holds the reason for the execs approving it.
+- **Agora: Abacus views, as in Airtable.** Built-in views (By status, Not
+  ready, Ready to order, On the way, Done, My parts, Missing info) and views
+  anyone can make: filter by status, priority, "mine" or missing info; group
+  by status, priority, vendor, subteam, who asked, needed-by or funding, with
+  counts and totals per group (fold a group, or tick all of it); sort; hide
+  columns. Views are shared with the team or kept to yourself; Abacus
+  remembers the view and tab you had open.
+- **Agora: links in Abacus are clickable.** A product link shows an "open"
+  beside it, also on rows you can edit; a link typed without https:// still
+  opens.
+
 ## [6.0.2] - 2026-10-02
 
 ### Changed

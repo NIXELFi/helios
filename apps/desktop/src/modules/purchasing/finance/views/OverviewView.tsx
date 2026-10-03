@@ -18,6 +18,11 @@ export function OverviewView({ fin, pur, openTxn, go }: FinanceProps & { go: (v:
   const evidence = useMemo(() => allEvidence(fin, pur.items, where), [fin, pur.items]);
   const disc = useMemo(() => discrepancies(fin, evidence), [fin, evidence]);
   const s = d.summary;
+  const f = d.funds;
+  const asu = f.others.filter((o) => o.account.kind === "university");
+  const rest = f.others.filter((o) => o.account.kind !== "university");
+  const part = (xs: typeof f.others) => xs.reduce((t, o) => t + (o.balance_cents ?? 0), 0);
+  const notEntered = f.others.filter((o) => o.balance_cents === null);
 
   const counts = { high: 0, medium: 0, low: 0 };
   for (const x of disc.open) counts[x.severity]++;
@@ -51,8 +56,12 @@ export function OverviewView({ fin, pur, openTxn, go }: FinanceProps & { go: (v:
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Tile hero label="Available to spend" value={<Money cents={s?.available_cents} />} note="Bank - card owed - uncashed checks - reimbursements owed" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Tile hero label="Available to spend" value={<Money cents={f.total_cents} />}
+          note={<>{d.checking.name} {fmtCents(f.checking_cents)}{asu.some((o) => o.basis) && <> + ASU {fmtCents(part(asu))}</>}{rest.some((o) => o.basis) && <> + other {fmtCents(part(rest))}</>}
+            {notEntered.length > 0 && <button className="block text-left text-asu-gold hover:underline" onClick={() => go("balances")}>
+              No balance yet for {notEntered.map((o) => o.account.name).join(", ")}</button>}</>} />
+        <Tile label={`${d.checking.name} available`} value={<Money cents={s?.available_cents} />} note="Bank - card owed - uncashed checks - reimbursements owed" />
         <Tile label={`${d.checking.name} balance`} value={<Money cents={s?.bank_balance_cents} />}
           note={s?.bank_balance_basis ? `${s.bank_balance_basis.entered_by_name === "Chase statement" ? "Statement" : "Entered"} ${shortDate(s.bank_balance_basis.as_of)} + logged since` : "Not entered yet"} />
         <Tile label="Card owed" value={<Money cents={(s?.card_owed_cents ?? 0) + (s?.card_pending_cents ?? 0)} />}
@@ -118,18 +127,36 @@ export function OverviewView({ fin, pur, openTxn, go }: FinanceProps & { go: (v:
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
-          <div className="flex items-center justify-between"><b>Other accounts</b><button className="text-xs text-asu-gold hover:underline" onClick={() => go("balances")}>Update balances</button></div>
+          <div className="flex items-center justify-between"><b>Where the money is</b><button className="text-xs text-asu-gold hover:underline" onClick={() => go("balances")}>Update balances</button></div>
           <table className="mt-2 w-full text-sm">
             <tbody>
-              {d.others.map(({ account, entry }) => (
+              <tr className="border-t border-helios-line">
+                <td className="py-1.5">{d.checking.name} <span className="text-xs text-helios-dim">(available)</span></td>
+                <td className="py-1.5 text-right"><Money cents={f.checking_cents} /></td>
+                <td className="py-1.5 pl-3 text-xs text-helios-dim">{s?.bank_balance_basis ? shortDate(s.bank_balance_basis.as_of) : ""}</td>
+              </tr>
+              {f.others.map(({ account, balance_cents, basis }) => (
                 <tr key={account.id} className="border-t border-helios-line">
-                  <td className="py-1.5">{account.name}{!account.active && <> <Badge>on hold</Badge></>}</td>
+                  <td className="py-1.5">{account.name}</td>
+                  <td className="py-1.5 text-right"><Money cents={balance_cents} /></td>
+                  <td className="py-1.5 pl-3 text-xs text-helios-dim">{basis ? shortDate(basis.as_of) : "no balance yet"}</td>
+                </tr>
+              ))}
+              <tr className="border-t-2 border-helios-line font-semibold">
+                <td className="py-1.5">Available to spend</td>
+                <td className="py-1.5 text-right"><Money cents={f.total_cents} /></td>
+                <td />
+              </tr>
+              {d.others.filter(({ account }) => !account.active).map(({ account, entry }) => (
+                <tr key={account.id} className="border-t border-helios-line text-helios-dim">
+                  <td className="py-1.5">{account.name} <Badge>on hold, not counted</Badge></td>
                   <td className="py-1.5 text-right"><Money cents={entry?.balance_cents} /></td>
-                  <td className="py-1.5 pl-3 text-xs text-helios-dim">{entry ? shortDate(entry.as_of) : ""}{entry && !entry.confirmed && <> <Badge tone="warn">unconfirmed</Badge></>}</td>
+                  <td className="py-1.5 pl-3 text-xs">{entry ? shortDate(entry.as_of) : ""}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="mt-2 text-xs text-helios-dim">Each account's last confirmed balance plus anything logged on it since. ASU money can take a while to reach (university purchasing or a disbursement), and some of it is restricted to a purpose: check before you count on it.</p>
         </Card>
         <Card>
           <div className="flex items-center justify-between"><b>Latest activity</b><button className="text-xs text-asu-gold hover:underline" onClick={() => go("ledger")}>Full ledger</button></div>
