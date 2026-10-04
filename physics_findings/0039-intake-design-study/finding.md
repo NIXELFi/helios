@@ -853,3 +853,29 @@ The 1D prediction for the same pair, restated on the corrected exhaust merges (`
 - **For the design:**
   - With a fixed runner, plenum volume is a trade between 8k and 9k, not a gain. The 1D band averages (6-12k under +0.5 %) stand, and if anything are optimistic.
   - With the VRLI, the runner length can follow the peak, so the small band gain from a bigger plenum (+0.6 to +1.2 points, plenum3) remains the right expectation, against its throttle-response cost.
+
+## Addendum (2026-10-04): plenum volume and neck length for the plenum-shape study (1D)
+
+Asked by the 3D side for Nick's plenum-shape study (`plenum_shape.py`, 119 runs; `charts/plenum_shape.csv`).
+
+**Setup:**
+- L140 restrictor at the car-fitted level (Cd 0.961, R 0.621, outlet 37.34 mm, inertance 250 1/m); 233.5 mm from restrictor exit to plenum floor.
+- Runners 260 / 256 mm, corrected exhaust merges, calibrated walls, logged tune, 250 rpm steps.
+- 1D plenum: a 40 mm neck of length L_n, a cone to a 175 mm body (191 mm when 175 cannot hold the volume), and the body to the floor. The cone length sets the total gas volume V.
+
+| V | neck | flare / body height | VE mean 7-10k | brake torque mean 7-10k | vs 2.0 L / 120 mm |
+|---|---|---|---|---|---|
+| 1.50 L | 120 mm | 100 / 13 mm | 0.969 | 48.61 N.m | -0.47 % |
+| 1.75 L | 120 mm | 82 / 31 mm | 0.972 | 48.74 | -0.19 % |
+| 2.00 L | 120 mm | 64 / 50 mm | 0.974 | 48.83 | 0 |
+| 2.25 L | 120 mm | 46 / 68 mm | 0.975 | 48.87 | +0.08 % |
+| 2.50 L | 120 mm | 28 / 86 mm | 0.974 | 48.77 | -0.13 % |
+| 2.00 L | 60 mm | 163 / 10 mm | 0.976 | 48.96 | +0.25 % |
+| 2.00 L | 160 mm (191 mm body) | 18 / 55 mm | 0.966 | 48.33 | -1.04 % |
+
+- **Volume is flat on the 7-10k objective:** 1.75-2.5 L lie within 0.3 %, and 1.5 L costs 0.5 %. The same peak shift as before: more volume raises 8.5k (VE 0.985 -> 1.014) and lowers 9-9.5k.
+- **Neck length matters more than volume in 1D:** 60 mm is +0.25 %, 160 mm is -1.0 % against 120 mm. The 160 mm case also has a wider body and an abrupt flare, so neck length and flare are confounded there.
+- **Pick on the 1D side: about 2.0 L, the shortest neck the packaging allows.** Within 1.75-2.25 L choose by packaging and throttle response (about 9 ms of lost full-torque time per snap per litre).
+- **Caveats:**
+  - The 3D check found the 1D overstates the plenum's peak shift by about a third, so 0.3 % differences are inside the uncertainty.
+  - The 1D cone recovers the neck's dynamic pressure like an ideal diffuser (about 0.5-1 kPa). A steep real flare will not, which may make the real long-neck penalty larger. The 3D shape runs settle that.
