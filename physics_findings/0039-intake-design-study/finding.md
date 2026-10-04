@@ -839,3 +839,17 @@ The 1D prediction for the same pair, restated on the corrected exhaust merges (`
 - **At 9000 rpm the 3D agrees with the 1D in sign and roughly in size:** the bigger plenum loses charge there.
 - This is the first independent support for the 1D plenum result: a bigger plenum moves the upper peak down in rpm rather than raising the level.
 - 8000 rpm, where the 1D predicts +8.5 %, is the decisive half of the test.
+
+**8000 rpm half of the 3D plenum check (2026-10-04):** the bigger plenum traps **+5.5 %** more fresh charge (as-built 172.7 mg, big 182.2 mg; 6 cycles, settled to 0.3 %). The 1D predicted +8.5 % VE.
+
+| rpm | 1D (VE, big vs as-built) | 3D (fresh charge) |
+|---|---|---|
+| 8000 | +8.5 % | +5.5 % |
+| 9000 | -4.9 % | -4.4 % |
+
+- **Both models agree on the mechanism:** a bigger plenum moves the upper torque peak down in rpm instead of raising it. The 3D gives about two thirds of the 1D's gain at 8000 and about the same loss at 9000.
+- At 8000 the 3D big plenum's swing is larger than the as-built's (7.77 against 6.56 kPa). At 9000 it is smaller (9.43 against 12.75).
+- **Answer to "does the model undersell a bigger plenum?": no.** It slightly oversells the gain below the peak and gets the loss above it right.
+- **For the design:**
+  - With a fixed runner, plenum volume is a trade between 8k and 9k, not a gain. The 1D band averages (6-12k under +0.5 %) stand, and if anything are optimistic.
+  - With the VRLI, the runner length can follow the peak, so the small band gain from a bigger plenum (+0.6 to +1.2 points, plenum3) remains the right expectation, against its throttle-response cost.
