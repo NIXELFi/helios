@@ -8,6 +8,8 @@ import { useModuleLive } from "../../shell/module-activity";
 import { can } from "./lib/api";
 import { usePurchasing } from "./lib/usePurchasing";
 import { Flash } from "./components/ui";
+import { IS_MAC } from "../../lib/platform";
+import { handleWindowDragMouseDown } from "../../shell/windowDrag";
 import { PartsView } from "./views/PartsView";
 import { ApprovalsView } from "./views/ApprovalsView";
 import { OrdersView } from "./views/OrdersView";
@@ -167,7 +169,12 @@ export function AgoraModule() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-helios-line bg-helios-panel/40 px-6 py-4">
+        {/* On macOS the header sits under the invisible Overlay title bar, so it
+            doubles as a window drag handle (its buttons opt out). */}
+        <header
+          onMouseDown={IS_MAC ? handleWindowDragMouseDown : undefined}
+          className="flex flex-wrap items-center justify-between gap-3 border-b border-helios-line bg-helios-panel/40 px-6 py-4"
+        >
           <div>
             <h1 className="text-lg font-semibold">{label}</h1>
             <p className="text-xs text-helios-dim">{SUBTITLE[shown]}

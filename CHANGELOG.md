@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- macOS: the Helios window can be dragged again from every module — grab the HELIOS header at the top of the left rail (or the Agora page header). Double-click it to zoom. Previously only the Logs module had a drag area on Mac.
+
 ## [6.1.0] - 2026-10-03
 
 ### Added
