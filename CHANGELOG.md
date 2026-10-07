@@ -27,8 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- PM Gantt: new **Manual (my order)**, **Task A–Z** and **Subsystem** sort options. In Manual, use the ▲/▼ arrows next to each task to arrange rows within a subteam — your order is saved on your computer and doesn't change anyone else's chart. The chosen sort is now remembered per view.
+
 ### Fixed
 - macOS: the Helios window can be dragged again from every module — grab the HELIOS header at the top of the left rail (or the Agora page header). Double-click it to zoom. Previously only the Logs module had a drag area on Mac.
+- PM Gantt: tasks with the same priority no longer shuffle around after edits — ties now fall back to the task name.
 
 ## [6.1.0] - 2026-10-03
 

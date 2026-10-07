@@ -25,6 +25,8 @@ import {
   startOfDay,
 } from "date-fns";
 import {
+  IconChevronDown,
+  IconChevronUp,
   IconEdit,
   IconEye,
   IconEyeOff,
@@ -42,6 +44,14 @@ import { MilestoneDialog } from "@pm/components/MilestoneDialog";
 import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { Select } from "@pm/components/ui/Select";
 import { isManufacturingType } from "@pm/lib/filters";
+import {
+  SORT_LABEL,
+  moveInGroup,
+  recallManualOrder,
+  rememberManualOrder,
+  taskComparator,
+  type GanttSort,
+} from "@pm/lib/ganttOrder";
 import {
   recallGanttSettings,
   rememberGanttSettings,
@@ -72,32 +82,6 @@ function invalidDateNote(tasks: TaskRow[]): string {
     .join("; ");
   const more = tasks.length > 3 ? `; +${tasks.length - 3} more` : "";
   return `${tasks.length} hidden with an invalid date (${named}${more}) · `;
-}
-
-type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
-
-const SORT_LABEL: Record<GanttSort, string> = {
-  criticality: "Most critical",
-  upcoming: "Upcoming deadline",
-  subteam_asc: "Subteam A–Z",
-  subteam_desc: "Subteam Z–A",
-};
-
-const PRIORITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
-
-function criticalityScore(t: TaskRow, critical: Set<string>): number {
-  return (critical.has(t.id) ? 100 : 0) + (PRIORITY_RANK[t.priority] ?? 0);
-}
-
-// Orders tasks within each subteam group (top to bottom).
-function taskComparator(
-  sort: GanttSort,
-  critical: Set<string>,
-): (a: TaskRow, b: TaskRow) => number {
-  if (sort === "upcoming") {
-    return (a, b) => (a.due_date ?? "9999-12-31").localeCompare(b.due_date ?? "9999-12-31");
-  }
-  return (a, b) => criticalityScore(b, critical) - criticalityScore(a, critical);
 }
 
 const MILESTONE_TYPE_LABEL: Record<MilestoneType, string> = {
@@ -252,7 +236,6 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   }, [scopedRows, manufacturingOnly]);
 
   const [showCriticalOnly, setShowCriticalOnly] = useState(false);
-  const [sort, setSort] = useState<GanttSort>("criticality");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [hiddenCursors, setHiddenCursors] = useState<Set<string>>(new Set());
   const [cursorMenuOpen, setCursorMenuOpen] = useState(false);
@@ -276,10 +259,29 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
 
   // Color-by-property settings, persisted per-scope (see ganttSettings.ts).
   const [colorSettings, setColorSettings] = useState(() => recallGanttSettings(teamSlug));
-  const { bgProperty, outlineProperty, showDependencies } = colorSettings;
+  const { bgProperty, outlineProperty, showDependencies, sort } = colorSettings;
   useEffect(() => {
     rememberGanttSettings(teamSlug, colorSettings);
   }, [teamSlug, colorSettings]);
+
+  // The user's own row order for "Manual" sort, per scope (see ganttOrder.ts).
+  // Only written on an explicit move, so switching scope never copies it over.
+  const [manualOrder, setManualOrder] = useState(() => recallManualOrder(teamSlug));
+  useEffect(() => {
+    setManualOrder(recallManualOrder(teamSlug));
+  }, [teamSlug]);
+  const moveTask = useCallback(
+    (groupIds: readonly string[], taskId: string, delta: -1 | 1) => {
+      setManualOrder((prev) => {
+        // Drop ids of tasks that no longer exist so the list can't grow forever.
+        const live = new Set(tasks.map((t) => t.id));
+        const next = moveInGroup(prev, groupIds, taskId, delta).filter((id) => live.has(id));
+        rememberManualOrder(teamSlug, next);
+        return next;
+      });
+    },
+    [tasks, teamSlug],
+  );
 
   function toggleCursor(id: string) {
     setHiddenCursors((prev) => {
@@ -370,7 +372,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       groups.set(t.subteam_id, arr);
     }
 
-    const compare = taskComparator(sort, critical);
+    const compare = taskComparator(sort, critical, subsystems, manualOrder);
     const groupOrder = [...subteams];
     if (sort === "subteam_asc") groupOrder.sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === "subteam_desc") groupOrder.sort((a, b) => b.name.localeCompare(a.name));
@@ -383,10 +385,20 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
 
     const bars: BarLayout[] = [];
     let rowIndex = 0;
-    const groupSpans: Array<{ subteam: Subteam; headerRow: number; taskRows: number }> = [];
+    const groupSpans: Array<{
+      subteam: Subteam;
+      headerRow: number;
+      taskRows: number;
+      taskIds: string[];
+    }> = [];
 
     for (const g of orderedGroups) {
-      groupSpans.push({ subteam: g.subteam, headerRow: rowIndex, taskRows: g.tasks.length });
+      groupSpans.push({
+        subteam: g.subteam,
+        headerRow: rowIndex,
+        taskRows: g.tasks.length,
+        taskIds: g.tasks.map((t) => t.id),
+      });
       rowIndex += 1;
       for (const t of g.tasks) {
         const start = parseISO(t.start_date!);
@@ -401,7 +413,17 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     const totalRows = rowIndex;
 
     return { days, totalDays: days.length, totalRows, bars, groupSpans, rangeStart };
-  }, [visibleTasks, invalidDateTasks, milestones, subteams, relationByTaskId, sort, critical]);
+  }, [
+    visibleTasks,
+    invalidDateTasks,
+    milestones,
+    subteams,
+    relationByTaskId,
+    sort,
+    critical,
+    subsystems,
+    manualOrder,
+  ]);
 
   // First open of a scope lands on TODAY, not the start of the range (report
   // 2026-09-24, Daniel Germaine: the chart opened at the project's first date and
@@ -520,7 +542,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 value={sort}
                 ariaLabel="Sort"
                 className="min-w-[130px]"
-                onChange={(v) => setSort(v as GanttSort)}
+                onChange={(v) => setColorSettings((s) => ({ ...s, sort: v as GanttSort }))}
                 options={(Object.keys(SORT_LABEL) as GanttSort[]).map((k) => ({
                   value: k,
                   label: SORT_LABEL[k],
@@ -684,17 +706,44 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                   const bar = bars.find((b) => b.rowIndex === g.headerRow + 1 + i);
                   const ext = bar && bar.relation !== "owned";
                   const rh = rowHeightAt(g.headerRow + 1 + i);
+                  const taskId = bar?.task.id;
                   return (
                     <div
                       key={i}
                       className={
-                        "truncate border-b border-helios-line/60 px-6 font-normal " +
+                        "flex items-center border-b border-helios-line/60 pl-6 pr-1 font-normal " +
                         (ext ? "italic text-helios-text/70" : "text-helios-text")
                       }
                       style={{ height: rh, lineHeight: `${rh}px`, fontSize: barFont }}
                       title={bar?.task.title}
                     >
-                      {bar?.task.title}
+                      <span className="min-w-0 flex-1 truncate">{bar?.task.title}</span>
+                      {sort === "manual" && taskId ? (
+                        // Personal reorder, only in Manual sort. Always shown (not
+                        // hover-only) so picking "Manual" makes the arrows obvious.
+                        <span className="flex shrink-0 items-center not-italic">
+                          <button
+                            type="button"
+                            aria-label={`Move ${bar.task.title} up`}
+                            title="Move up"
+                            disabled={i === 0}
+                            onClick={() => moveTask(g.taskIds, taskId, -1)}
+                            className="rounded-sm p-0.5 text-helios-dim hover:bg-helios-base hover:text-helios-text disabled:pointer-events-none disabled:opacity-30"
+                          >
+                            <IconChevronUp size={14} stroke={1.75} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Move ${bar.task.title} down`}
+                            title="Move down"
+                            disabled={i === g.taskRows - 1}
+                            onClick={() => moveTask(g.taskIds, taskId, 1)}
+                            className="rounded-sm p-0.5 text-helios-dim hover:bg-helios-base hover:text-helios-text disabled:pointer-events-none disabled:opacity-30"
+                          >
+                            <IconChevronDown size={14} stroke={1.75} />
+                          </button>
+                        </span>
+                      ) : null}
                     </div>
                   );
                 })}
