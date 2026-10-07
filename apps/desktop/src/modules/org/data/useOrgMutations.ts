@@ -36,6 +36,21 @@ export function useOrgMutations() {
     [client],
   );
 
+  // Tag a subteam grant with the car it applies to (null = both). Lead tags
+  // steer which lead a PM task notification pings (notify.lead_email).
+  const setRoleProgram = useCallback(
+    async (target: string, roleKey: string, subteamId: string, program: "ic" | "ev" | null): Promise<Result> => {
+      const { error } = await client.schema("pm").rpc("set_role_program", {
+        p_target: target,
+        p_role_key: roleKey,
+        p_subteam_id: subteamId,
+        p_program: program,
+      });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
   const setProjectSubteam = useCallback(
     async (projectId: string, subteamId: string, present: boolean): Promise<Result> => {
       const { error } = await client
@@ -141,6 +156,7 @@ export function useOrgMutations() {
   return {
     grantRole,
     revokeRole,
+    setRoleProgram,
     setProjectSubteam,
     upsertRole,
     deleteRole,

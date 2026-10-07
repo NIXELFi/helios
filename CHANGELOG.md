@@ -33,6 +33,7 @@ follow [semver](https://semver.org/).
 ### Fixed
 - macOS: the Helios window can be dragged again from every module — grab the HELIOS header at the top of the left rail (or the Agora page header). Double-click it to zoom. Previously only the Logs module had a drag area on Mac.
 - PM Gantt: tasks with the same priority no longer shuffle around after edits — ties now fall back to the task name.
+- PM notifications: editing an EV task no longer pings the IC lead of a shared subteam (e.g. EV Chassis → IC Chassis lead). In **Org → People & Roles**, each subteam Lead can now be tagged **IC**, **EV** or **Both**; task and comment pings go to the lead of the task's car. Existing leads start as Both, so tag them to take effect.
 
 ## [6.1.0] - 2026-10-03
 
