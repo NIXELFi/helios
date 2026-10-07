@@ -213,7 +213,9 @@ export function decodeFrame(bytes: Uint8Array, def: ChannelSetDefinition): Decod
         const scale = ch.scale ?? 1;
         const offset = ch.offset ?? 0;
         for (let i = 0; i < rateHz; i++) {
-          out[i] = view.getInt16(off, true) * scale + offset;
+          const raw = view.getInt16(off, true);
+          // HTP reserves INT16_MIN for sensor dropout, before scale/offset.
+          out[i] = raw === -32768 ? NaN : raw * scale + offset;
           off += 2;
         }
       }

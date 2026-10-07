@@ -610,6 +610,60 @@ function withSubteamMove(patch: Partial<TaskRow>): Partial<TaskRow> {
 }
 
 export const usePmStore = create<PmState>((set, get) => {
+  // Keep overlapping task edits until they all settle. If an earlier edit
+  // fails, a later edit's undo/rollback must skip that failed predecessor.
+  type TaskEdit = { entries: TaskPatchEntry[]; failed: boolean; settled: boolean };
+  let taskEdits: TaskEdit[] = [];
+
+  function persistTaskEdit(
+    entries: TaskPatchEntry[],
+    command: PmCommand | null,
+    activityId: string | undefined,
+    run: (client: SupabaseClient) => Promise<void>,
+  ) {
+    const edit: TaskEdit = { entries, failed: false, settled: false };
+    taskEdits.push(edit);
+    persist(run, () => {
+      edit.failed = true;
+      const later = taskEdits.slice(taskEdits.indexOf(edit) + 1);
+      // Rebase later before-images (also used by their undo commands) so two
+      // rejected saves cannot resurrect the first rejected value.
+      for (const entry of entries) {
+        for (const next of later) {
+          const dependent = next.entries.find((e) => e.id === entry.id);
+          if (!dependent) continue;
+          for (const key of PATCHABLE_KEYS) {
+            if (key in entry.after && key in dependent.before &&
+                Object.is(dependent.before[key], entry.after[key])) {
+              Object.assign(dependent.before, { [key]: entry.before[key] });
+            }
+          }
+        }
+      }
+      set((s) => ({
+        tasks: s.tasks.map((task) => {
+          const entry = entries.find((e) => e.id === task.id);
+          if (!entry) return task;
+          const inverse: Partial<TaskRow> = {};
+          for (const key of PATCHABLE_KEYS) {
+            const ownedByLater = later.some((next) => !next.failed &&
+              next.entries.some((e) => e.id === task.id && key in e.after));
+            if (key in entry.after && !ownedByLater && Object.is(task[key], entry.after[key])) {
+              Object.assign(inverse, { [key]: entry.before[key] });
+            }
+          }
+          return Object.keys(inverse).length ? embedTaskPatch(s, task, inverse) : task;
+        }),
+        activity: s.activity.filter((a) => a.id !== activityId),
+        undoStack: s.undoStack.filter((c) => c !== command),
+        redoStack: s.redoStack.filter((c) => c !== command),
+      }));
+    }, () => {
+      edit.settled = true;
+      if (taskEdits.every((e) => e.settled)) taskEdits = [];
+    });
+  }
+
   // Re-pull the authoritative workspace after a PARTIAL write, then restore the
   // error toast on top of the fresh data. `reloadWorkspace`'s hydrate clears
   // `lastWriteError` (a normal hydrate should), so we snapshot the message first
@@ -644,6 +698,7 @@ export const usePmStore = create<PmState>((set, get) => {
   function persist(
     run: (client: SupabaseClient) => Promise<void>,
     rollback: () => void,
+    onSettled?: () => void,
   ): void {
     const client = get().client;
     // No client = nothing can be saved. This is only reachable before hydrate
@@ -653,6 +708,7 @@ export const usePmStore = create<PmState>((set, get) => {
     // the zero-rows-affected check exists to prevent. Undo the change and say so.
     if (!client) {
       rollback();
+      onSettled?.();
       set({
         lastWriteError: {
           message: "Not connected — your change couldn't be saved.",
@@ -700,6 +756,7 @@ export const usePmStore = create<PmState>((set, get) => {
       })
       .finally(() => {
         set((s) => ({ inFlightWrites: Math.max(0, s.inFlightWrites - 1) }));
+        onSettled?.();
       });
   }
 
@@ -1369,13 +1426,16 @@ export const usePmStore = create<PmState>((set, get) => {
       );
     },
 
-    updateTask: (id, patch, opts) => {
+    updateTask: (id, rawPatch, opts) => {
       const current = get().tasks.find((t) => t.id === id);
       if (!current) return;
+      const patch = withSubteamMove(rawPatch);
       const withHistory = opts?.withHistory !== false;
       // Capture the minimal before/after diff BEFORE mutating, for undo/redo.
       const entry = diffTaskPatch(current, patch);
-      const snap = { tasks: get().tasks, activity: get().activity };
+      const command: PmCommand | null = withHistory && entry
+        ? { kind: "bulkPatch", entries: [entry] } : null;
+      let activityId: string | undefined;
       set((s) => {
         const next = embedTaskPatch(s, current, patch);
         const tasks = s.tasks.map((t) => (t.id === id ? next : t));
@@ -1402,13 +1462,11 @@ export const usePmStore = create<PmState>((set, get) => {
             });
 
         // Record a 1-entry command so a single inline edit is undoable too.
-        const history =
-          withHistory && entry
-            ? pushUndo(s, { kind: "bulkPatch", entries: [entry] })
-            : {};
+        activityId = activity[0]?.id;
+        const history = command ? pushUndo(s, command) : {};
         return { tasks, activity, ...history };
       });
-      persist((c) => db.patchTask(c, id, patch), () => set(snap));
+      persistTaskEdit(entry ? [entry] : [], command, activityId, (c) => db.patchTask(c, id, patch));
     },
 
     bulkUpdateTasks: (ids, rawPatch, opts) => {
@@ -1424,7 +1482,9 @@ export const usePmStore = create<PmState>((set, get) => {
       const entries = targets
         .map((t) => diffTaskPatch(t, patch))
         .filter((e): e is TaskPatchEntry => e !== null);
-      const snap = { tasks: get().tasks, activity: get().activity };
+      const command: PmCommand | null = withHistory && entries.length > 0
+        ? { kind: "bulkPatch", entries } : null;
+      let activityId: string | undefined;
       set((s) => {
         const tasks = s.tasks.map((t) =>
           idSet.has(t.id) ? embedTaskPatch(s, t, patch) : t,
@@ -1438,14 +1498,12 @@ export const usePmStore = create<PmState>((set, get) => {
           subteam_ids: [...new Set(targets.map((t) => t.subteam_id))],
           payload: { patch, count: targets.length },
         });
-        const history =
-          withHistory && entries.length > 0
-            ? pushUndo(s, { kind: "bulkPatch", entries })
-            : {};
+        activityId = activity[0]?.id;
+        const history = command ? pushUndo(s, command) : {};
         return { tasks, activity, ...history };
       });
       // ONE atomic .in() write for the whole batch.
-      persist((c) => db.batchPatchTasks(c, ids, patch), () => set(snap));
+      persistTaskEdit(entries, command, activityId, (c) => db.batchPatchTasks(c, ids, patch));
     },
 
     undo: () => {

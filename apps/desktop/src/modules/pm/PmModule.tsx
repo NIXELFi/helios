@@ -234,204 +234,126 @@ export function PmModule() {
     const c = client;
     const uid = userId;
     let active = true;
+    let running: Promise<void> | null = null;
+    let requested = false;
+    let releaseWriteWait: (() => void) | null = null;
+    let hasWorkspace = false;
 
     const hydrateFrom = (ws: Workspace) => {
-      const persisted = readPersistedActiveProject(uid);
-      const activeProjectId =
-        persisted && ws.projectData[persisted] ? persisted : defaultProjectId(ws.projects);
-      usePmStore.getState().hydrate({
-        projects: ws.projects,
-        projectData: ws.projectData,
-        activeProjectId,
-        currentUserId: uid,
-        baselineOrg: ws.baselineOrg,
-        roles: ws.roles,
-        client: c,
+      const cur = usePmStore.getState();
+      const selected = hasWorkspace && cur.currentUserId === uid
+        ? cur.activeProjectId : readPersistedActiveProject(uid);
+      const activeProjectId = selected && ws.projectData[selected]
+        ? selected : defaultProjectId(ws.projects);
+      cur.hydrate({
+        projects: ws.projects, projectData: ws.projectData, activeProjectId,
+        currentUserId: uid, baselineOrg: ws.baselineOrg, roles: ws.roles, client: c,
+        preserveWriteError: hasWorkspace,
+      });
+      hasWorkspace = true;
+      setPhase("ready");
+    };
+
+    setError(null);
+    setPhase("loading");
+    const cached = loadSnapshot(uid);
+    if (cached) hydrateFrom(cached);
+
+    // Every load path (startup, explicit reload, realtime, focus, probe) shares
+    // the same owner lifetime and write-epoch gate. Waiting is event-driven:
+    // a write that already finished during a fetch must also trigger a retry.
+    function waitForWrites(): Promise<void> {
+      if (!active || usePmStore.getState().inFlightWrites === 0) return Promise.resolve();
+      return new Promise((resolve) => {
+        const finish = () => {
+          unsubscribe();
+          releaseWriteWait = null;
+          resolve();
+        };
+        const unsubscribe = usePmStore.subscribe((state) => {
+          if (state.inFlightWrites === 0) finish();
+        });
+        releaseWriteWait = finish;
+      });
+    }
+
+    function requestRefresh(): Promise<void> {
+      if (!active) return Promise.resolve();
+      requested = true;
+      if (running) return running;
+      running = (async () => {
+        while (active && requested) {
+          requested = false;
+          await waitForWrites();
+          if (!active) return;
+          const epoch = usePmStore.getState().writeEpoch;
+          const ws = await loadWorkspace(c);
+          if (!active) return;
+          const cur = usePmStore.getState();
+          if (cur.inFlightWrites > 0 || cur.writeEpoch !== epoch) {
+            requested = true;
+            continue;
+          }
+          hydrateFrom(ws);
+          saveSnapshot(ws, uid, new Date().toISOString());
+        }
+      })().finally(() => { running = null; });
+      return running;
+    }
+
+    const refreshSafely = () => {
+      void requestRefresh().catch((e: unknown) => {
+        if (!active || hasWorkspace) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setPhase("error");
       });
     };
+    usePmStore.getState().registerReloadWorkspace(requestRefresh);
+    refreshSafely();
 
-    // Expose an authoritative, awaitable full reload to the store so a
-    // server-backed create (createProject → the admin-only RPC) can re-pull the
-    // whole workspace the moment it commits — reusing this exact loadWorkspace +
-    // hydrate path rather than a separate one. Unlike the background refresh()
-    // below, this has no in-flight/epoch guard: it runs right after a committed
-    // RPC, so there's no optimistic local edit to clobber, and it must not be
-    // silently skipped. saveSnapshot keeps the cold-launch cache current.
-    usePmStore.getState().registerReloadWorkspace(async () => {
-      const ws = await loadWorkspace(c);
-      hydrateFrom(ws);
-      saveSnapshot(ws, uid, new Date().toISOString());
-    });
-
-    // 1. Stale-while-revalidate: paint instantly from the cached snapshot so PM
-    //    cold-launch shows the last workspace sub-frame instead of a spinner.
-    const cached = loadSnapshot(uid);
-    if (cached) {
-      hydrateFrom(cached);
-      setPhase("ready");
-    }
-
-    // 2. Revalidate from the network, then refresh the cache for next launch.
-    void (async () => {
-      try {
-        const ws = await loadWorkspace(c);
-        if (!active) return;
-        hydrateFrom(ws);
-        saveSnapshot(ws, uid, new Date().toISOString());
-        setPhase("ready");
-      } catch (e) {
-        if (!active) return;
-        // Already painted from cache → keep it rather than wiping the screen on
-        // a transient failure. Only hard-error on a cold start with no cache.
-        if (!cached) {
-          setError(e instanceof Error ? e.message : String(e));
-          setPhase("error");
-        }
-      }
-    })();
-    return () => {
-      active = false;
-      // Drop the reload hook so a server-backed create can't fire against a
-      // stale client/user after sign-out or a client swap.
-      usePmStore.getState().registerReloadWorkspace(null);
-    };
-  }, [client, userId]);
-
-  // Keep the workspace fresh without a full app reload, re-hydrating from the
-  // `pm` schema so server-side changes (the activity-feed trigger, edits from
-  // another session, computed fields) appear. Preserves the active project + UI
-  // state, and SKIPS while a write is in flight so it never clobbers an
-  // in-flight optimistic edit.
-  //
-  // Freshness comes from four signals instead of a blind 20s full re-pull:
-  //   - REALTIME on the published pm tables (subscribePmRealtime) — the live
-  //     path, so a teammate's task/milestone/comment edit lands near-instantly,
-  //   - a cheap task/activity change-probe (fetchPmCursor) every PM_PROBE_MS —
-  //     covers the UNpublished tables + any missed realtime event,
-  //   - window focus — a full refresh (catches the long tail instantly), and
-  //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
-  //     the window stays focused but idle.
-  useEffect(() => {
-    if (!client || !userId) return;
-    const c = client;
-    const uid = userId;
-    let running = false;
-    // Set when a refresh aborts because a write started/finished mid-fetch. We
-    // can't just drop that refresh — the change that triggered it (a probe/
-    // realtime/focus signal) would be lost until the next cycle. Instead we
-    // re-arm one retry the moment all in-flight writes drain (see the store
-    // subscription below), so the pending change lands promptly.
-    let retryPending = false;
-    async function refresh() {
-      const st = usePmStore.getState();
-      if (!st.hydrated || st.inFlightWrites > 0 || running) return;
-      running = true;
-      const epochBefore = st.writeEpoch;
-      try {
-        const ws = await loadWorkspace(c);
-        const cur = usePmStore.getState();
-        // Abort if any write started (and maybe finished) during the fetch — the
-        // snapshot may predate it, so re-hydrating would clobber that edit.
-        if (cur.inFlightWrites > 0 || cur.writeEpoch !== epochBefore) {
-          retryPending = true;
-          return;
-        }
-        const keep =
-          cur.activeProjectId && ws.projectData[cur.activeProjectId]
-            ? cur.activeProjectId
-            : defaultProjectId(ws.projects);
-        usePmStore.getState().hydrate({
-          projects: ws.projects,
-          projectData: ws.projectData,
-          activeProjectId: keep,
-          currentUserId: uid,
-          baselineOrg: ws.baselineOrg,
-          roles: ws.roles,
-          client: c,
-          // Background re-hydrate: don't wipe a pending "Change not saved" toast.
-          preserveWriteError: true,
-        });
-        // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
-        // huge workspace just isn't persisted rather than janking the write.
-        saveSnapshot(ws, uid, new Date().toISOString());
-        retryPending = false; // this refresh succeeded — nothing left to re-arm
-      } catch {
-        // transient refresh failure — the next focus/interval retries
-      } finally {
-        running = false;
-      }
-    }
-    // Cheap baseline for the change-probe. A full refresh (focus/backstop)
-    // resets it to null so the next probe re-baselines instead of firing a
-    // redundant refresh for a change the full pull already captured.
     let prevCursor: PmCursor | null = null;
     async function probe() {
-      const st = usePmStore.getState();
-      // Mirror refresh()'s guards: don't probe before hydration, mid-write, or
-      // while a refresh is already running.
-      if (!st.hydrated || st.inFlightWrites > 0 || running) return;
+      if (!active || running || usePmStore.getState().inFlightWrites > 0) return;
       try {
         const next = await fetchPmCursor(c);
-        if (pmCursorChanged(prevCursor, next)) {
-          prevCursor = next;
-          void refresh();
-        } else {
-          prevCursor = next;
-        }
+        if (!active) return;
+        if (pmCursorChanged(prevCursor, next)) refreshSafely();
+        prevCursor = next;
       } catch {
-        // Probe failed — fall back to a full refresh so the safety net holds,
-        // and re-baseline on the next good probe.
+        if (!active) return;
         prevCursor = null;
-        void refresh();
+        refreshSafely();
       }
     }
     const fullRefresh = () => {
       prevCursor = null;
-      void refresh();
+      refreshSafely();
     };
-
-    const onFocus = fullRefresh;
-    window.addEventListener("focus", onFocus);
+    window.addEventListener("focus", fullRefresh);
     const probeInterval = window.setInterval(() => void probe(), PM_PROBE_MS);
     const backstopInterval = window.setInterval(fullRefresh, PM_BACKSTOP_MS);
-
-    // Realtime is the live path: the published pm tables (tasks, comments,
-    // dependencies, task_subteams, milestones, calendar_events, subteams) push
-    // changes instantly, so a teammate's edit appears in well under a second
-    // instead of waiting up to PM_PROBE_MS. Debounced into one guarded refresh()
-    // so a burst coalesces; the probe/focus/backstop above remain the safety net
-    // for the UNpublished tables and any missed events.
     let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
-    const onRealtime = () => {
+    const unsubscribeRealtime = subscribePmRealtime(c, () => {
       if (realtimeDebounce) clearTimeout(realtimeDebounce);
       realtimeDebounce = setTimeout(() => {
         realtimeDebounce = null;
         fullRefresh();
       }, PM_REALTIME_DEBOUNCE_MS);
-    };
-    const unsubscribeRealtime = subscribePmRealtime(c, onRealtime);
-
-    // Re-arm a refresh that was aborted mid-fetch by an in-flight write: the
-    // moment all writes drain (inFlightWrites → 0) and a retry is pending, run
-    // one full refresh so the change that triggered the aborted refresh isn't
-    // dropped until the next probe/backstop tick.
-    let lastInFlight = usePmStore.getState().inFlightWrites;
-    const unsubscribeStore = usePmStore.subscribe((state) => {
-      const now = state.inFlightWrites;
-      if (lastInFlight > 0 && now === 0 && retryPending) {
-        retryPending = false;
-        fullRefresh();
-      }
-      lastInFlight = now;
     });
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      // Invalidate before releasing waiters: an old request may complete after
+      // the next user has already hydrated this singleton store.
+      active = false;
+      releaseWriteWait?.();
+      if (usePmStore.getState().reloadWorkspace === requestRefresh) {
+        usePmStore.getState().registerReloadWorkspace(null);
+      }
+      window.removeEventListener("focus", fullRefresh);
       window.clearInterval(probeInterval);
       window.clearInterval(backstopInterval);
       if (realtimeDebounce) clearTimeout(realtimeDebounce);
       unsubscribeRealtime();
-      unsubscribeStore();
     };
   }, [client, userId]);
 

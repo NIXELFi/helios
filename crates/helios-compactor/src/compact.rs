@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use arrow::array::{ArrayRef, Float64Array, Int64Array};
+use arrow::array::{Array, ArrayRef, Float64Array, Int64Array};
 use arrow::compute::concat_batches;
 use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
@@ -105,8 +105,8 @@ pub fn build_chunk(rows: &[StagingRow]) -> Result<CompactedChunk> {
 
 /// Mean-per-second downsample of a compacted batch (schema: time_us Int64 +
 /// Float64 channels — the staging window schema). Aggregation: arithmetic
-/// mean of all samples whose `time_us` falls in the same whole second; the
-/// output timestamp is the start of that second.
+/// mean of each channel's non-null, non-NaN samples in the same whole second.
+/// All-missing channels yield NaN; the output timestamp is the second's start.
 pub fn downsample_1hz(batch: &RecordBatch) -> Result<RecordBatch> {
     let schema = batch.schema();
     if schema.field(0).name() != "time_us" || schema.field(0).data_type() != &DataType::Int64 {
@@ -118,20 +118,22 @@ pub fn downsample_1hz(batch: &RecordBatch) -> Result<RecordBatch> {
         .downcast_ref::<Int64Array>()
         .context("time_us not Int64")?;
 
-    // second -> (per-channel sum, count)
+    // second -> (per-channel sums, per-channel valid sample counts)
     let n_ch = batch.num_columns() - 1;
-    let mut acc: BTreeMap<i64, (Vec<f64>, u32)> = BTreeMap::new();
+    let mut acc: BTreeMap<i64, (Vec<f64>, Vec<u32>)> = BTreeMap::new();
     for row in 0..batch.num_rows() {
         let sec = time.value(row).div_euclid(1_000_000);
-        let e = acc.entry(sec).or_insert_with(|| (vec![0.0; n_ch], 0));
-        e.1 += 1;
+        let e = acc.entry(sec).or_insert_with(|| (vec![0.0; n_ch], vec![0; n_ch]));
         for c in 0..n_ch {
             let col = batch
                 .column(c + 1)
                 .as_any()
                 .downcast_ref::<Float64Array>()
                 .context("channel column not Float64")?;
-            e.0[c] += col.value(row);
+            if !col.is_null(row) && !col.value(row).is_nan() {
+                e.0[c] += col.value(row);
+                e.1[c] += 1;
+            }
         }
     }
 
@@ -140,7 +142,13 @@ pub fn downsample_1hz(batch: &RecordBatch) -> Result<RecordBatch> {
     for c in 0..n_ch {
         let col: Float64Array = acc
             .values()
-            .map(|(sums, n)| Some(sums[c] / *n as f64))
+            .map(|(sums, counts)| {
+                Some(if counts[c] == 0 {
+                    f64::NAN
+                } else {
+                    sums[c] / counts[c] as f64
+                })
+            })
             .collect();
         cols.push(Arc::new(col));
     }
@@ -226,5 +234,53 @@ mod tests {
         assert_eq!(t.value(0), 1_000_000_000);
         assert_eq!(v.value(0), 104.5);
         assert_eq!(v.value(1), 204.5);
+    }
+
+    #[test]
+    fn downsample_ignores_missing_samples_per_channel() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("time_us", DataType::Int64, false),
+            Field::new("rpm", DataType::Float64, true),
+            Field::new("speed", DataType::Float64, true),
+        ]));
+        let batch = RecordBatch::try_new(schema, vec![
+            Arc::new(Int64Array::from(vec![0, 250_000, 500_000, 750_000, 1_000_000])),
+            Arc::new(Float64Array::from(vec![
+                Some(10.0), Some(f64::NAN), None, Some(30.0), Some(50.0),
+            ])),
+            Arc::new(Float64Array::from(vec![
+                Some(0.0), Some(6.0), Some(12.0), None, Some(8.0),
+            ])),
+        ]).unwrap();
+        let ds = downsample_1hz(&batch).unwrap();
+        let rpm = ds.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
+        let speed = ds.column(2).as_any().downcast_ref::<Float64Array>().unwrap();
+        assert_eq!(rpm.value(0), 20.0);
+        assert_eq!(speed.value(0), 6.0);
+        assert_eq!(rpm.value(1), 50.0);
+        assert_eq!(speed.value(1), 8.0);
+    }
+
+    #[test]
+    fn downsample_all_missing_is_nan_after_ipc_roundtrip() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("time_us", DataType::Int64, false),
+            Field::new("nan_only", DataType::Float64, false),
+            Field::new("null_only", DataType::Float64, true),
+        ]));
+        let batch = RecordBatch::try_new(schema, vec![
+            Arc::new(Int64Array::from(vec![1_000_000, 1_500_000])),
+            Arc::new(Float64Array::from(vec![f64::NAN, f64::NAN])),
+            Arc::new(Float64Array::from(vec![None::<f64>, None])),
+        ]).unwrap();
+        let ds = downsample_1hz(&batch).unwrap();
+        let ipc = helios_arrow::batch_to_ipc(&ds).unwrap();
+        let decoded = helios_arrow::batch_from_ipc(&ipc).unwrap();
+        assert_eq!(decoded.schema(), batch.schema());
+        assert_eq!(decoded.num_rows(), 1);
+        for c in 1..=2 {
+            let values = decoded.column(c).as_any().downcast_ref::<Float64Array>().unwrap();
+            assert!(values.value(0).is_nan(), "all-missing channel {c} must stay missing");
+        }
     }
 }

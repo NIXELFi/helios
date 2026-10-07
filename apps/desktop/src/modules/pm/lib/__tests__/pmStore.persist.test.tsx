@@ -150,6 +150,36 @@ beforeEach(() => {
 });
 
 describe("optimistic persistence with rollback", () => {
+  test.each([false, true])("a failed edit preserves a successful unrelated edit (bulk: %s)", async (bulk) => {
+    const pending: Array<(error: { message: string } | null) => void> = [];
+    const client = {
+      schema: () => ({ from: () => ({ update: () => {
+        const chain = {
+          eq: () => chain, in: () => chain, select: () => chain,
+          then: (resolve: (result: unknown) => void) => new Promise((done) => {
+            pending.push((error) => { resolve({ data: error ? null : [{ id: "ok" }], error }); done(undefined); });
+          }),
+        };
+        return chain;
+      } }) }),
+    } as unknown as SupabaseClient;
+    seed(client, [makeTask("a"), makeTask("b")]);
+    usePmStore.setState({ inFlightWrites: 0 });
+    if (bulk) usePmStore.getState().bulkUpdateTasks(["a"], { title: "a-edited" });
+    else usePmStore.getState().updateTask("a", { title: "a-edited" });
+    usePmStore.getState().updateTask("b", { title: "b-saved" });
+    await flush();
+    pending[1]!(null);
+    await flush();
+    pending[0]!({ message: "permission denied" });
+    await flush();
+    expect(usePmStore.getState().tasks.find((t) => t.id === "b")!.title).toBe("b-saved");
+    expect(usePmStore.getState().tasks.find((t) => t.id === "a")!.title).toBe("task a");
+    expect(usePmStore.getState().undoStack).toHaveLength(1);
+    expect(usePmStore.getState().undoStack[0]!.entries[0]!.id).toBe("b");
+    expect(usePmStore.getState().activity.some((a) => a.target_id === "b")).toBe(true);
+  });
+
   test("addTask keeps the task and writes to the DB on success", async () => {
     const { client, writes } = recorderClient(null);
     seed(client);

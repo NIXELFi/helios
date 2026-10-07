@@ -101,6 +101,7 @@ async fn run(
                 bytes_in as f64 / bytes_out.max(1) as f64
             ),
             Ok(_) => {}
+            Err(e) if once => return Err(e),
             Err(e) => eprintln!("pass error (will retry): {e:#}"),
         }
         if prune {
