@@ -17,6 +17,9 @@ export interface PersonRole {
   tag: string | null;
   scope: "org" | "subteam";
   subteam_id: string | null;
+  /** Car program a subteam grant applies to; null = both cars. Only the lead
+   *  grant's tag matters today (it picks who a task's Slack ping goes to). */
+  program?: "ic" | "ev" | null;
 }
 
 export interface Person {
@@ -166,6 +169,21 @@ export function canRevokeRole(
   if (pr.role === "owner" || pr.role === "executive") return can("org.manage_admins");
   if (pr.subteam_id === null) return can("org.grant_roles");
   return can("org.grant_roles") || can("pm.grant_subteam_roles", pr.subteam_id);
+}
+
+/** Server-side gate of `pm.set_role_program`, mirrored on the client: retagging
+ *  a subteam grant's car program is checked exactly like granting it — the
+ *  subteam branch of `pm.grant_role` (`pm.grant_subteam_roles` in THAT subteam
+ *  or org-wide `org.grant_roles`) plus the grant-subset rule. Org-scoped grants
+ *  carry no program. */
+export function canSetRoleProgram(
+  pr: Pick<PersonRole, "scope" | "subteam_id">,
+  roleCaps: string[],
+  can: CanFn,
+): boolean {
+  if (pr.scope !== "subteam" || pr.subteam_id === null) return false;
+  if (!(can("org.grant_roles") || can("pm.grant_subteam_roles", pr.subteam_id))) return false;
+  return roleCapsHeldInScope(roleCaps, can, pr.subteam_id);
 }
 
 /** The capability set safe to send to `pm.upsert_role`: only caps the caller can
