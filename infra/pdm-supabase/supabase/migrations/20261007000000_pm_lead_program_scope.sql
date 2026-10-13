@@ -23,8 +23,10 @@
 --   * notify.lead_email(subteam, project): for a task in a project with a
 --     program, leads tagged for THAT program rank first, untagged (both-car)
 --     leads next, the legacy pm.subteam_memberships fallback last; a lead
---     tagged for the OTHER program is never returned (no lead -> the
---     dispatcher's existing slack_fallback_email path). A project with no
+--     tagged for the OTHER program is never returned, including through a
+--     stale legacy row of theirs (no lead -> the dispatcher's existing
+--     slack_fallback_email path). A legacy row carries no car, so one whose
+--     holder has no lead grant in the subteam can still be returned. A project with no
 --     program resolves exactly as before. Tie-break is unchanged (earliest
 --     grant, then user id).
 --   * notify.enqueue_from_task / notify.enqueue_from_comment: verbatim from
@@ -90,7 +92,8 @@ grant execute on function pm.set_role_program(uuid, text, uuid, text) to authent
 -- 3. Car-aware lead resolution ------------------------------------------------
 -- pri 0 = lead tagged for the task's car, 1 = untagged (both-car) lead,
 -- 2 = legacy subteam_memberships lead. Leads tagged for the other car are
--- filtered out. With no project program every org lead is pri 1, which is
+-- filtered out, and so is their legacy row (prod's legacy leads are the IC
+-- leads, so without this an EV subteam with no EV lead pinged the IC lead). With no project program every org lead is pri 1, which is
 -- today's ordering.
 create or replace function notify.lead_email(p_subteam uuid, p_project uuid)
  returns text language sql stable security definer set search_path to ''
@@ -111,7 +114,16 @@ as $$
       union all
       select sm.user_id, 2 as pri, sm.joined_at as since
         from pm.subteam_memberships sm
+        cross join prog
        where sm.subteam_id = p_subteam and sm.role = 'lead'
+         and not exists (
+           select 1
+             from pm.role_memberships m2
+             join pm.roles r2 on r2.id = m2.role_id
+            where m2.user_id = sm.user_id and m2.subteam_id = p_subteam and r2.key = 'lead'
+              and prog.program is not null and m2.program is not null
+              and m2.program <> prog.program
+         )
     ) c
     join auth.users u on u.id = c.user_id
    where p_subteam is not null

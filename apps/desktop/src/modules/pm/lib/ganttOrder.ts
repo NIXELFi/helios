@@ -1,8 +1,10 @@
 // Gantt row ordering: the sort modes for tasks within a subteam group, and the
 // per-user manual order (2026-10-07 feature request — "unable to put them in a
 // better order or manually move them"). The manual order is personal: it lives
-// in localStorage per scope, like the rest of ganttSettings, so it needs no
-// schema and never reorders anyone else's chart.
+// in localStorage per project + scope, so it needs no schema and never
+// reorders anyone else's chart. Keyed by project too because shared subteams
+// (Chassis on both IC and EV) would otherwise share one list, and pruning it
+// to the open project's tasks wiped the other car's order.
 
 import type { Subsystem, TaskRow } from "@helios/pm-ui";
 import { scopeKey } from "@pm/lib/nav";
@@ -106,14 +108,14 @@ export function moveInGroup(
   return [...next, ...order.filter((id) => !inGroup.has(id))];
 }
 
-function storageKey(teamSlug: string | null): string {
-  return `helios:gantt-order:${scopeKey(teamSlug)}`;
+function storageKey(projectId: string | null, teamSlug: string | null): string {
+  return `helios:gantt-order:${projectId ?? "__none__"}:${scopeKey(teamSlug)}`;
 }
 
-export function recallManualOrder(teamSlug: string | null): string[] {
+export function recallManualOrder(projectId: string | null, teamSlug: string | null): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(storageKey(teamSlug));
+    const raw = window.localStorage.getItem(storageKey(projectId, teamSlug));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
@@ -123,10 +125,14 @@ export function recallManualOrder(teamSlug: string | null): string[] {
   }
 }
 
-export function rememberManualOrder(teamSlug: string | null, order: readonly string[]): void {
+export function rememberManualOrder(
+  projectId: string | null,
+  teamSlug: string | null,
+  order: readonly string[],
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey(teamSlug), JSON.stringify(order));
+    window.localStorage.setItem(storageKey(projectId, teamSlug), JSON.stringify(order));
   } catch {
     // ignore storage failures (private mode, quota)
   }

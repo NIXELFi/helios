@@ -198,6 +198,9 @@ check("EV Suspension with ONLY IC-tagged leads -> null (never the other car's le
 await db.query(`insert into pm.subteam_memberships values ($1, $2, 'lead', now() - interval '400 days')`, [TIM, SUS]);
 check("legacy subteam_memberships lead is the last resort",
   (await lead(SUS, P_EV)) === "tim@x");
+// an IC-tagged lead's own (older) legacy row must not leak them back in for EV
+await db.query(`insert into pm.subteam_memberships values ($1, $2, 'lead', now() - interval '500 days')`, [ICS, SUS]);
+check("an other-car lead's legacy row is skipped", (await lead(SUS, P_EV)) === "tim@x");
 // both Suspension leads are IC-tagged now -> earliest-granted of them, never the legacy row
 check("legacy lead never outranks a tagged org lead", (await lead(SUS, P_IC)) === "both@x");
 check("no subteam -> null", (await lead(null, P_EV)) === null);

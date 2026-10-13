@@ -115,7 +115,7 @@ function CurrentView() {
     case "board":
       return <BoardViewClient teamSlug={teamSlug} />;
     case "gantt":
-      return <GanttViewClient teamSlug={teamSlug} />;
+      return <GanttViewClient key={scopeKey(teamSlug)} teamSlug={teamSlug} />;
     case "graph":
       return <GraphViewClient teamSlug={teamSlug} />;
     case "calendar":

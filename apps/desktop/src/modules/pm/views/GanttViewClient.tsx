@@ -264,23 +264,24 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     rememberGanttSettings(teamSlug, colorSettings);
   }, [teamSlug, colorSettings]);
 
-  // The user's own row order for "Manual" sort, per scope (see ganttOrder.ts).
-  // Only written on an explicit move, so switching scope never copies it over.
-  const [manualOrder, setManualOrder] = useState(() => recallManualOrder(teamSlug));
+  // The user's own row order for "Manual" sort, per project + scope (see
+  // ganttOrder.ts). Only written on an explicit move, so switching project
+  // never copies it over.
+  const [manualOrder, setManualOrder] = useState(() => recallManualOrder(projectId, teamSlug));
   useEffect(() => {
-    setManualOrder(recallManualOrder(teamSlug));
-  }, [teamSlug]);
+    setManualOrder(recallManualOrder(projectId, teamSlug));
+  }, [projectId, teamSlug]);
   const moveTask = useCallback(
     (groupIds: readonly string[], taskId: string, delta: -1 | 1) => {
       setManualOrder((prev) => {
         // Drop ids of tasks that no longer exist so the list can't grow forever.
         const live = new Set(tasks.map((t) => t.id));
         const next = moveInGroup(prev, groupIds, taskId, delta).filter((id) => live.has(id));
-        rememberManualOrder(teamSlug, next);
+        rememberManualOrder(projectId, teamSlug, next);
         return next;
       });
     },
-    [tasks, teamSlug],
+    [tasks, projectId, teamSlug],
   );
 
   function toggleCursor(id: string) {

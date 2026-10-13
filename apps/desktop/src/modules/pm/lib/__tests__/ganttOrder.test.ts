@@ -60,12 +60,19 @@ describe("moveInGroup", () => {
 });
 
 describe("persistence", () => {
-  test("manual order round-trips per scope and tolerates junk", () => {
-    rememberManualOrder("chassis", ["b", "a"]);
-    expect(recallManualOrder("chassis")).toEqual(["b", "a"]);
-    expect(recallManualOrder(null)).toEqual([]);
-    localStorage.setItem("helios:gantt-order:chassis", "{nope");
-    expect(recallManualOrder("chassis")).toEqual([]);
+  test("manual order round-trips per project + scope and tolerates junk", () => {
+    rememberManualOrder("ic", "chassis", ["b", "a"]);
+    expect(recallManualOrder("ic", "chassis")).toEqual(["b", "a"]);
+    expect(recallManualOrder("ic", null)).toEqual([]);
+    localStorage.setItem("helios:gantt-order:ic:chassis", "{nope");
+    expect(recallManualOrder("ic", "chassis")).toEqual([]);
+  });
+
+  test("a shared subteam keeps a separate order per car", () => {
+    rememberManualOrder("ic", "chassis", ["i1", "i2"]);
+    rememberManualOrder("ev", "chassis", ["e2", "e1"]);
+    expect(recallManualOrder("ic", "chassis")).toEqual(["i1", "i2"]);
+    expect(recallManualOrder("ev", "chassis")).toEqual(["e2", "e1"]);
   });
 
   test("sort mode is remembered with the other Gantt settings", () => {
