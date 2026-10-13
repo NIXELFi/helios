@@ -23,6 +23,7 @@ import { usePresenceRoster, type PresenceStore } from "./presenceStore";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
+import { handleWindowDragMouseDown } from "./windowDrag";
 
 export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "agora" | "sim" | "games" | "amethyst" | "marketplace" | "org";
 
@@ -196,8 +197,13 @@ export function ModulePicker(props: Props) {
       }
     >
       <div
+        // macOS has no TitleBar (Overlay title bar): this header sits under
+        // the traffic lights and is the one drag handle present in every
+        // module. Windows drags from the TitleBar above instead.
+        onMouseDown={IS_MAC ? handleWindowDragMouseDown : undefined}
         className={
           "flex items-center border-b border-helios-line pb-3 " +
+          (IS_MAC ? "select-none " : "") +
           BRAND_HEADER_TOP_PADDING +
           (collapsed ? " justify-center px-1" : " justify-between px-3")
         }

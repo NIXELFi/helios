@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canRevokeRole, grantableCapsPayload, roleCapsHeldInScope, type CanFn } from "../data/useOrgData";
+import { canRevokeRole, canSetRoleProgram, grantableCapsPayload, roleCapsHeldInScope, type CanFn } from "../data/useOrgData";
 
 // Build a `can(cap, subteamId?)` matching useMyCapabilities' resolver from a
 // flat list of granted caps: subteam_id null ⇒ applies everywhere; otherwise
@@ -123,5 +123,34 @@ describe("canRevokeRole (revoke-gate mirror)", () => {
   it("an org granter can revoke org and subteam grants alike", () => {
     expect(canRevokeRole({ role: "advisor", subteam_id: null }, orgGranter)).toBe(true);
     expect(canRevokeRole({ role: "member", subteam_id: "st-aero" }, orgGranter)).toBe(true);
+  });
+});
+
+describe("canSetRoleProgram (pm.set_role_program gate mirror)", () => {
+  const leadCaps = ["pm.grant_subteam_roles", "pm.edit"];
+  const chassisLead = makeCan([
+    { capability_key: "pm.grant_subteam_roles", subteam_id: "st-chassis" },
+    { capability_key: "pm.edit", subteam_id: "st-chassis" },
+  ]);
+  const orgGranter = makeCan([
+    { capability_key: "org.grant_roles", subteam_id: null },
+    { capability_key: "pm.grant_subteam_roles", subteam_id: null },
+    { capability_key: "pm.edit", subteam_id: null },
+  ]);
+
+  it("follows grant_role's subteam gate: own subteam only for a Lead, anywhere for an org granter", () => {
+    expect(canSetRoleProgram({ scope: "subteam", subteam_id: "st-chassis" }, leadCaps, chassisLead)).toBe(true);
+    expect(canSetRoleProgram({ scope: "subteam", subteam_id: "st-aero" }, leadCaps, chassisLead)).toBe(false);
+    expect(canSetRoleProgram({ scope: "subteam", subteam_id: "st-aero" }, leadCaps, orgGranter)).toBe(true);
+  });
+
+  it("applies the grant-subset rule", () => {
+    expect(canSetRoleProgram({ scope: "subteam", subteam_id: "st-chassis" }, [...leadCaps, "pm.admin"], chassisLead)).toBe(
+      false,
+    );
+  });
+
+  it("never offers a program on an org-scoped grant", () => {
+    expect(canSetRoleProgram({ scope: "org", subteam_id: null }, [], orgGranter)).toBe(false);
   });
 });

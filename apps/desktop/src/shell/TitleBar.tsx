@@ -1,15 +1,7 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useState } from "react";
 import { tca } from "@helios/ui";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import heliosIcon from "../assets/helios-icon.png";
-
-/** `getCurrentWindow()` throws outside a real Tauri webview (vitest/jsdom,
- *  `vite:dev` in a plain browser) — the bar still renders there, its window
- *  controls just no-op. */
-function tauriWindow(): ReturnType<typeof getCurrentWindow> | null {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return null;
-  return getCurrentWindow();
-}
+import { handleWindowDragMouseDown, tauriWindow } from "./windowDrag";
 
 /** Height of the custom title bar. Mirrored into the `--helios-titlebar-h`
  *  CSS variable (declared 0px in styles.css) so full-height `fixed` overlays
@@ -23,29 +15,16 @@ const TITLEBAR_HEIGHT_PX = 38;
  * macOS keeps its native traffic lights via `titleBarStyle: "Overlay"` and
  * does NOT render this component.
  *
- * Dragging: handled EXPLICITLY via startDragging() on mousedown, not via
- * `data-tauri-drag-region` — the declarative attribute's injected handler
- * proved unreliable on a frameless Windows window (drag simply didn't
- * engage), and mixing both mechanisms would double-fire the double-click
- * maximize. The window-control buttons opt out via `closest("button")`.
+ * Dragging: handled EXPLICITLY via startDragging() on mousedown (see
+ * ./windowDrag), not via `data-tauri-drag-region` — the declarative
+ * attribute's injected handler proved unreliable on a frameless Windows
+ * window, and mixing both mechanisms would double-fire the double-click
+ * maximize. The window-control buttons opt out as interactive elements.
  * Design per the approved 2026-06-16 mockup: logo + HELIOS wordmark +
  * module crumb left, min/max/close right, red close hover.
  */
 export function TitleBar({ context }: { context: string | null }) {
   const [maximized, setMaximized] = useState(false);
-
-  function handleDragMouseDown(e: ReactMouseEvent<HTMLDivElement>) {
-    if (e.button !== 0) return;
-    // The min/max/close buttons are click targets, never drag handles.
-    if ((e.target as HTMLElement).closest("button")) return;
-    const win = tauriWindow();
-    if (!win) return;
-    // Second press of a double-click arrives as mousedown with detail 2 —
-    // native title bars toggle maximize on it; a single press starts the
-    // OS move loop (which also swallows the matching mouseup).
-    if (e.detail === 2) void win.toggleMaximize();
-    else void win.startDragging();
-  }
 
   // Publish the bar height app-wide while mounted (see TITLEBAR_HEIGHT_PX).
   useEffect(() => {
@@ -84,7 +63,7 @@ export function TitleBar({ context }: { context: string | null }) {
 
   return (
     <div
-      onMouseDown={handleDragMouseDown}
+      onMouseDown={handleWindowDragMouseDown}
       className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-helios-panel to-helios-base"
     >
       <div className="flex items-center gap-[9px] pl-[13px]">

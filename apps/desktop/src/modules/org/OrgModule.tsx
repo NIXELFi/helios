@@ -26,6 +26,7 @@ import {
   useRolesWithCaps,
   useSubteams,
   canRevokeRole,
+  canSetRoleProgram,
   grantableCapsPayload,
   roleCapsHeldInScope,
   type Capability,
@@ -204,7 +205,7 @@ function PeopleRolesPanel() {
   // grant) instead of always failing the RPC.
   const { data: roles } = useRolesWithCaps();
   const { can, refetch: refetchMyCaps } = useMyCapabilities();
-  const { grantRole, revokeRole, updatePerson, deletePerson } = useOrgMutations();
+  const { grantRole, revokeRole, setRoleProgram, updatePerson, deletePerson } = useOrgMutations();
   // Pending account deletion awaiting the confirm dialog; null = closed.
   const [confirmDelete, setConfirmDelete] = useState<Person | null>(null);
 
@@ -265,6 +266,14 @@ function PeopleRolesPanel() {
       refetch();
       refetchMyCaps();
     }
+    setBusyUser(null);
+  }
+  async function doSetProgram(target: string, roleKey: string, subteamId: string, program: "ic" | "ev" | null) {
+    setBusyUser(target);
+    setActionError(null);
+    const r = await setRoleProgram(target, roleKey, subteamId, program);
+    if (!r.ok) setActionError(r.error);
+    else refetch();
     setBusyUser(null);
   }
   async function doUpdate(target: string, name: string | null, subteam: string | null) {
@@ -358,6 +367,7 @@ function PeopleRolesPanel() {
                   can={can}
                   onGrant={doGrant}
                   onRevoke={doRevoke}
+                  onSetProgram={doSetProgram}
                   onUpdate={doUpdate}
                   onDelete={(person) => setConfirmDelete(person)}
                 />
@@ -421,11 +431,13 @@ function PersonRow(props: {
   can: (cap: string, subteamId?: string | null) => boolean;
   onGrant: (target: string, roleKey: string, subteamId: string | null) => void;
   onRevoke: (target: string, roleKey: string, subteamId: string | null) => void;
+  onSetProgram: (target: string, roleKey: string, subteamId: string, program: "ic" | "ev" | null) => void;
   onUpdate: (target: string, name: string | null, subteam: string | null) => void;
   onDelete: (person: Person) => void;
 }) {
   const theme = useTheme();
-  const { person, roles, subteams, subteamName, busy, isMe, can, onGrant, onRevoke, onUpdate, onDelete } = props;
+  const { person, roles, subteams, subteamName, busy, isMe, can, onGrant, onRevoke, onSetProgram, onUpdate, onDelete } =
+    props;
   const [adding, setAdding] = useState(false);
   const [roleKey, setRoleKey] = useState("");
   const [subteamId, setSubteamId] = useState("");
@@ -648,6 +660,17 @@ function PersonRow(props: {
                   {r.scope === "subteam" && r.subteam_id ? (
                     <span className="opacity-70">· {subteamName.get(r.subteam_id) ?? "?"}</span>
                   ) : null}
+                  {/* Which car a subteam lead covers (shared subteams like
+                      Chassis have one lead per car); picks who a task's
+                      Slack ping goes to. Lead grants only. */}
+                  {r.role === "lead" && r.scope === "subteam" && r.subteam_id ? (
+                    <LeadProgramControl
+                      program={r.program ?? null}
+                      editable={canSetRoleProgram(r, roles.find((x) => x.key === r.role)?.capabilities ?? [], can)}
+                      busy={busy}
+                      onChange={(program) => onSetProgram(person.user_id, r.role, r.subteam_id!, program)}
+                    />
+                  ) : null}
                   {canRevokeRole(r, can) && (
                     <button
                       type="button"
@@ -763,6 +786,39 @@ function ProgramBadge({ program }: { program: "ic" | "ev" | null | undefined }) 
     );
   }
   return <span className="text-[9px] uppercase tracking-wider text-helios-muted">—</span>;
+}
+
+/** IC / EV / Both tag on a subteam lead grant (null = both cars). Editable
+ *  callers get a compact select tinted like {@link ProgramBadge}; everyone else
+ *  sees the badge only when the grant is car-specific. */
+function LeadProgramControl(props: {
+  program: "ic" | "ev" | null;
+  editable: boolean;
+  busy: boolean;
+  onChange: (program: "ic" | "ev" | null) => void;
+}) {
+  const { program, editable, busy, onChange } = props;
+  if (!editable) return program ? <ProgramBadge program={program} /> : null;
+  const tint =
+    program === "ic"
+      ? "bg-amber-500/15 text-amber-300 ring-amber-500/30"
+      : program === "ev"
+        ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"
+        : "bg-helios-base text-helios-dim ring-helios-line";
+  return (
+    <select
+      aria-label="Car program for this lead"
+      title="Which car this lead covers — task notifications ping the lead of the task's car"
+      value={program ?? ""}
+      disabled={busy}
+      onChange={(e) => onChange(e.target.value === "ic" || e.target.value === "ev" ? e.target.value : null)}
+      className={`ml-0.5 cursor-pointer appearance-none rounded-full px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40 ${tint}`}
+    >
+      <option value="">Both</option>
+      <option value="ic">IC</option>
+      <option value="ev">EV</option>
+    </select>
+  );
 }
 
 function StructurePanel() {

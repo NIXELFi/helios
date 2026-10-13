@@ -1,10 +1,11 @@
 // Per-scope persisted Gantt view settings. Mirrors the localStorage pattern in
 // nav.ts (storageKey + remember/recall with try/catch + SSR guard): each scope
 // (the project, or a given subteam) remembers which task property colors the
-// bar background and which colors the outline.
+// bar background and which colors the outline, plus the row sort mode.
 
 import type { TaskColorProperty } from "@helios/pm-ui";
 import { scopeKey } from "@pm/lib/nav";
+import { isGanttSort, type GanttSort } from "@pm/lib/ganttOrder";
 
 export interface GanttSettings {
   bgProperty: TaskColorProperty;
@@ -12,12 +13,15 @@ export interface GanttSettings {
   // Whether dependency arrows are drawn between bars. On by default; users can
   // hide them to declutter a dense chart.
   showDependencies: boolean;
+  // Row order within each subteam group (was unpersisted and reset per visit).
+  sort: GanttSort;
 }
 
 export const DEFAULT_GANTT_SETTINGS: GanttSettings = {
   bgProperty: "status",
   outlineProperty: "priority",
   showDependencies: true,
+  sort: "criticality",
 };
 
 const COLOR_PROPERTIES: readonly TaskColorProperty[] = [
@@ -54,6 +58,7 @@ export function recallGanttSettings(teamSlug: string | null): GanttSettings {
         typeof obj.showDependencies === "boolean"
           ? obj.showDependencies
           : DEFAULT_GANTT_SETTINGS.showDependencies,
+      sort: isGanttSort(obj.sort) ? obj.sort : DEFAULT_GANTT_SETTINGS.sort,
     };
   } catch {
     // ignore storage/parse failures (private mode, quota, malformed JSON)
