@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-10-13
+
 ### Added
 - PM Gantt: new **Manual (my order)**, **Task A–Z** and **Subsystem** sort options. In Manual, use the ▲/▼ arrows next to each task to arrange rows within a subteam — your order is saved on your computer (separately for each car) and doesn't change anyone else's chart. The chosen sort is now remembered per view.
 
