@@ -2,8 +2,9 @@ import type { SupabaseClient } from "@helios/auth";
 import { invoke } from "@tauri-apps/api/core";
 import type { Account, BalanceEntry, PaidWith, Reimbursement, Statement, Txn, TxnAllocation } from "./ledger";
 import type { Evidence } from "./discrepancies";
-import { allRows, type Item } from "../lib/api";
+import { addItems, allRows, importItems, setStatus, updateItem, type Item } from "../lib/api";
 import type { NewTxn, Plan, VendorRule } from "./importers";
+import type { Action } from "./roundtrip";
 
 // Data layer for the finance side (infra/pdm-supabase/supabase/migrations/
 // 20261001010000_finance_schema.sql). RLS returns the ledger only to execs; a
@@ -219,9 +220,14 @@ export function toCsv(rows: Record<string, unknown>[]): string {
  * does nothing in the desktop app, and still report success).
  */
 export async function saveCsv(filename: string, csv: string): Promise<boolean> {
+  return saveTextFile(filename, csv, { name: "CSV", extension: "csv", mime: "text/csv" });
+}
+
+/** Save any text file where the user picks (true if saved, false if they cancelled). */
+export async function saveTextFile(filename: string, text: string, type: { name: string; extension: string; mime: string }): Promise<boolean> {
   if (!("__TAURI_INTERNALS__" in window)) {   // a plain browser (dev): download it
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.href = URL.createObjectURL(new Blob([text], { type: type.mime }));
     a.download = filename;
     a.click();
     URL.revokeObjectURL(a.href);
@@ -229,9 +235,9 @@ export async function saveCsv(filename: string, csv: string): Promise<boolean> {
   }
   const { save } = await import("@tauri-apps/plugin-dialog");
   const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-  const path = await save({ defaultPath: filename, filters: [{ name: "CSV", extensions: ["csv"] }] });
+  const path = await save({ defaultPath: filename, filters: [{ name: type.name, extensions: [type.extension] }] });
   if (!path) return false;
-  await writeTextFile(path, csv);
+  await writeTextFile(path, text);
   return true;
 }
 
@@ -292,4 +298,50 @@ export interface RestoreResult {
 export async function restoreLedger(c: SupabaseClient, data: unknown, cars: { IC: string; EV: string; Team?: string },
   subteams: Record<string, string>, seasonStart: string): Promise<RestoreResult> {
   return unwrap(await F(c).rpc("restore_ledger", { p_data: data, p_cars: cars, p_subteams: subteams, p_season_start: seasonStart })) as RestoreResult;
+}
+
+// ---- the Claude round trip (roundtrip.ts): apply one ticked change
+
+/**
+ * Write one change from a Claude changes file, through the same calls an exec
+ * would make by hand (so the server's rules and the audit trail apply).
+ * `source` marks parts it adds ("claude:<file>:<n>"), so they can be found again.
+ */
+export async function applyChange(c: SupabaseClient, a: Action, source: string): Promise<void> {
+  const P = c.schema("purchasing");
+  switch (a.kind) {
+    case "update_part":
+      if (Object.keys(a.patch).length) await updateItem(c, a.itemId, a.patch);
+      if (a.status) await setStatus(c, [a.itemId], a.status);
+      return;
+    case "add_part": {
+      let id: string | undefined;
+      if (a.status === "PLANNED" || a.status === "READY") {
+        id = (await addItems(c, a.projectId, a.subteamId, [a.row], a.status === "READY"))[0];
+      } else {
+        await importItems(c, a.projectId, a.subteamId, [{ ...a.row, status: a.status, source }]);
+        const found = unwrap(await P.from("items").select("id").eq("source", source).order("created_at", { ascending: false }).limit(1)) as { id: string }[];
+        id = found[0]?.id;
+      }
+      if (!id) throw new Error("The part was added but couldn't be found again to finish it: check Abacus.");
+      if (Object.keys(a.buyer).length) await updateItem(c, id, a.buyer);
+      if (a.txnId !== null) await linkItem(c, id, a.txnId);
+      return;
+    }
+    case "link_part":
+      await linkItem(c, a.itemId, a.txnId);
+      return;
+    case "add_invoice":
+      unwrap(await F(c).from("evidence").upsert(a.row, { onConflict: "source_key", ignoreDuplicates: true }));
+      return;
+    case "link_invoice":
+      await linkEvidence(c, a.evidenceId, a.txnId);
+      return;
+    case "update_charge":
+      if (Object.keys(a.fields).length) await updateTxn(c, a.txnId, a.fields);
+      return;
+    case "split_charge":
+      await setAllocations(c, a.txnId, a.allocations);
+      return;
+  }
 }

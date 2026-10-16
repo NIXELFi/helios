@@ -49,7 +49,8 @@ export interface Discrepancy {
 
 export const INVOICE_REQUIRED_CENTS = 300_00;   // CFO handbook: invoices required for $300 and up
 export const AIRTABLE_ITEM_ALONE_CENTS = 100_00; // parts-list rows at or above this are flagged one by one
-const REQUEST_CATEGORIES = new Set(["Parts & materials", "Tools & shop supplies", "Needs category"]);
+/** Charges in these categories should have a parts-list row or request behind them. */
+export const REQUEST_CATEGORIES: ReadonlySet<string> = new Set(["Parts & materials", "Tools & shop supplies", "Needs category"]);
 
 /** True if this record says money was (or should have been) spent. */
 export function claimsACharge(e: Evidence): boolean {

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconBuildingBank, IconCheckbox, IconChartPie, IconFileInvoice, IconInbox, IconLayoutDashboard, IconListDetails,
-  IconAlertTriangle, IconBook2, IconCalculator, IconCloudUpload, IconDatabaseImport, IconMap2, IconReceipt2, IconScale, IconTable, IconTruckDelivery, type TablerIcon,
+  IconAlertTriangle, IconBook2, IconCalculator, IconChecklist, IconCloudUpload, IconDatabaseImport, IconMap2, IconReceipt2, IconScale, IconSparkles, IconTable,
+  IconTruckDelivery, type TablerIcon,
 } from "@tabler/icons-react";
 import { useHeliosAuth, userDisplayName } from "../../auth/AuthShell";
 import { useModuleLive } from "../../shell/module-activity";
@@ -23,17 +24,21 @@ import { ReimbursementsView } from "./finance/views/ReimbursementsView";
 import { DiscrepanciesView } from "./finance/views/DiscrepanciesView";
 import { AccountsView } from "./finance/views/AccountsView";
 import { MyReimbursementsView } from "./finance/views/MyReimbursementsView";
-import type { FinanceProps } from "./finance/views/shared";
+import { whereLabel, type FinanceProps } from "./finance/views/shared";
+import { LooseEndsView } from "./finance/views/LooseEndsView";
+import { ClaudeView } from "./finance/views/ClaudeView";
+import { allEvidence } from "./finance/compute";
+import { looseEnds } from "./finance/looseEnds";
 import { ImportView } from "./finance/views/ImportView";
 import { BringInDataView } from "./finance/views/BringInDataView";
 import { WhatIfView } from "./finance/views/WhatIfView";
 import { ExecGuide, MemberGuide, useGuideAnchor } from "./views/GuideView";
 
 type PurchasingView = "parts" | "approvals" | "orders" | "budgets" | "myreimb" | "inbox" | "guide";
-type View = PurchasingView | FinanceView | "import" | "bring" | "whatif" | "execguide";
+type View = PurchasingView | FinanceView | "import" | "bring" | "whatif" | "execguide" | "looseends" | "claude";
 const PROJECT_KEY = "helios:purchasing:project";
 const VIEW_KEY = "helios:purchasing:view";
-const FINANCE_VIEWS: string[] = ["overview", "balances", "ledger", "reimbursements", "discrepancies", "accounts", "import", "bring", "whatif", "execguide"];
+const FINANCE_VIEWS: string[] = ["overview", "balances", "ledger", "looseends", "reimbursements", "discrepancies", "accounts", "import", "bring", "whatif", "execguide", "claude"];
 
 const SUBTITLE: Record<View, string> = {
   parts: "Abacus, the team's parts list: add parts when you know you'll need them, send them for approval when the design is settled.",
@@ -50,6 +55,8 @@ const SUBTITLE: Record<View, string> = {
   overview: "What the team can actually spend, the card, and what needs attention.",
   balances: "This week's balances for every account, and how they compare with the ledger.",
   ledger: "Every statement line and hand-entered transaction, with running totals.",
+  looseends: "Ledger lines that aren't squared away yet: what each is missing, and a quick way to fix it.",
+  claude: "Save a snapshot for Claude with new emails and invoices, then load the changes it sends back. Execs only.",
   reimbursements: "Everyone the team owes money, per person, with their receipts.",
   discrepancies: "Anything that doesn't add up, with the lines and documents behind it.",
   accounts: "The accounts the ledger tracks.",
@@ -104,6 +111,11 @@ export function AgoraModule() {
   const toOrder = data.items.filter((i) => i.status === "APPROVED").length;
   const unread = data.notifications.filter((n) => !n.read_at).length;
   const toReview = fin.data.reimbursements.filter((r) => r.status === "requested").length;
+  const loose = useMemo(() => {
+    if (!financeExec) return 0;
+    const resolved = new Set(fin.data.resolutions.map((r) => r.key));
+    return looseEnds(fin.data.txns, allEvidence(fin.data, data.items, whereLabel(data)), resolved).length;
+  }, [financeExec, fin.data, data]);
 
   const nav: { id: View; label: string; Icon: TablerIcon; count?: number; show: boolean }[] = [
     { id: "parts", label: "Abacus (parts)", Icon: IconTable, show: true },
@@ -114,14 +126,16 @@ export function AgoraModule() {
     { id: "inbox", label: "Inbox", Icon: IconInbox, count: unread, show: true },
     { id: "guide", label: "How it works", Icon: IconMap2, show: true },
   ];
-  const financeNav: { id: FinanceView | "import" | "bring" | "whatif" | "execguide"; label: string; Icon: TablerIcon; count?: number }[] = [
+  const financeNav: { id: FinanceView | "import" | "bring" | "whatif" | "execguide" | "looseends" | "claude"; label: string; Icon: TablerIcon; count?: number }[] = [
     { id: "overview", label: "Overview", Icon: IconLayoutDashboard },
     { id: "balances", label: "Weekly balances", Icon: IconScale },
     { id: "ledger", label: "Ledger", Icon: IconListDetails },
+    { id: "looseends", label: "Loose ends", Icon: IconChecklist, count: loose },
     { id: "reimbursements", label: "Reimbursements", Icon: IconFileInvoice, count: toReview },
     { id: "discrepancies", label: "Discrepancies", Icon: IconAlertTriangle },
     { id: "whatif", label: "What if?", Icon: IconCalculator },
     { id: "import", label: "Upload files", Icon: IconCloudUpload },
+    { id: "claude", label: "Update with Claude", Icon: IconSparkles },
     { id: "bring", label: "Bring in data", Icon: IconDatabaseImport },
     { id: "accounts", label: "Accounts", Icon: IconBuildingBank },
     { id: "execguide", label: "Exec guide", Icon: IconBook2 },
@@ -205,6 +219,8 @@ export function AgoraModule() {
             : shown === "ledger" ? <LedgerView {...fp} selected={txnId} select={setTxnId} />
             : shown === "reimbursements" ? <ReimbursementsView {...fp} />
             : shown === "discrepancies" ? <DiscrepanciesView {...fp} />
+            : shown === "looseends" ? <LooseEndsView {...fp} />
+            : shown === "claude" ? <ClaudeView {...fp} />
             : shown === "import" ? <ImportView {...fp} />
             : shown === "bring" ? <BringInDataView {...fp} go={go} />
             : shown === "whatif" ? <WhatIfView {...fp} />

@@ -17,13 +17,16 @@ const STATUS_STYLE: Record<Status, string> = {
   HAVE: "bg-transparent text-helios-muted border-helios-line",
 };
 
+// Quiet tints, so a sheet full of them stays readable; HIGH is the one that stands out.
 const PRIORITY_STYLE: Record<Priority, string> = {
-  HIGH: "bg-asu-gold text-helios-on-gold border-transparent",
-  Medium: "bg-blue-600 text-white border-transparent",
-  Low: "bg-helios-strip text-helios-dim border-helios-line",
+  HIGH: "bg-asu-gold/15 text-asu-gold border-asu-gold/40",
+  Medium: "bg-sky-500/10 text-sky-300 border-sky-400/25",
+  Low: "bg-transparent text-helios-dim border-helios-line",
 };
 
-const pill = "rounded-md border px-2 py-0.5 text-xs font-semibold";
+const pill = "inline-flex h-6 items-center rounded-full border px-2.5 text-[11.5px] font-semibold leading-none";
+/** A pill that is also a dropdown: same look, with room for the arrow. */
+const pillSelect = "h-6 max-w-full cursor-pointer rounded-full border pl-2.5 pr-1 text-[11.5px] font-semibold outline-none focus-visible:ring-1 focus-visible:ring-asu-gold";
 
 export function StatusPill({ status }: { status: Status }) {
   return <span className={`${pill} whitespace-nowrap ${STATUS_STYLE[status]}`}>{STATUS_LABEL[status]}</span>;
@@ -36,7 +39,7 @@ export function StatusSelect({
   return (
     <select
       aria-label="Status"
-      className={`${pill} cursor-pointer ${STATUS_STYLE[status]}`}
+      className={`${pillSelect} ${STATUS_STYLE[status]}`}
       value={status}
       onChange={(e) => onChange(e.target.value as Status)}
     >
@@ -48,15 +51,15 @@ export function StatusSelect({
 export function PrioritySelect({
   priority, editable, onChange,
 }: { priority: Priority; editable: boolean; onChange: (p: Priority) => void }) {
-  if (!editable) return <span className={`${pill} ${PRIORITY_STYLE[priority]}`}>{priority}</span>;
+  if (!editable) return <span className={`${pill} ${PRIORITY_STYLE[priority]}`}>{priority === "HIGH" ? "High" : priority}</span>;
   return (
     <select
       aria-label="Priority"
-      className={`${pill} cursor-pointer ${PRIORITY_STYLE[priority]}`}
+      className={`${pillSelect} ${PRIORITY_STYLE[priority]}`}
       value={priority}
       onChange={(e) => onChange(e.target.value as Priority)}
     >
-      {(["HIGH", "Medium", "Low"] as Priority[]).map((p) => <option key={p}>{p}</option>)}
+      {(["HIGH", "Medium", "Low"] as Priority[]).map((p) => <option key={p} value={p}>{p === "HIGH" ? "High" : p}</option>)}
     </select>
   );
 }

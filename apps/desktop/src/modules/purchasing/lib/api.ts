@@ -65,6 +65,7 @@ export interface Item {
   vendor_order_id: string | null;
   actual_total_cents: number | null;
   payment_method: string;
+  paid_by?: string;                 // a member who paid with their own money
   ordered_at: string | null;
   carrier: string;
   tracking_number: string;

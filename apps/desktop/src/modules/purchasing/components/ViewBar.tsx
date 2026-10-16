@@ -13,14 +13,14 @@ export function ViewBar({ views, active, onPick, onNew, onEdit, canEdit }: {
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Views">
-      <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-helios-dim">Views</span>
+      <span className="mr-1 text-xs text-helios-muted">View</span>
       {views.map((v) => {
         const on = v.id === active;
         return (
-          <span key={v.id} className={`group inline-flex items-center rounded-full border text-xs ${on ? "border-asu-gold bg-asu-gold/10 text-asu-gold" : "border-helios-line text-helios-dim hover:bg-helios-strip"}`}>
-            <button role="tab" aria-selected={on} aria-label={v.name} className="px-3 py-1" onClick={() => onPick(v.id)}
+          <span key={v.id} className={`group inline-flex items-center rounded-md text-[13px] transition-colors ${on ? "bg-helios-strip font-semibold text-helios-text ring-1 ring-helios-line" : "text-helios-dim hover:bg-helios-strip/70 hover:text-helios-text"}`}>
+            <button role="tab" aria-selected={on} aria-label={v.name} className="px-2.5 py-1" onClick={() => onPick(v.id)}
               title={`${describeView(v.config)}${v.owner_name ? ` | made by ${v.owner_name}` : ""}${v.shared ? "" : " | only you see it"}`}>
-              {v.name}{!v.shared && <span className="ml-1 text-[10px] opacity-70">(you)</span>}
+              {v.name}{!v.shared && <span className="ml-1 text-[10px] font-normal opacity-70">(only you)</span>}
             </button>
             {canEdit(v) && (
               <button className={`-ml-1 pr-2 ${on ? "" : "hidden group-hover:inline"}`} title="Change this view" aria-label={`Change view ${v.name}`} onClick={() => onEdit(v)}>&#9998;</button>
@@ -28,7 +28,7 @@ export function ViewBar({ views, active, onPick, onNew, onEdit, canEdit }: {
           </span>
         );
       })}
-      <button className="rounded-full border border-dashed border-helios-line px-3 py-1 text-xs text-helios-dim hover:bg-helios-strip" onClick={onNew}>+ New view</button>
+      <button className="rounded-md px-2.5 py-1 text-[13px] text-helios-muted hover:bg-helios-strip hover:text-helios-text" onClick={onNew}>+ New view</button>
     </div>
   );
 }

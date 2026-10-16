@@ -172,11 +172,12 @@ const WEEK_STEPS: Step[] = [
       <p>The preview shows what each line will do: <b>new</b>, <b>already in the ledger</b> (skipped, so nothing counts twice), <b>clears a check</b>, or <b>confirms the autopay</b>. Fix categories there if you like, then press Import.</p>
       <p>The same file can't be imported twice.</p></>,
     page: ["import", "Open Upload files"] },
-  { id: "tidy", title: "Tidy new lines", tone: "exec", who: "CFO",
+  { id: "tidy", title: "Tie up loose ends", tone: "exec", who: "CFO",
     what: <>
-      <p>Ledger &gt; tick <b>Needs attention</b>. For each line: set the category and the subteam split (a shared purchase can be split across cars and subteams).</p>
-      <p>Charges of <b>$300 or more need an invoice</b> (handbook rule): open the line and attach the PDF or photo.</p></>,
-    page: ["ledger", "Open the Ledger"] },
+      <p>Finance &gt; <b>Loose ends</b> lists every ledger line that isn't squared away and what it's missing: a category, a subteam, a receipt, the part it paid for, an amount that differs. Click a line to fix it right there; the chips at the top show one kind at a time.</p>
+      <p>Charges of <b>$300 or more need an invoice</b> (handbook rule). A small charge with no receipt, or a difference that's just tax, can be marked fine with a reason instead.</p>
+      <p>Lots of new emails and invoices? <b>Update with Claude</b> does the matching for you (below).</p></>,
+    page: ["looseends", "Open Loose ends"] },
   { id: "balances", title: "Enter this week's balances", tone: "exec", who: "CFO",
     what: <>
       <p>Weekly balances &gt; click each number and type this week's figure: <b>Chase</b> (from the bank), <b>SAE card available credit</b> (from PaymentNet: it's how pending charges show up), Square, cash box, ASU accounts.</p>
@@ -229,6 +230,12 @@ export function ExecGuide({ go }: { go: Go }) {
       </Card>
       <div className="flex flex-col gap-3">{BUY_STEPS.map((s, i) => <StepCard key={s.id} s={s} n={i + 1} prefix={p} go={go} />)}</div>
 
+      <Extra id="claude" prefix={p} title="Updating Agora with Claude">
+        <p>Finance &gt; <b>Update with Claude</b>. Save a snapshot of Agora (one file with the parts, the ledger, invoices and loose ends, and instructions for Claude inside it). Give Claude that file with the new order confirmations, shipping emails, invoices and a note on anything else that changed. Claude sends back <b>agora-changes.json</b>: a list of small changes (mark a part shipped, attach an invoice to a charge, split a charge), each with its reason.</p>
+        <p>Load that file: every change is shown as old value to new value, against Agora as it is now. Tick the ones you agree with and press Make changes. Nothing else is written. A changes file can't add or change statement amounts or dates, approve parts, or delete anything; the server checks each change as if you'd made it by hand, and it goes in the history.</p>
+        <p>The snapshot is the team's books: keep it private and never put it in the Helios repository.</p>
+        <button className="text-asu-gold hover:underline" onClick={() => go("claude")}>Open Update with Claude</button>
+      </Extra>
       <Extra id="whatif" prefix={p} title="Weighing up a big expense">
         <p>Finance &gt; <b>What if?</b>: list the big things you're considering (a new engine, a trailer, registration) and any money you expect in. Each line shows what Available, the card's room this cycle, the subteam's budget line, or the account it comes from would be after it, building on the lines above, with a warning if anything goes negative or below your cushion. Untick a line to see the picture without it. It never touches the books.</p>
         <button className="text-asu-gold hover:underline" onClick={() => go("whatif")}>Open What if?</button>

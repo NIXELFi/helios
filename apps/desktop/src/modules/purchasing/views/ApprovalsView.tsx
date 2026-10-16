@@ -5,8 +5,12 @@ import { fmtCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, PrioritySelect, SubteamChip } from "../components/ui";
 import { partPrice } from "../components/OrderDialog";
+import { NO_FILTER, WAITING_LABEL, filterApprovals, isFiltered, type ApprovalFilter } from "../lib/approvalFilter";
 
-const PRIORITY_ORDER = { HIGH: 0, Medium: 1, Low: 2 } as const;
+const FILTER_KEY = "helios:agora:approvals-filter";
+function loadFilter(): ApprovalFilter {
+  try { return { ...NO_FILTER, ...(JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}") as Partial<ApprovalFilter>) }; } catch { return NO_FILTER; }
+}
 
 /** The budget line covering an item's (car, subteam). */
 export function lineFor(budgets: BudgetRow[], projectId: string, subteamId: string): BudgetRow | undefined {
@@ -28,6 +32,13 @@ export function ApprovalsView({
 }) {
   const { items, approvals, subteams, projects, budgets } = data;
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // remembered on this computer, like Abacus's view
+  const [filter, setFilterState] = useState<ApprovalFilter>(loadFilter);
+  const setFilter = (patch: Partial<ApprovalFilter>) => setFilterState((f) => {
+    const next = { ...f, ...patch };
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
   // members aren't asked for sales tax, so show a rough all-in figure where it's missing
   const [taxPct, setTaxPct] = useState<number | null>(null);
   // the approval rule is a setting (the server's decide() reads the same ones)
@@ -41,16 +52,15 @@ export function ApprovalsView({
   // the CFO approves alone when the approvals were given in person
   const override = can(data.caps, "purchasing.override");
 
-  const waiting = items
+  const all = items
     .filter((i) => i.status === "READY")
     .map((i) => {
       const mine = approvals.find((a) => a.item_id === i.id && a.user_id === userId);
       const hours = i.ready_at ? (now - new Date(i.ready_at).getTime()) / 3_600_000 : 0;
       const flag = hours > 14 * 24 ? "stale" : (i.priority === "HIGH" && hours > 24) || hours > 72 ? "nudge" : "";
-      return { i, mine, hours, flag };
-    })
-    .sort((a, b) => Number(!!a.mine) - Number(!!b.mine)
-      || PRIORITY_ORDER[a.i.priority] - PRIORITY_ORDER[b.i.priority] || b.hours - a.hours);
+      return { i, mine, voted: !!mine, hours, flag };
+    });
+  const waiting = filterApprovals(all, filter);
 
   async function act(i: Item, decision: "approve" | "deny") {
     try {
@@ -69,10 +79,12 @@ export function ApprovalsView({
     } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
   }
 
-  if (!waiting.length) return <Empty>Nothing waiting for approval.</Empty>;
+  if (!all.length) return <Empty>Nothing waiting for approval.</Empty>;
 
   return (
     <div className="flex flex-col gap-3">
+      <FilterBar all={all.map((x) => x.i)} shown={waiting.length} filter={filter} setFilter={setFilter} data={data} />
+      {!waiting.length && <Empty>No requests match these filters. <button className="text-asu-gold hover:underline" onClick={() => setFilter(NO_FILTER)}>Clear them</button></Empty>}
       {waiting.map(({ i, mine, hours, flag }) => {
         const count = approvals.filter((a) => a.item_id === i.id && a.decision === "approve" && (rule.selfCounts || a.user_id !== i.requester_id)).length;
         const border = flag === "stale" ? "border-helios-danger/60" : flag === "nudge" ? "border-helios-warn/60" : "";
@@ -149,6 +161,50 @@ export function ApprovalsView({
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+const box = "rounded-md border border-helios-line bg-helios-strip px-2 py-1.5 text-sm";
+
+/** Narrow the queue: who asked, for which car and subteam, how urgent, how long it's waited. */
+function FilterBar({ all, shown, filter: f, setFilter, data }: {
+  all: Item[]; shown: number; filter: ApprovalFilter; setFilter: (p: Partial<ApprovalFilter>) => void; data: PurchasingData;
+}) {
+  // only what's actually waiting, so no option leads to an empty list
+  const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const requesters = uniq(all.map((i) => i.requester_name));
+  const vendors = uniq(all.map((i) => i.vendor ?? ""));
+  const teamIds = new Set(all.flatMap((i) => i.item_allocations.map((a) => a.subteam_id)));
+  const carIds = new Set(all.flatMap((i) => i.item_allocations.map((a) => a.project_id)));
+  const sel = (label: string, value: string, onChange: (v: string) => void, options: [string, string][], all = "All") => (
+    <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-helios-dim">{label}
+      <select className={`${box} font-normal normal-case tracking-normal text-helios-text ${value ? "border-asu-gold/70" : ""}`} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{all}</option>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </label>
+  );
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-helios-line bg-helios-panel p-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-helios-dim">Search
+          <input className={`${box} font-normal normal-case tracking-normal text-helios-text`} placeholder="Part, vendor, part #, who asked, notes..."
+            value={f.q} onChange={(e) => setFilter({ q: e.target.value })} />
+        </label>
+        {carIds.size > 1 && sel("Car", f.car, (v) => setFilter({ car: v }), data.projects.filter((p) => carIds.has(p.id)).map((p) => [p.id, p.car_code]), "Both")}
+        {sel("Subteam", f.subteam, (v) => setFilter({ subteam: v }), data.subteams.filter((s) => teamIds.has(s.id)).map((s) => [s.id, s.name]))}
+        {sel("Priority", f.priority, (v) => setFilter({ priority: v as ApprovalFilter["priority"] }), [["HIGH", "High"], ["Medium", "Medium"], ["Low", "Low"]], "Any")}
+        {sel("Asked by", f.requester, (v) => setFilter({ requester: v }), requesters.map((r) => [r, r]), "Anyone")}
+        {sel("Vendor", f.vendor, (v) => setFilter({ vendor: v }), vendors.map((v) => [v, v]), "Any")}
+        {sel("Waiting", f.waiting, (v) => setFilter({ waiting: v as ApprovalFilter["waiting"] }), Object.entries(WAITING_LABEL), "Any time")}
+        {sel("My vote", f.vote, (v) => setFilter({ vote: v as ApprovalFilter["vote"] }), [["todo", "Not voted yet"], ["voted", "Already voted"]], "Either")}
+        {sel("Sort", f.sort, (v) => setFilter({ sort: v as ApprovalFilter["sort"] }),
+          [["oldest", "Waiting longest"], ["newest", "Newest"], ["biggest", "Biggest $"], ["smallest", "Smallest $"]], "To do, then priority")}
+      </div>
+      <div className="flex items-center gap-3 text-xs text-helios-dim">
+        <span>{isFiltered(f) ? <>Showing <b className="text-helios-text">{shown}</b> of {all.length} waiting</> : <>{all.length} waiting</>}</span>
+        {isFiltered(f) && <button className="text-asu-gold hover:underline" onClick={() => setFilter({ ...NO_FILTER, sort: f.sort })}>Clear filters</button>}
+      </div>
     </div>
   );
 }
