@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Agora: a **Finance team** role (org-wide) for the CFO's helpers: see and keep the books and record orders, without approvals or any other exec power. Grant it from Admin like any other role. The signup list already offered "Finance".
+
 ## [6.2.1] - 2026-10-17
 
 ### Added
