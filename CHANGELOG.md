@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.2.1] - 2026-10-17
+
 ### Added
 - Agora: **Update with Claude** (Finance, execs only). Save a snapshot of Agora with instructions for Claude built in, give it to Claude along with new order emails and invoices, and load the **agora-changes.json** it sends back. Every change (part shipped, invoice attached to a charge, charge split between subteams...) is shown as old value to new value with Claude's reason, and only the ones you tick are made. A changes file can't add or alter statement amounts or delete anything, and can't approve parts (the CFO's own override still applies when it marks a part ordered). The snapshot leaves out shipping addresses. Needs finance edit rights.
 - Agora: **Loose ends** (Finance, execs only). Every ledger line that isn't squared away, with what's missing on each (category, subteam, receipt, the part it paid for, an amount that differs, a flag) and a quick fix right on the line. A missing receipt or a small difference can be marked fine with a reason, which also resolves it on Discrepancies. The count shows in the sidebar.
