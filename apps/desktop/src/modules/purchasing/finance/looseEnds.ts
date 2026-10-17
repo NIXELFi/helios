@@ -7,7 +7,9 @@
 // fixed: the books and the budgets can't tie without them. Paperwork gaps (no
 // receipt, no part matched, an amount that differs, a flag, a check with no
 // reason) can also be waived with a reason. Waiving one stores the same key
-// the Discrepancies page uses, so the two pages always agree.
+// the Discrepancies page uses, so the two pages always agree: a gap is raised
+// under exactly the conditions findDiscrepancies() raises it, and its keys are
+// only the ones not resolved yet (so waiving never rewrites an old resolution).
 //
 // Pure: no Supabase or React (tests in __tests__/looseEnds.test.ts).
 
@@ -56,38 +58,41 @@ export function looseEnds(txns: Txn[], evidence: Evidence[], resolved: ReadonlyS
     const evs = byTxn.get(t.id) ?? [];
     const docs = evs.filter((e) => e.kind === "invoice" || e.kind === "email");
     const parts = evs.filter((e) => REQUEST_KINDS.has(e.kind));
-    const gaps = gapsOf(t, docs, parts, evs.some((e) => e.kind === "slack"))
-      .filter((g) => !g.keys.length || g.keys.some((k) => !resolved.has(k)));
+    const gaps = gapsOf(t, docs, parts, evs.some((e) => e.kind === "slack"), resolved);
     if (gaps.length) out.push({ txn: t, gaps, docs, parts });
   }
   return out.sort((a, b) => (a.txn.date === b.txn.date ? b.txn.id - a.txn.id : a.txn.date < b.txn.date ? 1 : -1));
 }
 
-function gapsOf(t: Txn, docs: Evidence[], parts: Evidence[], slack: boolean): GapInfo[] {
+function gapsOf(t: Txn, docs: Evidence[], parts: Evidence[], slack: boolean, resolved: ReadonlySet<string>): GapInfo[] {
   const gaps: GapInfo[] = [];
   const amount = Math.abs(t.amount_cents);
+  const open = (k: string) => !resolved.has(k);
   if (t.category === "Needs category") gaps.push({ gap: "category", detail: "", keys: [] });
-  if (!isSpend(t)) return gaps;
+  // refunds and card credits count against the budgets too, so they need a split as well
+  if (!isSpend(t) && t.kind !== "credit") return gaps;
 
   const split = t.txn_allocations.reduce((s, a) => s + a.amount_cents, 0);
   if (!t.txn_allocations.length) gaps.push({ gap: "split", detail: "", keys: [] });
   else if (split !== amount) gaps.push({ gap: "split", detail: `the split adds up to ${fmtCents(split)} of ${fmtCents(amount)}`, keys: [] });
 
-  if (t.kind === "charge" && !docs.length) {
+  if (t.kind === "charge" && !docs.length && open(`no-invoice:${t.id}`)) {
     gaps.push({ gap: "receipt", detail: amount >= INVOICE_REQUIRED_CENTS ? "required for $300 and up" : "", keys: [`no-invoice:${t.id}`] });
   }
-  if (t.kind === "charge" && !parts.length && !slack && REQUEST_CATEGORIES.has(t.category)) {
+  if (t.kind === "charge" && !parts.length && !slack && REQUEST_CATEGORIES.has(t.category) && open(`no-request:${t.id}`)) {
     gaps.push({ gap: "part", detail: "", keys: [`no-request:${t.id}`] });
   }
 
-  // the same comparisons as the discrepancy checker, so waiving one waives both
+  // the same comparisons as the discrepancy checker, so waiving one waives both;
+  // a difference already marked fine over there isn't listed again here
   const diffs: string[] = [], keys: string[] = [];
   for (const e of docs) {
     if (e.total_cents === null || e.total_cents === amount || e.status.toLowerCase().includes("estimate")) continue;
+    if (!open(`amount:${t.id}:${e.id}`)) continue;
     diffs.push(`${e.kind} says ${fmtCents(e.total_cents)}`);
     keys.push(`amount:${t.id}:${e.id}`);
   }
-  if (parts.length) {
+  if (parts.length && open(`amount-airtable:${t.id}`)) {
     const total = parts.reduce((s, r) => s + (r.total_cents ?? 0), 0);
     if (total !== amount) {
       diffs.push(`${parts.length === 1 ? "the part says" : `${parts.length} parts total`} ${fmtCents(total)}`);
@@ -96,8 +101,11 @@ function gapsOf(t: Txn, docs: Evidence[], parts: Evidence[], slack: boolean): Ga
   }
   if (keys.length) gaps.push({ gap: "amount", detail: `${diffs.join(", ")}; charged ${fmtCents(amount)}`, keys });
 
-  if (t.needs_review) gaps.push({ gap: "review", detail: t.review_note, keys: [`review:${t.id}`] });
-  if (t.kind === "check" && !(t.notes.trim() || t.description.trim())) gaps.push({ gap: "reason", detail: "", keys: [`check-why:${t.id}`] });
+  // flagged lines and cleared checks, under the same conditions as Discrepancies
+  if (t.needs_review && t.review_note && open(`review:${t.id}`)) gaps.push({ gap: "review", detail: t.review_note, keys: [`review:${t.id}`] });
+  if (t.kind === "check" && t.cleared_date && !(t.notes.trim() || t.description.trim()) && open(`check-why:${t.id}`)) {
+    gaps.push({ gap: "reason", detail: "", keys: [`check-why:${t.id}`] });
+  }
   return gaps;
 }
 

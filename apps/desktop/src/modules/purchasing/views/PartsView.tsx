@@ -512,7 +512,8 @@ export function PartsView({
     const edit = canEdit(i);
     const planning = i.status === "PLANNED" || i.status === "READY";
     // a ticked row is tinted across, over each cell's own background
-    const hl = `${HOVER} ${selected.has(i.id) ? "shadow-[inset_0_0_0_9999px_rgb(var(--asu-gold)/0.08)]" : ""}`;
+    // (both tints are inset shadows, so a ticked row keeps gold on hover rather than falling back to grey)
+    const hl = selected.has(i.id) ? "shadow-[inset_0_0_0_9999px_rgb(var(--asu-gold)/0.08)] group-hover:shadow-[inset_0_0_0_9999px_rgb(var(--asu-gold)/0.14)]" : HOVER;
     return (
       <tr key={i.id} data-id={i.id} className={`group ${i.status === "CANCELLED" || i.status === "HAVE" ? "opacity-55" : ""}`}>
         <td className={`${STICK.check} z-[1] ${ROW} bg-helios-panel ${hl} text-center`}>

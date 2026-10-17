@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canWaiveAll, gapCounts, looseEnds, waivableKeys } from "../looseEnds";
-import type { Evidence } from "../discrepancies";
+import { findDiscrepancies, type Evidence } from "../discrepancies";
 import type { Txn } from "../ledger";
 
 let nextId = 1;
@@ -63,10 +63,52 @@ describe("loose ends", () => {
   });
 
   it("asks why a check was written, and counts each gap", () => {
-    const check = txn({ amount_cents: -6000, kind: "check", category: "Reimbursement", txn_allocations: split(6000), description: "" });
+    const check = txn({ amount_cents: -6000, kind: "check", category: "Reimbursement", txn_allocations: split(6000), description: "", cleared_date: "2026-09-12" });
     const flagged = txn({ amount_cents: -999, kind: "charge", needs_review: true, review_note: "addressed to Jaxson", txn_allocations: split(999) });
     const ends = looseEnds([check, flagged], [ev({ kind: "invoice", txn_id: flagged.id, total_cents: 999 })], new Set());
     expect(ends.find((e) => e.txn.id === check.id)!.gaps.map((g) => g.gap)).toEqual(["reason"]);
     expect(gapCounts(ends)).toMatchObject({ reason: 1, review: 1, part: 1, receipt: 0 });
+  });
+
+  it("asks why a check was written only once it has cleared, like Discrepancies does", () => {
+    const pending = txn({ amount_cents: -6000, kind: "check", category: "Reimbursement", txn_allocations: split(6000) });
+    const cleared = txn({ amount_cents: -6000, kind: "check", category: "Reimbursement", txn_allocations: split(6000), cleared_date: "2026-09-12" });
+    const ends = looseEnds([pending, cleared], [], new Set());
+    expect(ends.map((e) => e.txn.id)).toEqual([cleared.id]);
+    expect(ends[0]!.gaps.map((g) => g.gap)).toEqual(["reason"]);
+  });
+
+  it("only keeps the keys that are still open, so waiving never rewrites an earlier resolution", () => {
+    const t = txn({ amount_cents: -4433, kind: "charge", txn_allocations: split(4433) });
+    const a = ev({ kind: "invoice", txn_id: t.id, total_cents: 4371 });
+    const b = ev({ kind: "email", txn_id: t.id, total_cents: 4400 });
+    const [end] = looseEnds([t], [a, b, ev({ kind: "request", txn_id: t.id, total_cents: 4433 })], new Set([`amount:${t.id}:${a.id}`]));
+    expect(end!.gaps[0]!.keys).toEqual([`amount:${t.id}:${b.id}`]);
+    expect(end!.gaps[0]!.detail).toBe("email says $44.00; charged $44.33");
+  });
+
+  it("wants a subteam on a refund too, since the budgets count it", () => {
+    const refund = txn({ amount_cents: 1200, kind: "credit", category: "Parts & materials" });
+    const ends = looseEnds([refund], [], new Set());
+    expect(ends.map((e) => e.gaps.map((g) => g.gap))).toEqual([["split"]]);
+    expect(looseEnds([txn({ ...refund, txn_allocations: split(1200) })], [], new Set())).toEqual([]);
+  });
+
+  it("uses exactly the keys the Discrepancies page uses", () => {
+    const flagged = txn({ amount_cents: -999, kind: "charge", needs_review: true, review_note: "addressed to Jaxson", txn_allocations: split(999) });
+    const quiet = txn({ amount_cents: -999, kind: "charge", needs_review: true, txn_allocations: split(999) });
+    const check = txn({ amount_cents: -6000, kind: "check", category: "Reimbursement", txn_allocations: split(6000), cleared_date: "2026-09-12" });
+    const off = txn({ amount_cents: -4433, kind: "charge", txn_allocations: split(4433) });
+    const evidence = [
+      ev({ kind: "invoice", txn_id: flagged.id, total_cents: 999 }), ev({ kind: "request", txn_id: flagged.id, total_cents: 999 }),
+      ev({ kind: "invoice", txn_id: quiet.id, total_cents: 999 }), ev({ kind: "request", txn_id: quiet.id, total_cents: 999 }),
+      ev({ kind: "invoice", txn_id: off.id, total_cents: 4371 }), ev({ kind: "request", txn_id: off.id, total_cents: 4400 }),
+    ];
+    const txns = [flagged, quiet, check, off];
+    const ours = new Set(looseEnds(txns, evidence, new Set()).flatMap(waivableKeys));
+    const theirs = new Set(findDiscrepancies(txns, evidence, [], []).map((d) => d.key));
+    expect(ours.size).toBeGreaterThan(0);
+    for (const k of ours) expect(theirs).toContain(k);
+    for (const k of theirs) if (/^(no-invoice|no-request|amount|amount-airtable|review|check-why):/.test(k)) expect(ours).toContain(k);
   });
 });

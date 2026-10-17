@@ -113,9 +113,11 @@ function Fixes({ end, evidence, ...p }: FinanceProps & { end: LooseEnd; evidence
   const [why, setWhy] = useState("");
   const run = (label: string, fn: () => Promise<unknown>) => void attempt(flash, reload, label, fn);
   const waive = (keys: string[], note: string) => run("Marked as fine.", async () => { for (const k of keys) await resolveDiscrepancy(client, k, note, me); });
-  // unmatched invoices and parts with the same vendor or amount
+  // unmatched invoices and parts with the same vendor or amount: exact amounts first, then nearest in date
+  const days = (e: Evidence) => (e.date ? Math.abs(new Date(e.date).getTime() - new Date(t.date).getTime()) : Infinity);
   const candidates = (kinds: (e: Evidence) => boolean) => evidence.filter((e) => e.txn_id === null && kinds(e) && claimsACharge(e)
-    && ((t.vendor && e.vendor === t.vendor) || e.total_cents === abs)).slice(0, 6);
+    && ((t.vendor && e.vendor === t.vendor) || e.total_cents === abs))
+    .sort((a, b) => Number(b.total_cents === abs) - Number(a.total_cents === abs) || days(a) - days(b)).slice(0, 6);
 
   const section = (g: GapInfo, body: React.ReactNode) => (
     <div key={g.gap} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
@@ -144,8 +146,10 @@ function Fixes({ end, evidence, ...p }: FinanceProps & { end: LooseEnd; evidence
               return section(g, (
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex w-96 max-w-full gap-1"><WherePicker pur={pur} value={where} onChange={(v) => setWhere({ project_id: v.project_id, subteam_id: v.subteam_id })} /></div>
-                  <Button disabled={!where.subteam_id} onClick={() => run("Split saved.", () => setAllocations(client, t.id, [{ ...where, amount_cents: abs }]))}>
-                    All {fmtCents(abs)} to this subteam</Button>
+                  {t.txn_allocations.length > 1
+                    ? <span className="text-xs text-helios-dim">Already split {t.txn_allocations.length} ways; fix the amounts in the ledger so it isn't lost.</span>
+                    : <Button disabled={!where.subteam_id} onClick={() => run("Split saved.", () => setAllocations(client, t.id, [{ ...where, amount_cents: abs }]))}>
+                      All {fmtCents(abs)} to this subteam</Button>}
                   <button className="text-xs text-asu-gold hover:underline" onClick={() => openTxn(t.id)}>Split between subteams in the ledger</button>
                 </div>
               ));

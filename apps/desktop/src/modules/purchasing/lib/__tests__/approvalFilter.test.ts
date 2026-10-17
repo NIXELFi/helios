@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NO_FILTER, filterApprovals, isFiltered } from "../approvalFilter";
+import { NO_FILTER, filterApprovals, isFiltered, sanitizeFilter } from "../approvalFilter";
 import type { Item } from "../api";
 
 const item = (p: Partial<Item> & Pick<Item, "code">): Item => ({
@@ -33,6 +33,24 @@ describe("approval filters", () => {
     expect(codes({ waiting: "14d" })).toEqual(["SDM-0003"]);
     expect(codes({ vote: "todo" })).toEqual(["SDM-0003", "SDM-0020"]);
     expect(codes({ vote: "voted" })).toEqual(["SDM-0012"]);
+  });
+
+  it("ignores what it doesn't know when reading a remembered filter", () => {
+    expect(sanitizeFilter(null)).toEqual(NO_FILTER);
+    expect(sanitizeFilter("abc")).toEqual(NO_FILTER);
+    expect(sanitizeFilter([1])).toEqual(NO_FILTER);
+    expect(sanitizeFilter({ q: 5, waiting: "7d", sort: "cheapest", vote: "maybe", priority: "URGENT", car: "ic", extra: true }))
+      .toEqual({ ...NO_FILTER, car: "ic" });
+    expect(sanitizeFilter({ q: " imu", waiting: "3d", sort: "biggest", vote: "todo", priority: "HIGH", vendor: "Mouser" }))
+      .toEqual({ ...NO_FILTER, q: " imu", waiting: "3d", sort: "biggest", vote: "todo", priority: "HIGH", vendor: "Mouser" });
+  });
+
+  it("handles a request with no vendor and no ready date", () => {
+    const bare = w(item({ code: "SDM-0030", vendor: null }), 0);
+    const codes = (f: Partial<typeof NO_FILTER>) => filterApprovals([adc, bare], { ...NO_FILTER, ...f }).map((x) => x.i.code);
+    expect(codes({ q: "sdm-0030" })).toEqual(["SDM-0030"]);
+    expect(codes({ vendor: "Mouser" })).toEqual(["SDM-0003"]);
+    expect(codes({ waiting: "1d" })).toEqual(["SDM-0003"]);
   });
 
   it("sorts by cost or age when asked", () => {

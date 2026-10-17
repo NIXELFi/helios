@@ -5,11 +5,11 @@ import { fmtCents } from "../lib/money";
 import type { PurchasingData } from "../lib/usePurchasing";
 import { Button, Card, Empty, PrioritySelect, SubteamChip } from "../components/ui";
 import { partPrice } from "../components/OrderDialog";
-import { NO_FILTER, WAITING_LABEL, filterApprovals, isFiltered, type ApprovalFilter } from "../lib/approvalFilter";
+import { NO_FILTER, WAITING_LABEL, filterApprovals, isFiltered, sanitizeFilter, type ApprovalFilter } from "../lib/approvalFilter";
 
 const FILTER_KEY = "helios:agora:approvals-filter";
 function loadFilter(): ApprovalFilter {
-  try { return { ...NO_FILTER, ...(JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}") as Partial<ApprovalFilter>) }; } catch { return NO_FILTER; }
+  try { return sanitizeFilter(JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}")); } catch { return NO_FILTER; }
 }
 
 /** The budget line covering an item's (car, subteam). */
@@ -177,13 +177,17 @@ function FilterBar({ all, shown, filter: f, setFilter, data }: {
   const vendors = uniq(all.map((i) => i.vendor ?? ""));
   const teamIds = new Set(all.flatMap((i) => i.item_allocations.map((a) => a.subteam_id)));
   const carIds = new Set(all.flatMap((i) => i.item_allocations.map((a) => a.project_id)));
-  const sel = (label: string, value: string, onChange: (v: string) => void, options: [string, string][], all = "All") => (
-    <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-helios-dim">{label}
-      <select className={`${box} font-normal normal-case tracking-normal text-helios-text ${value ? "border-asu-gold/70" : ""}`} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{all}</option>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </label>
-  );
+  // a remembered choice that nothing waiting matches any more stays visible (and clearable) rather than silently emptying the list
+  const sel = (label: string, value: string, onChange: (v: string) => void, options: [string, string][], all = "All", name?: string) => {
+    const opts = value && !options.some(([v]) => v === value) ? [...options, [value, `${name ?? value} (none waiting)`] as [string, string]] : options;
+    return (
+      <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-helios-dim">{label}
+        <select className={`${box} font-normal normal-case tracking-normal text-helios-text ${value ? "border-asu-gold/70" : ""}`} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{all}</option>{opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </label>
+    );
+  };
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-helios-line bg-helios-panel p-3">
       <div className="flex flex-wrap items-end gap-3">
@@ -191,8 +195,10 @@ function FilterBar({ all, shown, filter: f, setFilter, data }: {
           <input className={`${box} font-normal normal-case tracking-normal text-helios-text`} placeholder="Part, vendor, part #, who asked, notes..."
             value={f.q} onChange={(e) => setFilter({ q: e.target.value })} />
         </label>
-        {carIds.size > 1 && sel("Car", f.car, (v) => setFilter({ car: v }), data.projects.filter((p) => carIds.has(p.id)).map((p) => [p.id, p.car_code]), "Both")}
-        {sel("Subteam", f.subteam, (v) => setFilter({ subteam: v }), data.subteams.filter((s) => teamIds.has(s.id)).map((s) => [s.id, s.name]))}
+        {(carIds.size > 1 || f.car) && sel("Car", f.car, (v) => setFilter({ car: v }), data.projects.filter((p) => carIds.has(p.id)).map((p) => [p.id, p.car_code]), "Both",
+          data.projects.find((p) => p.id === f.car)?.car_code)}
+        {sel("Subteam", f.subteam, (v) => setFilter({ subteam: v }), data.subteams.filter((s) => teamIds.has(s.id)).map((s) => [s.id, s.name]), "All",
+          data.subteams.find((s) => s.id === f.subteam)?.name)}
         {sel("Priority", f.priority, (v) => setFilter({ priority: v as ApprovalFilter["priority"] }), [["HIGH", "High"], ["Medium", "Medium"], ["Low", "Low"]], "Any")}
         {sel("Asked by", f.requester, (v) => setFilter({ requester: v }), requesters.map((r) => [r, r]), "Anyone")}
         {sel("Vendor", f.vendor, (v) => setFilter({ vendor: v }), vendors.map((v) => [v, v]), "Any")}

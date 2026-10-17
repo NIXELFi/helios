@@ -66,8 +66,12 @@ export async function insertTxn(c: SupabaseClient, fields: TxnFields): Promise<n
   const row = unwrap(await F(c).from("transactions").insert({ source: "manual", ...fields }).select("id").single()) as { id: number };
   return row.id;
 }
+/** A plain update that RLS filters out updates nothing and reports no error; say so instead of "saved". */
+function wrote(rows: unknown[] | null, what: string): void {
+  if (!rows?.length) throw new Error(`${what} wasn't saved: it may be gone, or you may only be able to view the books.`);
+}
 export async function updateTxn(c: SupabaseClient, id: number, fields: TxnFields): Promise<void> {
-  unwrap(await F(c).from("transactions").update(fields).eq("id", id));
+  wrote(unwrap(await F(c).from("transactions").update(fields).eq("id", id).select("id")), "The line");
 }
 export async function deleteTxn(c: SupabaseClient, id: number): Promise<void> {
   const rows = unwrap(await F(c).from("transactions").delete().eq("id", id).select("id")) as unknown[];
@@ -99,7 +103,7 @@ export async function reopenDiscrepancy(c: SupabaseClient, key: string): Promise
 }
 /** Attach an invoice/email to a statement line (null detaches; the matcher won't re-attach it). */
 export async function linkEvidence(c: SupabaseClient, evidenceId: number, txnId: number | null): Promise<void> {
-  unwrap(await F(c).from("evidence").update({ txn_id: txnId, match_method: txnId ? "manual" : "rejected", match_score: txnId ? 1 : 0 }).eq("id", evidenceId));
+  wrote(unwrap(await F(c).from("evidence").update({ txn_id: txnId, match_method: txnId ? "manual" : "rejected", match_score: txnId ? 1 : 0 }).eq("id", evidenceId).select("id")), "The invoice");
 }
 export async function linkItem(c: SupabaseClient, itemId: string, txnId: number | null): Promise<void> {
   unwrap(await F(c).rpc("link_item", { p_item: itemId, p_txn: txnId }));

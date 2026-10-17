@@ -28,9 +28,13 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Agora: **Update with Claude** (Finance, execs only). Save a snapshot of Agora with instructions for Claude built in, give it to Claude along with new order emails and invoices, and load the **agora-changes.json** it sends back. Every change (part shipped, invoice attached to a charge, charge split between subteams...) is shown as old value to new value with Claude's reason, and only the ones you tick are made. A changes file can't add or alter statement amounts, approve parts or delete anything.
+- Agora: **Update with Claude** (Finance, execs only). Save a snapshot of Agora with instructions for Claude built in, give it to Claude along with new order emails and invoices, and load the **agora-changes.json** it sends back. Every change (part shipped, invoice attached to a charge, charge split between subteams...) is shown as old value to new value with Claude's reason, and only the ones you tick are made. A changes file can't add or alter statement amounts or delete anything, and can't approve parts (the CFO's own override still applies when it marks a part ordered). The snapshot leaves out shipping addresses. Needs finance edit rights.
 - Agora: **Loose ends** (Finance, execs only). Every ledger line that isn't squared away, with what's missing on each (category, subteam, receipt, the part it paid for, an amount that differs, a flag) and a quick fix right on the line. A missing receipt or a small difference can be marked fine with a reason, which also resolves it on Discrepancies. The count shows in the sidebar.
-- Agora Approvals: filters. Search, and narrow the queue by car, subteam, priority, who asked, vendor, how long it's waited and whether you've voted; sort by waiting time or cost. Remembered on your computer.
+- Agora Approvals: filters. Search, and narrow the queue by car, subteam, priority, who asked, vendor, how long it's waited and whether you've voted; sort by waiting time or cost. Remembered on your computer; a remembered choice nothing matches any more stays visible so it can be cleared.
+
+### Fixed
+- Agora Loose ends: raises a flag or a check-with-no-reason under exactly the conditions Discrepancies does, so the two pages agree; marking something fine no longer rewrites a resolution made earlier on Discrepancies; refunds and card credits need a subteam too, since the budgets count them; a line already split between subteams can't be collapsed to one by accident; the best-matching invoice or part is offered first.
+- Agora Finance: editing a ledger line or attaching an invoice says so when nothing was saved (view-only role, or the line is gone) instead of reporting success.
 
 ### Changed
 - Abacus is easier on the eyes: roomier rows, quieter grid lines and priority colours, one toolbar for search, group, sort, columns and adding parts, and subteam tabs that show the subteams in use (the rest are under "more"). Empty date cells no longer show mm/dd/yyyy, ticked rows are highlighted across, and the parts count and total sit under the sheet. Sorting, filtering, views, cell ranges and the fill handle work as before.

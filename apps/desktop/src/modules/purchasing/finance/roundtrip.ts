@@ -8,8 +8,10 @@
 //
 // A changes file never adds money: ledger lines still only come from
 // statements (Upload files). It can't change a statement line's amount or
-// date, delete anything, or approve a part. The server's own rules apply to
-// every write, as if the exec had made it by hand.
+// date, or delete anything. It can't approve a part either, except that the
+// CFO's own override applies as usual: marking a part ordered approves it, as
+// it would by hand. The server's own rules apply to every write, as if the
+// exec had made it by hand. The snapshot leaves out shipping addresses.
 //
 // Pure: no Supabase or React (tests in __tests__/roundtrip.test.ts).
 
@@ -155,7 +157,7 @@ export function buildSnapshot(s: SnapshotInput) {
     })),
     invoices: s.evidence.filter((e) => e.kind === "invoice" || e.kind === "email").map((e) => compact({
       invoice: e.id, kind: e.kind, vendor: e.vendor, order_ref: e.order_ref, date: e.date, total: dollars(e.total_cents), items: e.items,
-      status: e.status, ship_to: e.ship_to, payment_hint: e.payment_hint, charge: e.txn_id, file: e.source_file,
+      status: e.status, payment_hint: e.payment_hint, charge: e.txn_id, file: e.source_file,
     })),
     reimbursements: s.reimbursements.map((r) => compact({
       reimbursement: r.id, person: r.person_name, amount: dollars(r.amount_cents), reason: r.reason, status: r.status,

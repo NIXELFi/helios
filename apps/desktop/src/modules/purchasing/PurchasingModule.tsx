@@ -75,6 +75,8 @@ export function AgoraModule() {
   const active = useModuleLive();
   const { data, loading, error, reload } = usePurchasing(client, active);
   const financeExec = can(data.caps, "finance.view");
+  // Update with Claude writes to the books, so it needs edit rights, not just view
+  const financeEdit = can(data.caps, "finance.edit");
   const fin = useFinance(client, active, financeExec);
   const [view, setView] = useState<View>(() => {
     try { return (localStorage.getItem(VIEW_KEY) as View) || "parts"; } catch { return "parts"; }
@@ -135,14 +137,15 @@ export function AgoraModule() {
     { id: "discrepancies", label: "Discrepancies", Icon: IconAlertTriangle },
     { id: "whatif", label: "What if?", Icon: IconCalculator },
     { id: "import", label: "Upload files", Icon: IconCloudUpload },
-    { id: "claude", label: "Update with Claude", Icon: IconSparkles },
+    ...(financeEdit ? [{ id: "claude" as const, label: "Update with Claude", Icon: IconSparkles }] : []),
     { id: "bring", label: "Bring in data", Icon: IconDatabaseImport },
     { id: "accounts", label: "Accounts", Icon: IconBuildingBank },
     { id: "execguide", label: "Exec guide", Icon: IconBook2 },
   ];
   // A finance page someone can't see (or a stale remembered one) falls back to the parts list.
   const isFinance = FINANCE_VIEWS.includes(view);
-  const shown: View = isFinance && !financeExec ? "parts" : !isFinance && !nav.find((n) => n.id === view)?.show ? "parts" : view;
+  const shown: View = isFinance && !financeExec ? "parts" : view === "claude" && !financeEdit ? "overview"
+    : !isFinance && !nav.find((n) => n.id === view)?.show ? "parts" : view;
   const label = [...nav, ...financeNav].find((n) => n.id === shown)?.label;
 
   const openTxn = useCallback((id: number) => { setTxnId(id); setView("ledger"); }, []);
