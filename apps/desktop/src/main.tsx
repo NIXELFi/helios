@@ -11,12 +11,16 @@ import "@fontsource/orbitron/900.css";
 import App from "./Shell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCapture } from "./lib/breadcrumbs";
+import { installExternalLinkHandler } from "./lib/external-links";
 import "./styles.css";
 
 // Start capturing diagnostic breadcrumbs (window errors, unhandled rejections,
 // console.error/warn) before anything renders, so a crash during boot is still
 // recorded for a bug report.
 installGlobalCapture();
+// External <a target="_blank"> links do nothing in the macOS webview; open them
+// in the system browser instead.
+installExternalLinkHandler();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

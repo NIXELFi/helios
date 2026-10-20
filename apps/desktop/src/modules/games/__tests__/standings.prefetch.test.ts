@@ -53,8 +53,8 @@ describe("standings prefetch", () => {
     const { client, from } = stubClient();
     prefetchBoards(client, token);
     await settle();
-    // 6 games × (all-time + weekly) + one subteams board per room.
-    expect(from).toHaveBeenCalledTimes(14);
+    // 7 games × (all-time + weekly) + one subteams board per room.
+    expect(from).toHaveBeenCalledTimes(16);
   });
 
   it("re-pulls only the named game's boards on a money bump", async () => {
