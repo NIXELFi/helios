@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-10-20
+
 ### Added
 - Agora: a **Finance team** role (org-wide) for the CFO's helpers: see and keep the books and record orders, without approvals or any other exec power. Grant it from Admin like any other role. The signup list already offered "Finance".
 - Games: **Tetris** in the Arcade, with next and hold previews, a ghost piece, and levels that speed up every 10 lines. Scores count toward the subteam standings like the other arcade games.
