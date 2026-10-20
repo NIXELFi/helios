@@ -22,3 +22,8 @@ select cron.schedule(
   '40 0 * * *',
   $$delete from cron.job_run_details where start_time < now() - interval '7 days'$$
 );
+
+-- Applied to hosted 2026-10-20 (Management API), followed out-of-band by
+--   vacuum full cron.job_run_details;
+-- (cannot run inside a transaction) which shrank it 120 MB -> 3.3 MB. Measured
+-- as an admin: admin_ops_overview 1.7 s warm / >8 s cold -> 0.3 s, 0 disk reads.

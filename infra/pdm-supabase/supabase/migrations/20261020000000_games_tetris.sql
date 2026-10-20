@@ -6,6 +6,7 @@
 -- games/games/tetris/logic.ts) scores line clears only — 100/300/500/800 x
 -- level, no drop points — so every legitimate score is a multiple of 100.
 --
+-- Applied to hosted 2026-10-20 via the Management API (version recorded).
 -- Hosted migration history is drifted: apply via the Management API query
 -- endpoint and record the version by hand. Do NOT db push.
 
