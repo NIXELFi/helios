@@ -36,6 +36,11 @@ interface TrackedMeta {
  * `Record<ModuleId, ...>`, so the compiler will not let it be incomplete;
  * deriving from it means the drift cannot happen again.
  */
+/** Minimum spacing between our presence tracks (Realtime rate-limits them per client). */
+export const MIN_TRACK_GAP_MS = 2_000;
+/** How long our own entry may be missing after a track before we re-announce. */
+export const SELF_HEAL_AFTER_MS = 10_000;
+
 const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set(Object.keys(MODULE_ICON) as ModuleId[]);
 
 /** Coerce an off-the-wire module string to a known ModuleId (a newer/renamed
@@ -116,6 +121,8 @@ export function useHeliosPresence(input: {
   metaRef.current = { name, subteam, module };
 
   const channelRef = useRef<any>(null);
+  /** The live channel's rate-gated track, null when not subscribed. */
+  const announceRef = useRef<(() => void) | null>(null);
   // True only between a successful SUBSCRIBED and teardown — gates re-tracks so
   // we never push to a channel that isn't joined (or is mid-teardown).
   const subscribedRef = useRef(false);
@@ -140,16 +147,47 @@ export function useHeliosPresence(input: {
     channelRef.current = channel;
     subscribedRef.current = false;
 
+    // Every track() is a presence message, and Realtime rate-limits them per
+    // client (ClientPresenceRateLimitReached). A rate-limited client drops out
+    // of everyone's roster, so all tracks go through this gate: at most one per
+    // MIN_TRACK_GAP_MS, one in flight at a time, later requests coalesced into a
+    // single trailing track that carries the newest module.
+    let lastTrack = 0;
+    let inFlight = false;
+    let trailing: ReturnType<typeof setTimeout> | undefined;
     const announce = () => {
-      void channel.track({
-        user_id: userId,
-        name: metaRef.current.name,
-        subteam: metaRef.current.subteam,
-        module: metaRef.current.module,
-        online_at: Date.now(),
-      } satisfies TrackedMeta);
+      if (disposed || !subscribedRef.current) return;
+      const wait = lastTrack + MIN_TRACK_GAP_MS - Date.now();
+      if (inFlight || wait > 0) {
+        trailing ??= setTimeout(() => {
+          trailing = undefined;
+          announce();
+        }, Math.max(wait, 250));
+        return;
+      }
+      lastTrack = Date.now();
+      inFlight = true;
+      Promise.resolve(
+        channel.track({
+          user_id: userId,
+          name: metaRef.current.name,
+          subteam: metaRef.current.subteam,
+          module: metaRef.current.module,
+          online_at: Date.now(),
+        } satisfies TrackedMeta),
+      )
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
     };
+    announceRef.current = announce;
 
+    // "sync" fires once after the full state or any diff has been applied.
+    // Listen to it ONLY: "join"/"leave" also fire once per person while the
+    // initial state is applied -- before our own entry is in it -- so a
+    // self-heal on those re-tracked once per person already online (~70
+    // presence messages in a burst on every connect, then rate-limited for good).
     const sync = () => {
       if (disposed) return;
       try {
@@ -158,14 +196,16 @@ export function useHeliosPresence(input: {
         // Self-heal: if a re-sync lands and our own presence is missing — e.g.
         // a socket drop/reconnect dropped our one-shot track — re-announce so
         // we don't silently vanish from everyone else's roster until remount.
-        if (subscribedRef.current && state && !state[userId]) announce();
+        // Give a just-sent track time to echo back before calling it lost.
+        if (
+          subscribedRef.current && state && !state[userId] &&
+          !inFlight && Date.now() - lastTrack >= SELF_HEAL_AFTER_MS
+        ) announce();
       } catch {
         /* presenceState unavailable mid-teardown — ignore */
       }
     };
     channel.on("presence", { event: "sync" }, sync);
-    channel.on("presence", { event: "join" }, sync);
-    channel.on("presence", { event: "leave" }, sync);
 
     channel.subscribe((status: string) => {
       if (disposed) return;
@@ -183,6 +223,8 @@ export function useHeliosPresence(input: {
       disposed = true;
       subscribedRef.current = false;
       channelRef.current = null;
+      announceRef.current = null;
+      if (trailing !== undefined) clearTimeout(trailing);
       try {
         void channel.untrack();
       } catch {
@@ -196,16 +238,12 @@ export function useHeliosPresence(input: {
   // everyone sees what each person is currently looking at. Only fires once the
   // channel is actually subscribed — the initial announce is handled by the
   // SUBSCRIBED callback above, so this never double-tracks on mount.
+  // Goes through the same rate gate as every other track (metaRef already holds
+  // the new values), so clicking quickly through modules sends one trailing
+  // track, not one per click.
   useEffect(() => {
-    const channel = channelRef.current;
-    if (!channel || !userId || !subscribedRef.current) return;
-    void channel.track({
-      user_id: userId,
-      name,
-      subteam,
-      module,
-      online_at: Date.now(),
-    } satisfies TrackedMeta);
+    if (!userId || !subscribedRef.current) return;
+    announceRef.current?.();
   }, [module, name, subteam, userId]);
 
   return store;

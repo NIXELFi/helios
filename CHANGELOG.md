@@ -33,6 +33,7 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 - macOS: links in Agora (product pages, Buy, tracking numbers) open in your browser again. On Mac they used to do nothing. The same fix applies to links in Help, Amethyst notes and bug-report screenshots.
+- "On Helios" (sidebar) now shows everyone who's online, and updates promptly. Helios was sending a burst of presence updates every time it connected (one per person already online), so the server rate-limited it and most people dropped off everyone's list.
 - Org → Pulse no longer times out the first time it opens. The cron history it reads had grown unbounded; it is now trimmed to 7 days every night.
 
 ## [6.2.1] - 2026-10-17
