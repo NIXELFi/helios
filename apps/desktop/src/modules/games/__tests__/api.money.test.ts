@@ -210,7 +210,7 @@ describe("blackjack is a money game and nothing else", () => {
     // The ladder is switched off, not half-wired. If a game is ever put back
     // on it, that is a deliberate change and this test should be the thing
     // that makes someone say so out loud.
-    const everyGame = ["snake", "breakout", "flappy", "2048", "blackjack", "plinko"] as const;
+    const everyGame = ["snake", "breakout", "flappy", "2048", "tetris", "blackjack", "plinko"] as const;
     expect(everyGame.filter((g) => isRated(g))).toEqual([]);
   });
 

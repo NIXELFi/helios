@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdown } from "./markdown";
+import { openExternal } from "../lib/external-links";
 import {
   WIKI_INDEX, HOME_SLUG, loadPage, loadAllPages, getLoadedPage, type WikiPage,
 } from "./pages";
@@ -149,13 +150,14 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
     }
     const repo = anchor.getAttribute("data-repo-link");
     if (repo) {
-      // Repo-relative path. Open in the user's browser via target=_blank
+      // Repo-relative path. Open in the user's browser
       // (the GitHub-rendered version of this same wiki page would resolve it).
       e.preventDefault();
       const url = `https://github.com/NIXELFi/helios/blob/main/${repo.replace(/^\.\.\//, "").replace(/^docs\//, "docs/")}`;
-      window.open(url, "_blank", "noreferrer,noopener");
+      openExternal(url);
     }
-    // External http(s) anchors keep their default browser behavior.
+    // External http(s) anchors are opened in the system browser by
+    // installExternalLinkHandler (lib/external-links).
   }
 
   if (!open) return null;
