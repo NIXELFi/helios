@@ -17,7 +17,7 @@ import { useCheckIn } from "./useCheckIn";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { useRecordRefs } from "./useRecordRefs";
 import { useRecordProperties } from "./useRecordProperties";
-import { matchLocal, vaultRelativePath } from "./local-match";
+import { matchLocal, normalizePathForCompare, vaultRelativePath } from "./local-match";
 import { localDestPathStrict } from "./folder-paths";
 import { ledgerRecord } from "./sync-ledger";
 import { setReadonly, flipSwReadonly } from "./fs-readonly";
@@ -99,6 +99,10 @@ export interface BatchCtx {
   currentUserId: UserId | null;
   /** Lock-holder display names, for "checked out by Alice" reasons. */
   holderLabelById?: Map<UserId, string>;
+  /** Vault-relative paths the local scan saw open in SOLIDWORKS. When given,
+   *  only those files get the in-session read-only flip (each flip is a
+   *  helper process); omitted = flip every file. */
+  openInSw?: Set<string>;
 }
 
 const PAST: Record<BatchOp, string> = {
@@ -160,6 +164,18 @@ export function useVaultBatchOps(ctx: BatchCtx) {
     lockByFile,
     currentUserId: ctx.currentUserId,
   };
+
+  const openInSwNorm = useMemo(
+    () => (ctx.openInSw ? new Set(Array.from(ctx.openInSw, normalizePathForCompare)) : null),
+    [ctx.openInSw],
+  );
+  /** Tell an open SOLIDWORKS session about a read-only change. Skipped for
+   *  files the scan didn't see open, so a 300-file batch doesn't queue 300
+   *  helper launches. */
+  function flipIfOpen(file: VaultFile, path: string, readonly: boolean) {
+    if (openInSwNorm && !openInSwNorm.has(normalizePathForCompare(vaultRelativePath(file, ctx.folders)))) return;
+    flipSwReadonly(path, readonly);
+  }
 
   function holderName(lock: Lock | undefined): string {
     if (!lock) return "someone else";
@@ -341,7 +357,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         await setReadonly(dest, false);
         // Tell an open SOLIDWORKS doc too, BEFORE the abort check, so a kept
         // checkout is editable there as well.
-        flipSwReadonly(dest, false);
+        flipIfOpen(file, dest, false);
         // The bytes are right and the copy is writable: the checkout is done,
         // so an abort here KEEPS the lock (releasing would leave a writable
         // unlocked copy, which sync treats as unsaved edits forever).
@@ -392,7 +408,8 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           fileBytes.byteOffset + fileBytes.byteLength,
         ) as ArrayBuffer;
         const comment = opts.comment === undefined ? "bulk check-in" : opts.comment;
-        const r = await checkIn.run(id, ab, comment);
+        let why: string | null = null;
+        const r = await checkIn.run(id, ab, comment, (e) => { why = e.message; });
         // Aborted before the RPC landed: give the lock back and stop. If it DID
         // land, fall through: the read-only + ledger finalize must run even on
         // abort, or the checked-in copy stays writable and reads as an unsaved
@@ -412,7 +429,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
             skip(id, "Checked in, but the file was saved again during the upload. Your newer edit was left writable; check it out and in again to keep it.");
           } else {
             await setReadonly(local.absolutePath, true);
-            flipSwReadonly(local.absolutePath, true);
+            flipIfOpen(file, local.absolutePath, true);
             if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), r.sha256);
           }
           // New content: capture assembly references and the data card, like
@@ -429,7 +446,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           // theirs; they were mid-edit).
           if (acquiredHere) await releaseLock.run(id);
           c.fail++;
-          fail(id, checkIn.errorRef.current?.message ?? "Check-in failed");
+          fail(id, why ?? "Check-in failed");
         }
       } catch (e) {
         if (acquiredHere) await releaseLock.run(id);
@@ -503,7 +520,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         // Only freeze on a successful restore: a failed one leaves the edit
         // writable (held back), never a read-only-but-dirty copy.
         await setReadonly(dest, true);
-        flipSwReadonly(dest, true);
+        flipIfOpen(file, dest, true);
         if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), ver.sha256);
       }
     }

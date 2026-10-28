@@ -28,6 +28,8 @@ interface Props {
   currentUserId?: UserId | null;
   /** Lock-holder names, for "checked out by Alice" in the failure list. */
   holderLabelById?: Map<UserId, string>;
+  /** Paths the local scan saw open in SOLIDWORKS (limits helper launches). */
+  openInSw?: Set<string>;
   /** Whether the viewer may modify files in this vault. False hides Check Out,
    *  Cancel Checkout and Check In Changes (every row would fail at RLS); Get
    *  Latest and Delete (separately admin-gated) are unaffected. Default true. */
@@ -49,6 +51,7 @@ export function BulkActionBar({
   locks = [],
   currentUserId = null,
   holderLabelById,
+  openInSw,
   canEdit = true,
 }: Props) {
   // Per-vault admin (global admin rows count everywhere): matches what the
@@ -56,7 +59,7 @@ export function BulkActionBar({
   // never shows actions the DB would reject for a vault-scoped member.
   const isAdmin = useIsVaultAdmin(vaultId);
   const batch = useVaultBatchOps({
-    files, localFiles, versionsByFileId, vaultRoot, folders, vaultId, locks, currentUserId, holderLabelById,
+    files, localFiles, versionsByFileId, vaultRoot, folders, vaultId, locks, currentUserId, holderLabelById, openInSw,
   });
   const busy = batch.busy;
   const progress = batch.progress;

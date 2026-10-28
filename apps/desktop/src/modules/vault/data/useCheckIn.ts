@@ -82,6 +82,10 @@ export function useCheckIn() {
       file_id: FileId,
       bytes: ArrayBuffer,
       comment: string | null,
+      // Per-call failure callback. errorRef is shared by every in-flight call
+      // on this hook instance, so a caller running several check-ins at once
+      // (the batch hook) reads its own row's reason here instead.
+      onError?: (err: Error) => void,
     ): Promise<Version | null> => {
       setLoading(true);
       setError(null);
@@ -153,6 +157,7 @@ export function useCheckIn() {
         const err = e instanceof Error ? e : new Error(String(e));
         errorRef.current = err;
         setError(err);
+        onError?.(err);
         return null;
       } finally {
         setLoading(false);

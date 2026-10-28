@@ -47,7 +47,7 @@ vi.mock("../../data/sync-ledger", () => ({
 }));
 
 import { FolderBatchDialog } from "../FolderBatchDialog";
-import { setReadonly } from "../../data/fs-readonly";
+import { setReadonly, flipSwReadonly } from "../../data/fs-readonly";
 import type { BatchCtx } from "../../data/useVaultBatchOps";
 import type { Lock, Version } from "../../data/types";
 
@@ -173,6 +173,27 @@ describe("FolderBatchDialog: check out", () => {
     expect(within(failed).getByText("Rotors/front.sldprt")).toBeInTheDocument();
     expect(within(failed).getByText(/couldn't download the latest version/i)).toBeInTheDocument();
     expect(releaseLockRun).toHaveBeenCalledWith("front");
+  });
+
+  it("only flips the SOLIDWORKS session for files the scan saw open", async () => {
+    vi.mocked(flipSwReadonly).mockClear();
+    renderDialog("checkout", baseCtx({ openInSw: new Set(["Brakes/Rotors/hub.sldprt"]) }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out 4 files/i })); });
+    await waitFor(() => expect(screen.getByText(/checked out 4 of 4 files/i)).toBeInTheDocument());
+    expect(vi.mocked(flipSwReadonly).mock.calls).toEqual([["/vault/Brakes/Rotors/hub.sldprt", false]]);
+  });
+
+  it("reports the check-in failure reason for its own row", async () => {
+    checkInRun.mockImplementation(async (id: string, _b: unknown, _c: unknown, onError?: (e: Error) => void) => {
+      if (id === "caliper") { onError?.(new Error("upload: quota exceeded")); return null; }
+      return { id: `v-${id}`, file_id: id, sha256: "x", version_num: 1 };
+    });
+    renderDialog("checkin", baseCtx({
+      locks: [lock("caliper", ME)],
+      localFiles: [local("Brakes/caliper.sldprt", "edited", false)],
+    }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check in 1 file/i })); });
+    await waitFor(() => expect(screen.getByText(/upload: quota exceeded/)).toBeInTheDocument());
   });
 
   it("keeps writable local edits out of the batch", () => {

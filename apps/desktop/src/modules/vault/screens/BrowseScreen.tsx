@@ -1098,6 +1098,7 @@ export function BrowseScreen() {
                   currentUserId={user?.id ?? null}
                   holderLabelById={holderEmailById}
                   canEdit={canEdit}
+                  openInSw={openInSw}
                 />
                 <FileTable
                   files={files ?? []}
@@ -1496,6 +1497,7 @@ export function BrowseScreen() {
             locks: locks ?? [],
             currentUserId: user?.id ?? null,
             holderLabelById: holderEmailById,
+            openInSw,
           }}
           onClose={() => setFolderBatch(null)}
           onDone={(ids) => {
