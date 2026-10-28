@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.4.0] - 2026-10-28
+
 ### Added
 - **Vault — who did it and when.** Every version in History and the file panel now shows who checked it in and the exact date and time, plus a short relative time like "3h ago". Your own check-ins show as "You". Recent check-ins show the person and time on each row.
 - **Vault History opens on recent activity.** Before you pick a file, History lists the most recently changed files (up to 50) across the vault or in the selected folder. Each row shows who checked it in last and when, and you can filter to one person. Click a row to open that file's history.
