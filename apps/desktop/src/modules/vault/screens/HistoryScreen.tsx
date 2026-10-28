@@ -199,6 +199,9 @@ function ActivityFeed({
     const ids = new Set<string>();
     for (const f of withVersion) if (f.latest?.author_id) ids.add(f.latest.author_id);
     return [...ids]
+      // Unresolved authors would all read "Unknown member" — skip them rather
+      // than list indistinguishable duplicates.
+      .filter((id) => id === currentUserId || nameById.has(id))
       .map((id) => ({ id, label: whoLabel(id, nameById, currentUserId) }))
       .sort((a, b) => (a.label === "You" ? -1 : b.label === "You" ? 1 : a.label.localeCompare(b.label)));
   }, [withVersion, nameById, currentUserId]);

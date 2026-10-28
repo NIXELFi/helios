@@ -134,6 +134,16 @@ describe("BulkActionBar — progress", () => {
   });
 });
 
+describe("BulkActionBar — a throwing worker", () => {
+  it("never leaves the bar stuck busy", async () => {
+    acquireLockRun.mockRejectedValue(new Error("boom"));
+    render(<BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
+    await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
+    expect(screen.getByRole("button", { name: /check out/i })).not.toBeDisabled();
+  });
+});
+
 describe("BulkActionBar — bulk Get Latest keeps local edits", () => {
   it("skips a writable modified copy and downloads a read-only stale one", async () => {
     downloadRun.mockReset();

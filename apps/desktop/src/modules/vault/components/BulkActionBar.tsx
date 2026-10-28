@@ -11,6 +11,7 @@ import { localDestPathStrict } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { runPool } from "../lib/pool";
+import { toast } from "../data/toast";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
@@ -114,6 +115,18 @@ export function BulkActionBar({
   // run (selection change). Mirrored in state for the "Stopping…" label.
   const stoppingRef = useRef(false);
   const [stopping, setStopping] = useState(false);
+
+  /** runPool that never rejects: an unexpected worker throw is logged and
+   *  toasted, and the caller's normal finish (status, busy=false / endAborted)
+   *  still runs — otherwise one throw left every bulk button disabled. */
+  async function runPoolSafe(...args: Parameters<typeof runPool<FileId>>) {
+    try {
+      await runPool(...args);
+    } catch (e) {
+      console.error("[vault] bulk action worker threw", e);
+      if (mountedRef.current) toast("A bulk action hit an unexpected error — some files may not have been processed.", "error");
+    }
+  }
 
   /** Wrap a per-file worker so the progress bar tracks it. */
   function tracked(fn: (id: FileId) => Promise<void>) {
@@ -231,7 +244,7 @@ export function BulkActionBar({
     setStatus(null);
     setProgress({ verb: "Checking in", done: 0, total: selectedIds.length, current: null });
     let ok = 0, fail = 0, skipped = 0, lockedByOther = 0;
-    await runPool(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
+    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
       // Bail the moment the run is superseded (unmount / selection cleared) so
       // we stop reading files and calling check-in RPCs for rows the user is
       // no longer acting on.
@@ -326,7 +339,7 @@ export function BulkActionBar({
     setStatus(null);
     setProgress({ verb: "Downloading", done: 0, total: selectedIds.length, current: null });
     let ok = 0, fail = 0, skipped = 0, kept = 0;
-    await runPool(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
+    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
       // Bail before starting the next download once the run is superseded
       // (unmount / selection cleared) — and pass the signal through so an
       // in-flight download drops its terminal disk write too.
@@ -370,7 +383,7 @@ export function BulkActionBar({
     setStatus(null);
     setProgress({ verb: "Checking out", done: 0, total: selectedIds.length, current: null });
     let ok = 0, fail = 0, lockedByOther = 0, alreadyMine = 0;
-    await runPool(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
+    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
       // Bail the moment the run is superseded (unmount / selection cleared) so
       // we stop acquiring locks for rows the user is no longer acting on.
       if (signal.aborted) return;
@@ -409,12 +422,14 @@ export function BulkActionBar({
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
         }
         await setReadonly(dest, false);
+        // Tell an open SOLIDWORKS doc too (fire-and-forget) BEFORE the abort
+        // check, so a kept checkout is editable there as well.
+        flipSwReadonly(dest, false);
         // The bytes are correct and the copy is now writable — the checkout is
         // effectively complete, so an abort here KEEPS the lock (releasing it
         // would leave a writable unlocked copy, the one state the sync model
         // treats as unsaved-edits-forever). Just stop the loop.
         if (signal.aborted) return;
-        flipSwReadonly(dest, false);
       }
       ok++;
     }), signal);
@@ -438,7 +453,7 @@ export function BulkActionBar({
     setStatus(null);
     setProgress({ verb: "Undoing checkout", done: 0, total: selectedIds.length, current: null });
     let ok = 0, fail = 0, notMine = 0, discarded = 0, restoreFailed = 0;
-    await runPool(selectedIds, 1, tracked(async (id) => {
+    await runPoolSafe(selectedIds, 1, tracked(async (id) => {
       if (signal.aborted) return;
       // Only rows the user owns can be released — releasing someone else's lock
       // requires force-unlock, which is admin-only and out of the bulk path.
@@ -506,7 +521,7 @@ export function BulkActionBar({
     const nameById = new Map(files.map((f) => [f.id, f.name]));
     let ok = 0;
     const failed: string[] = [];
-    await runPool(selectedIds, 1, tracked(async (id) => {
+    await runPoolSafe(selectedIds, 1, tracked(async (id) => {
       // Bail the moment the run is superseded (unmount / selection cleared) so
       // we stop deleting files the user is no longer acting on. Surface partial
       // progress the same way as a normal partial failure (failed list stays so
@@ -524,9 +539,9 @@ export function BulkActionBar({
       // is destructive and the user must know what was removed).
       const wasStop = stoppingRef.current;
       endAborted(ok, "deleted");
-      if ((ok > 0 || failed.length > 0) && mountedRef.current && !wasStop) {
+      if ((ok > 0 || failed.length > 0) && mountedRef.current) {
         setStatus(
-          `Deleted ${ok}/${selectedIds.length} (interrupted)` +
+          `${wasStop ? "Stopped — deleted" : "Deleted"} ${ok}/${selectedIds.length}${wasStop ? "" : " (interrupted)"}` +
             (failed.length ? ` — failed: ${failed.join(", ")}` : ""),
         );
       }

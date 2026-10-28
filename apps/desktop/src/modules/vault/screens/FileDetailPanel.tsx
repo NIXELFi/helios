@@ -245,7 +245,9 @@ function FileDetailLoader({
               title={`Set a revision on v${data[0]?.version_num ?? ""}?`}
               body={`This stamps the next revision number on the latest version of ${fileName ?? "this file"}. Revisions mark a released state, and Helios has no way to remove one.`}
               confirmLabel="Set Revision"
-              confirmTone="default"
+              // "danger" focuses Cancel on open, so a stray Enter can't stamp a
+              // permanent revision.
+              confirmTone="danger"
               cancelLabel="Cancel"
               onConfirm={() => { void handleSetRevision(); }}
               onClose={() => setConfirmRevision(false)}
