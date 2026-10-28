@@ -205,6 +205,11 @@ function ActivityFeed({
       .map((id) => ({ id, label: whoLabel(id, nameById, currentUserId) }))
       .sort((a, b) => (a.label === "You" ? -1 : b.label === "You" ? 1 : a.label.localeCompare(b.label)));
   }, [withVersion, nameById, currentUserId]);
+  // A refetch can drop the filtered person from this scope's authors; fall
+  // back to Everyone rather than show an empty feed with a hidden filter.
+  useEffect(() => {
+    if (author && !authors.some((a) => a.id === author)) setAuthor("");
+  }, [author, authors]);
   const shown = useMemo(
     () => (author ? withVersion.filter((f) => f.latest?.author_id === author) : withVersion).slice(0, ACTIVITY_LIMIT),
     [withVersion, author],

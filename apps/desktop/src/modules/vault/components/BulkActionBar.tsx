@@ -527,7 +527,15 @@ export function BulkActionBar({
       // progress the same way as a normal partial failure (failed list stays so
       // the user can see which files were/weren't deleted).
       if (signal.aborted) return;
-      const r = await deleteFile.run(id);
+      // A throw counts as a named failure, so the status never reads as a
+      // clean "Deleted N/N" (which would also clear the selection and hide the
+      // file that wasn't deleted).
+      let r = false;
+      try {
+        r = !!(await deleteFile.run(id));
+      } catch (e) {
+        console.error("[vault] bulk delete threw", e);
+      }
       if (signal.aborted) return;
       if (r) ok++;
       else failed.push(nameById.get(id) ?? String(id));
