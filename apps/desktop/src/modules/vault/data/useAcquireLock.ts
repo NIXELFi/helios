@@ -19,7 +19,7 @@ export function useAcquireLock() {
   const run = useCallback(
     async (file_id: FileId): Promise<Lock | null> => {
       if (!user) {
-        const expired = new Error("Your session has expired — please sign in again.");
+        const expired = new Error("Your session has expired, please sign in again.");
         errorRef.current = expired;
         setError(expired);
         // Clear any result from a prior successful acquire so hook state
