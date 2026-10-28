@@ -39,6 +39,7 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 - **Bulk check-in could overwrite a teammate's newer work.** Selecting files and pressing Check In Changes would check in an old read-only copy if a teammate had checked in a newer version you hadn't synced yet. Only real local edits (writable copies) are checked in now.
+- **A file checked out on another computer isn't checked in from an old copy.** If this computer only has an older copy you never edited, folder check-in lists it under "your copy is an older version" and leaves it alone instead of replacing the latest.
 - **Check-out no longer overwrites unsaved local edits.** Bulk and folder check-out skip a writable copy that differs from the vault. Single-file check-out asks whether to keep your copy or replace it with the latest.
 - **Bulk check-in now records assembly references and data cards**, like a single check-in. Before, files checked in together lost both.
 - **Saving a file during check-in no longer loses the new edit.** If the file changes while it's uploading, it stays writable instead of being locked read-only and later overwritten by sync.
