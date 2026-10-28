@@ -11,6 +11,8 @@
 //! required for this to work.
 
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
@@ -50,30 +52,17 @@ pub fn set_path_readonly(path: String, readonly: bool) -> Result<(), String> {
 ///
 /// Best-effort + fire-and-forget on a background thread + hidden window: it
 /// no-ops harmlessly when SOLIDWORKS isn't running, the file isn't open, or the
-/// helper is absent. NEVER call this in a bulk loop (e.g. auto-sync) — only on
-/// an explicit single-file check-out / check-in / cancel.
+/// helper is absent. Each call is a thread + a process, so bulk callers should
+/// go through the serial queue in `flipSwReadonly` (fs-readonly.ts) rather than
+/// fire this per file.
 pub fn flip_sw_readonly(app: &AppHandle, path: &str, readonly: bool) {
-    let exe = match app
-        .path()
-        .resolve("swhelper/HeliosSwReadonly.exe", tauri::path::BaseDirectory::Resource)
-    {
-        Ok(p) if p.exists() => p,
-        _ => return, // helper not bundled / resolvable — nothing to do
-    };
+    let Some(exe) = resolve_sw_helper(app) else { return };
     let path = path.to_string();
-    let mode = if readonly { "ro" } else { "rw" };
+    let mode = helper_mode(readonly);
     std::thread::Builder::new()
         .name("helios-sw-readonly".into())
         .spawn(move || {
-            let mut cmd = std::process::Command::new(&exe);
-            cmd.arg(&path).arg(mode);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-            let _ = cmd.status();
+            run_helper(&exe, &path, mode, HELPER_TIMEOUT);
         })
         .ok();
 }
@@ -81,9 +70,72 @@ pub fn flip_sw_readonly(app: &AppHandle, path: &str, readonly: bool) {
 /// Frontend-callable: flip an open SOLIDWORKS document's read-only state. Used
 /// by the desktop vault UI (RowActions) on check-out / check-in / cancel so the
 /// behavior matches the add-in even when the add-in isn't there.
+///
+/// Unlike [`flip_sw_readonly`] this resolves only when the helper has EXITED
+/// (or been killed after [`HELPER_TIMEOUT`]), which is what lets the frontend
+/// queue (`flipSwReadonly` in fs-readonly.ts) keep at most one helper process
+/// in flight during a bulk check-out / check-in instead of one per file. The
+/// wait runs on the blocking pool, so it never stalls the command executor.
 #[tauri::command]
-pub fn sw_flip_readonly(app: AppHandle, path: String, readonly: bool) {
-    flip_sw_readonly(&app, &path, readonly);
+pub async fn sw_flip_readonly(app: AppHandle, path: String, readonly: bool) {
+    let Some(exe) = resolve_sw_helper(&app) else { return };
+    let mode = helper_mode(readonly);
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        run_helper(&exe, &path, mode, HELPER_TIMEOUT);
+    })
+    .await;
+}
+
+/// Longest the helper may run before it is killed. It attaches to a live
+/// SOLIDWORKS session over COM, which can hang while SOLIDWORKS is busy; a
+/// stuck process must not wedge the frontend's one-at-a-time queue.
+const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
+
+fn helper_mode(readonly: bool) -> &'static str {
+    if readonly { "ro" } else { "rw" }
+}
+
+/// The bundled helper, or None when it isn't shipped / resolvable.
+fn resolve_sw_helper(app: &AppHandle) -> Option<PathBuf> {
+    match app
+        .path()
+        .resolve("swhelper/HeliosSwReadonly.exe", tauri::path::BaseDirectory::Resource)
+    {
+        Ok(p) if p.exists() => Some(p),
+        _ => None,
+    }
+}
+
+/// Run `exe <path> <mode>` (hidden window on Windows) and wait for it, killing
+/// it if it outlives `timeout`. Returns true iff it exited by itself in time.
+fn run_helper(exe: &Path, path: &str, mode: &str, timeout: Duration) -> bool {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg(path).arg(mode);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -115,5 +167,44 @@ mod tests {
     fn errors_on_missing_path() {
         let missing = "/nonexistent/helios/definitely-not-here.bin".to_string();
         assert!(set_path_readonly(missing, true).is_err());
+    }
+
+    #[cfg(unix)]
+    mod helper {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn script(name: &str, body: &str) -> PathBuf {
+            let mut p = std::env::temp_dir();
+            p.push(format!("helios_swhelper_{}_{}.sh", name, std::process::id()));
+            fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        }
+
+        #[test]
+        fn run_helper_waits_for_the_process_and_passes_path_and_mode() {
+            let out = std::env::temp_dir().join(format!("helios_swhelper_out_{}", std::process::id()));
+            let exe = script("args", &format!("echo \"$1 $2\" > {}", out.display()));
+            assert!(run_helper(&exe, "/some/file.sldprt", "rw", Duration::from_secs(5)));
+            // The helper has exited by the time run_helper returns.
+            assert_eq!(fs::read_to_string(&out).unwrap().trim(), "/some/file.sldprt rw");
+            let _ = fs::remove_file(&exe);
+            let _ = fs::remove_file(&out);
+        }
+
+        #[test]
+        fn run_helper_kills_a_hung_process_at_the_timeout() {
+            let exe = script("hang", "sleep 30");
+            let started = Instant::now();
+            assert!(!run_helper(&exe, "/x", "ro", Duration::from_millis(200)));
+            assert!(started.elapsed() < Duration::from_secs(10));
+            let _ = fs::remove_file(&exe);
+        }
+
+        #[test]
+        fn run_helper_reports_a_missing_executable() {
+            assert!(!run_helper(Path::new("/nonexistent/helios/helper"), "/x", "ro", Duration::from_secs(1)));
+        }
     }
 }
