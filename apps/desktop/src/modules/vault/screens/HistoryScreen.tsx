@@ -105,6 +105,9 @@ export function HistoryScreen() {
       <div className="min-w-0 flex-1 overflow-auto">
         {!fileId ? (
           <ActivityFeed
+            // Remount per scope so a person filter from one folder can't stick
+            // (hidden, matching nothing) on another.
+            key={folderId ?? "all"}
             files={folderId ? files ?? [] : allFiles ?? []}
             scopeLabel={folderName ? `in ${folderName}` : "across the vault"}
             loading={filesLoading && !allFiles}

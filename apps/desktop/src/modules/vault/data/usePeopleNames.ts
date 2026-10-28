@@ -69,7 +69,7 @@ export function usePeopleNames(vaultUsers?: VaultUser[] | null): Map<UserId, str
   return useMemo(() => {
     const m = new Map<UserId, string>(directory ?? []);
     for (const u of Array.isArray(vaultUsers) ? vaultUsers : []) {
-      const label = u.display_name ?? u.email;
+      const label = u.display_name?.trim() || u.email;
       if (label) m.set(u.user_id, label);
     }
     return m;

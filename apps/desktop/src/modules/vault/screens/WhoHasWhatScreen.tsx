@@ -25,7 +25,7 @@ import type { Lock, VaultUser } from "../data/types";
  *  BrowseScreen email-first vs WhoHasWhat name-first inconsistency (HOLDER-LABEL).
  *  Standardized on display_name-first. */
 export function holderLabel(u: Pick<VaultUser, "display_name" | "email">): string | null {
-  return u.display_name ?? u.email ?? null;
+  return u.display_name?.trim() || u.email || null;
 }
 
 /** Resolve a lock-holder's display name from an ordered list of id→name maps.

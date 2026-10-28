@@ -39,7 +39,7 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 - **Vault notifications no longer run off the bottom of the screen.** The panel now opens upward from the bell and stays within the window.
-- **Vault Get Latest asks before overwriting changes you haven't checked in.** It used to replace them without warning.
+- **Vault Get Latest no longer overwrites changes you haven't checked in.** On a file row it asks first; a bulk Get Latest keeps those files and reports them as "kept — local changes". It used to replace them without warning.
 - **Failed Check Out, Check In and Get Latest now show an error toast.** Before, the only sign was a red "Retry" button with the reason in its tooltip.
 - **Escape now closes vault dialogs** (bulk Delete, Undo Checkout, Action failed, the new-folder prompt and the bulk download window). It no longer clears your tree selection instead.
 - **Vault wording is consistent:** "Checked out by <name>" everywhere (it was a mix of "Locked by", "Holder" and "checked out"). Names show the same way on every screen.

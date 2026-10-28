@@ -94,10 +94,6 @@ export function BulkActionBar({
   // of selected ids changes.
   const selectionKey = selectedIds.join(",");
   useEffect(() => {
-    // A superseded run returns without touching state, so un-stick the bar
-    // for the new selection.
-    setBusy(false);
-    setProgress(null);
     // Cancel any loop still chewing through a previous selection on unmount or
     // when the selection content changes (e.g. cleared), so it can't finish
     // reading/writing files or calling setState for rows the user no longer
@@ -107,6 +103,17 @@ export function BulkActionBar({
       abortRef.current = null;
     };
   }, [selectionKey]);
+
+  // Unmounted → an aborted run's drain must not touch state.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  // Set by the Stop button so the drain can tell a user stop from a superseded
+  // run (selection change). Mirrored in state for the "Stopping…" label.
+  const stoppingRef = useRef(false);
+  const [stopping, setStopping] = useState(false);
 
   /** Wrap a per-file worker so the progress bar tracks it. */
   function tracked(fn: (id: FileId) => Promise<void>) {
@@ -120,15 +127,27 @@ export function BulkActionBar({
     };
   }
 
-  /** User-initiated stop. Rows already finished stay done; the abort paths in
-   *  each loop roll back any lock taken for a row that was mid-flight. */
+  /** User-initiated stop: abort only. The bar stays busy ("Stopping…") until
+   *  the in-flight rows finish their own rollback/finalize — re-enabling the
+   *  buttons immediately let a new run race those rows (e.g. a check-in on a
+   *  file whose stopped check-out was still releasing its lock). */
   function stopRun() {
-    const done = progress?.done ?? 0;
+    stoppingRef.current = true;
+    setStopping(true);
     abortRef.current?.abort();
-    abortRef.current = null;
+  }
+
+  /** Called once an aborted run's pool has drained (every in-flight row done).
+   *  Clears the busy state, reports a user Stop, and refetches so rows that
+   *  landed mid-stop show up. */
+  function endAborted(ok: number, verbPast: string) {
+    if (!mountedRef.current) return;
+    const wasStop = stoppingRef.current;
+    stoppingRef.current = false;
+    setStopping(false);
     setBusy(false);
     setProgress(null);
-    setStatus(`Stopped after ${done}/${selectedIds.length}`);
+    if (wasStop) setStatus(`Stopped — ${verbPast} ${ok} of ${selectedIds.length}`);
     onDone();
   }
 
@@ -254,7 +273,11 @@ export function BulkActionBar({
         // compensate when we still hold it (r === null / abort before the RPC
         // landed is indistinguishable here — releasing a lock we no longer hold
         // is a harmless no-op, whereas keeping one we do is the bug).
-        if (signal.aborted) { if (acquiredHere && !r) await releaseLock.run(id); return; }
+        // Aborted before the RPC landed → give the lock back and stop. If it DID
+        // land, fall through: the read-only + ledger finalize below must run even
+        // on abort, or the checked-in copy stays writable and reads as an
+        // unsaved edit that sync holds back forever.
+        if (signal.aborted && !r) { if (acquiredHere) await releaseLock.run(id); return; }
         if (r) {
           ok++;
           // pdm_check_in released the lock server-side — we no longer hold it,
@@ -284,7 +307,7 @@ export function BulkActionBar({
         fail++;
       }
     }), signal);
-    if (signal.aborted) return;
+    if (signal.aborted) { endAborted(ok, "checked in"); return; }
     const parts: string[] = [`Checked in ${ok}/${selectedIds.length}`];
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
@@ -302,7 +325,7 @@ export function BulkActionBar({
     setBusy(true);
     setStatus(null);
     setProgress({ verb: "Downloading", done: 0, total: selectedIds.length, current: null });
-    let ok = 0, fail = 0, skipped = 0;
+    let ok = 0, fail = 0, skipped = 0, kept = 0;
     await runPool(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
       // Bail before starting the next download once the run is superseded
       // (unmount / selection cleared) — and pass the signal through so an
@@ -312,6 +335,11 @@ export function BulkActionBar({
       if (!file) { skipped++; return; }
       const ver = versionsByFileId.get(id)?.[0];
       if (!ver) { skipped++; return; }
+      // Never overwrite a WRITABLE copy that differs from the vault — it may be
+      // unsaved work (the row button asks; a bulk run just keeps it). A
+      // read-only differing copy is a clean, stale copy and is refreshed.
+      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
+      if (m.status === "modified" && m.local && m.local.readonly !== true) { kept++; return; }
       // Strict: an unresolvable folder id would collapse the destination to
       // the vault root (stranding an orphan / clobbering a same-named root
       // file). Skip the row; the folder refetch makes it work next attempt.
@@ -325,11 +353,12 @@ export function BulkActionBar({
         if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
       } else fail++;
     }), signal);
-    if (signal.aborted) return;
-    setStatus(
-      `Downloaded ${ok}/${selectedIds.length}` +
-        (fail ? ` (${fail} failed, ${skipped} skipped)` : skipped ? ` (${skipped} skipped)` : ""),
-    );
+    if (signal.aborted) { endAborted(ok, "downloaded"); return; }
+    const detail: string[] = [];
+    if (fail) detail.push(`${fail} failed`);
+    if (skipped) detail.push(`${skipped} skipped`);
+    if (kept) detail.push(`${kept} kept — local changes`);
+    setStatus(`Downloaded ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""));
     setBusy(false);
     setProgress(null);
     onDone();
@@ -389,7 +418,7 @@ export function BulkActionBar({
       }
       ok++;
     }), signal);
-    if (signal.aborted) return;
+    if (signal.aborted) { endAborted(ok, "checked out"); return; }
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
     if (lockedByOther) detail.push(`${lockedByOther} checked out by someone else`);
@@ -421,13 +450,14 @@ export function BulkActionBar({
       // the local copy). Mirrors single-file undo-checkout on a draft.
       if (file && !ver) {
         const del = await deleteFile.run(id);
-        if (signal.aborted) return;
         if (del) discarded++; else fail++;
         return;
       }
       const rel = await releaseLock.run(id);
-      if (signal.aborted) return;
       if (!rel) { fail++; return; }
+      // Released → this row is committed. Finish its local restore even if the
+      // run was aborted meanwhile (no signal on the download below): stopping
+      // here would leave the discarded edits writable with no lock.
       // The checkout IS undone the moment the lock is released — count it as a
       // success NOW. A later failure to materialize the restored bytes locally
       // is a separate, non-authoritative concern (the vault row is already
@@ -446,15 +476,14 @@ export function BulkActionBar({
         // local restore — the next sync pass materializes it properly.
         const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
         if (!dest) { restoreFailed++; return; }
-        const restored = await download.run(ver.sha256, dest, signal);
-        if (signal.aborted) return;
+        const restored = await download.run(ver.sha256, dest);
         if (!restored) { restoreFailed++; return; }
         await setReadonly(dest, true);
         flipSwReadonly(dest, true);
         if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
       }
     }), signal);
-    if (signal.aborted) return;
+    if (signal.aborted) { endAborted(ok, "undid"); return; }
     const detail: string[] = [];
     if (discarded) detail.push(`${discarded} draft${discarded === 1 ? "" : "s"} discarded`);
     if (fail) detail.push(`${fail} failed`);
@@ -493,13 +522,13 @@ export function BulkActionBar({
       // the other bulk ops (bulkCheckInChanges / bulkGetLatest use `return` so
       // they surface nothing; bulkDelete keeps partial status because a delete
       // is destructive and the user must know what was removed).
-      if (ok > 0 || failed.length > 0) {
+      const wasStop = stoppingRef.current;
+      endAborted(ok, "deleted");
+      if ((ok > 0 || failed.length > 0) && mountedRef.current && !wasStop) {
         setStatus(
           `Deleted ${ok}/${selectedIds.length} (interrupted)` +
             (failed.length ? ` — failed: ${failed.join(", ")}` : ""),
         );
-        setBusy(false);
-        setProgress(null);
       }
       return;
     }
@@ -620,7 +649,9 @@ export function BulkActionBar({
           className="flex basis-full items-center gap-2"
         >
           <span className="shrink-0 font-medium text-helios-text">
-            {progress.verb} {Math.min(progress.done + 1, progress.total)} of {progress.total}…
+            {stopping
+              ? "Stopping — letting the files in progress finish…"
+              : `${progress.verb} ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`}
           </span>
           <div className="h-1.5 min-w-[6rem] flex-1 overflow-hidden rounded-full bg-helios-line">
             <div
@@ -636,7 +667,8 @@ export function BulkActionBar({
           <button
             type="button"
             onClick={stopRun}
-            className="shrink-0 rounded border border-helios-line px-2 py-0.5 text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
+            disabled={stopping}
+            className="shrink-0 rounded border border-helios-line px-2 py-0.5 text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold disabled:opacity-50"
           >
             Stop
           </button>

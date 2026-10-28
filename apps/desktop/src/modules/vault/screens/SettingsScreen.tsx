@@ -184,8 +184,8 @@ export function SettingsScreen() {
               </div>
               {confirmClear && (
                 <ConfirmDialog
-                  title="Stop syncing to this folder?"
-                  body={`Helios forgets this sync folder on this ${DEVICE_NOUN}. Files already on disk are left alone, but syncing stops until you pick a folder again.`}
+                  title="Clear the Helios folder?"
+                  body={`Helios forgets this folder on this ${DEVICE_NOUN}, for every vault (they all sync inside it). Files already on disk are left alone, but syncing stops until you pick a folder again.`}
                   confirmLabel="Clear folder"
                   confirmTone="danger"
                   cancelLabel="Keep it"

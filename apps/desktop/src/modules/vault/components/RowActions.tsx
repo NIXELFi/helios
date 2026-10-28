@@ -587,6 +587,9 @@ export function GetLatestButton({
       {download.loading ? "…" : err ? "Retry" : idleLabel}
     </button>
     {confirming && (
+      // The dialog renders inside the file row; stop its clicks (backdrop,
+      // Cancel) bubbling into the row's select handler.
+      <span onClick={(e) => e.stopPropagation()}>
       <ConfirmDialog
         title={`Overwrite your changes to ${fileName}?`}
         body={`Your local copy of ${fileName} has changes that aren't checked in. Getting the latest version replaces it and those changes are lost. To keep them, check the file in instead.`}
@@ -596,6 +599,7 @@ export function GetLatestButton({
         onConfirm={() => { void doGet(); }}
         onClose={() => setConfirming(false)}
       />
+      </span>
     )}
     </>
   );

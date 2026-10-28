@@ -49,4 +49,12 @@ describe("usePeopleNames", () => {
     await waitFor(() => expect(c._dirRpc).toHaveBeenCalled());
     expect(result.current.get("u9")).toBe("z@sdm.com");
   });
+
+  it("falls back to email when display_name is an empty string", async () => {
+    const c = client(null, { message: "nope" });
+    const users = [{ user_id: "u7", display_name: "  ", email: "q@sdm.com" }] as any;
+    const { result } = renderHook(() => usePeopleNames(users), { wrapper: wrap(c) });
+    await waitFor(() => expect(c._dirRpc).toHaveBeenCalled());
+    expect(result.current.get("u7")).toBe("q@sdm.com");
+  });
 });

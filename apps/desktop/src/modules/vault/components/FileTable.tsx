@@ -661,7 +661,11 @@ Click to reveal in ${FILE_MANAGER}`}
                         vaultId={vaultId ?? null}
                         onDone={onActionComplete}
                         variant={downloadMode}
-                        localModified={localMatch?.status === "modified"}
+                        // Only a WRITABLE differing copy can hold edits: a read-only
+                        // copy that just lags a teammate's newer version is clean
+                        // (reconciliation only ever freezes synced copies), so
+                        // pulling the update shouldn't warn about lost changes.
+                        localModified={localMatch?.status === "modified" && localMatch.local?.readonly !== true}
                       />
                     );
                   })()}

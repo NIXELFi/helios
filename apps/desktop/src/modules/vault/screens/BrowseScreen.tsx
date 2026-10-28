@@ -254,7 +254,7 @@ export function BrowseScreen() {
   const holderEmailById = useMemo(() => {
     const m = new Map<UserId, string>(peopleNames);
     for (const u of vaultUsers ?? []) {
-      const label = u.display_name ?? u.email;
+      const label = u.display_name?.trim() || u.email;
       if (label) m.set(u.user_id, label);
     }
     return m;
