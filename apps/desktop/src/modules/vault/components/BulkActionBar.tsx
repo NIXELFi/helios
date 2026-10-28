@@ -11,6 +11,7 @@ import { localDestPathStrict } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { runPool } from "../lib/pool";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -288,7 +289,7 @@ export function BulkActionBar({
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
     if (skipped) detail.push(`${skipped} skipped`);
-    if (lockedByOther) detail.push(`${lockedByOther} locked by other user`);
+    if (lockedByOther) detail.push(`${lockedByOther} checked out by someone else`);
     if (detail.length) parts.push(`(${detail.join(", ")})`);
     setStatus(parts.join(" "));
     setBusy(false);
@@ -391,7 +392,7 @@ export function BulkActionBar({
     if (signal.aborted) return;
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
-    if (lockedByOther) detail.push(`${lockedByOther} locked by other user`);
+    if (lockedByOther) detail.push(`${lockedByOther} checked out by someone else`);
     if (alreadyMine) detail.push(`${alreadyMine} already yours`);
     setStatus(
       `Checked out ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""),
@@ -641,77 +642,29 @@ export function BulkActionBar({
           </button>
         </div>
       )}
+      {/* Shared ConfirmDialog: role="dialog" (so Browse's Escape-clears-
+          selection handler stands down), Escape to close, Cancel focused. */}
       {confirmDelete && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setConfirmDelete(false)}
-        >
-          <div
-            className="w-96 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold text-helios-text">
-              Delete {selectedIds.length} file{selectedIds.length === 1 ? "" : "s"}?
-            </h3>
-            <p className="text-xs text-helios-dim">
-              The selected files move to this vault&apos;s Deleted tab — versions and history are
-              kept, and you (or an admin) can restore them from there. Local working copies on
-              teammates&apos; machines are removed unless they hold unsaved changes.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(false)}
-                className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={bulkDelete}
-                className="rounded bg-red-700 px-3 py-1 text-xs text-white hover:bg-red-600"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={`Delete ${selectedIds.length} file${selectedIds.length === 1 ? "" : "s"}?`}
+          body="The selected files move to this vault's Deleted tab — versions and history are kept, and you (or an admin) can restore them from there. Local working copies on teammates' machines are removed unless they hold unsaved changes."
+          confirmLabel="Delete"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => { void bulkDelete(); }}
+          onClose={() => setConfirmDelete(false)}
+        />
       )}
       {confirmCancel && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setConfirmCancel(false)}
-        >
-          <div
-            className="w-96 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold text-helios-text">
-              Undo check-out on {eligibility.canCancel} file{eligibility.canCancel === 1 ? "" : "s"}?
-            </h3>
-            <p className="text-xs text-helios-dim">
-              This discards your local changes to the files you have checked out and restores the
-              latest vaulted version (read-only). Files you created but never checked in are
-              discarded entirely. This can&apos;t be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmCancel(false)}
-                className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                onClick={bulkCancel}
-                className="rounded bg-red-700 px-3 py-1 text-xs text-white hover:bg-red-600"
-              >
-                Undo check-out
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={`Undo check-out on ${eligibility.canCancel} file${eligibility.canCancel === 1 ? "" : "s"}?`}
+          body="This discards your local changes to the files you have checked out and restores the latest vaulted version (read-only). Files you created but never checked in are discarded entirely. This can't be undone."
+          confirmLabel="Undo check-out"
+          confirmTone="danger"
+          cancelLabel="Keep editing"
+          onConfirm={() => { void bulkCancel(); }}
+          onClose={() => setConfirmCancel(false)}
+        />
       )}
     </div>
   );

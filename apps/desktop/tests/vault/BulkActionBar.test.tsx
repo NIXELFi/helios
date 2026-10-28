@@ -316,7 +316,7 @@ describe("<BulkActionBar>", () => {
     expect(checkOutBtn).not.toBeDisabled();
     await act(async () => { fireEvent.click(checkOutBtn); });
     await waitFor(() => expect(screen.getByText(/checked out 1\/3/i)).toBeInTheDocument());
-    expect(screen.getByText(/1 locked by other user/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 checked out by someone else/i)).toBeInTheDocument();
     expect(screen.getByText(/1 already yours/i)).toBeInTheDocument();
   });
 

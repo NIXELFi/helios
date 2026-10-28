@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -101,6 +101,10 @@ describe("<FileDetailPanel>", () => {
     );
     const btn = await screen.findByRole("button", { name: /set revision/i });
     fireEvent.click(btn);
+    // Set Revision now asks first — nothing is stamped until confirmed.
+    expect(setRevRun).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /set revision/i }));
     await waitFor(() => expect(setRevRun).toHaveBeenCalledWith("file-1"));
   });
 

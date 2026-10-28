@@ -9,6 +9,8 @@ import { BomPanel } from "../components/BomPanel";
 import { WatchToggleButton } from "../components/WatchToggleButton";
 import { useSetRevision } from "../data/useSetRevision";
 import { useVaultBom } from "../data/useVaultBom";
+import { toast } from "../data/toast";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { usePeopleNames } from "../data/usePeopleNames";
 import type { FileId, FolderId, Folder, VaultFile, VaultId, Version } from "../data/types";
 
@@ -111,9 +113,15 @@ function FileDetailLoader({
   const setRevision = useSetRevision();
   // Load BOM graph only when the file is an assembly and the user opened the panel.
   const bomResult = useVaultBom(showBom && vaultId ? vaultId : undefined);
+  // Set Revision is permanent on the version, so it asks first (it used to
+  // fire on a single click with no preview and no feedback).
+  const [confirmRevision, setConfirmRevision] = useState(false);
   async function handleSetRevision() {
     const ok = await setRevision.run(fileId);
-    if (ok) refetch();
+    if (ok) {
+      toast(`Stamped a new revision on v${data?.[0]?.version_num ?? "latest"}`);
+      refetch();
+    }
   }
   // Only offer per-version actions when we know the file's name (needed to
   // compute the local destination / save-dialog default). "Restore" (SW-PDM
@@ -219,7 +227,7 @@ function FileDetailLoader({
         <div className="flex items-center justify-end border-b border-helios-line px-3 py-1.5">
           <button
             type="button"
-            onClick={() => { void handleSetRevision(); }}
+            onClick={() => setConfirmRevision(true)}
             disabled={setRevision.loading}
             title={setRevision.error ? `Set revision failed: ${setRevision.error.message}` : "Stamp the next revision number on the latest version"}
             className={
@@ -232,6 +240,17 @@ function FileDetailLoader({
           >
             {setRevision.loading ? "…" : setRevision.error ? "Retry Set Revision" : "Set Revision"}
           </button>
+          {confirmRevision && (
+            <ConfirmDialog
+              title={`Set a revision on v${data[0]?.version_num ?? ""}?`}
+              body={`This stamps the next revision number on the latest version of ${fileName ?? "this file"}. Revisions mark a released state, and Helios has no way to remove one.`}
+              confirmLabel="Set Revision"
+              confirmTone="default"
+              cancelLabel="Cancel"
+              onConfirm={() => { void handleSetRevision(); }}
+              onClose={() => setConfirmRevision(false)}
+            />
+          )}
         </div>
       )}
       {/* BOM button — only for .sldasm files with a vaultId available */}
@@ -266,7 +285,6 @@ function FileDetailLoader({
           <>
             <VersionList
               versions={data}
-              onSelect={() => {}}
               renderActions={renderActions}
               nameById={nameById}
               currentUserId={user?.id ?? null}

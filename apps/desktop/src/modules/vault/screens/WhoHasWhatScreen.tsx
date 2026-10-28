@@ -546,7 +546,7 @@ export function WhoHasWhatScreen() {
                 <thead className="text-left text-xs uppercase tracking-wider text-helios-dim">
                   <tr>
                     <th className="px-3 py-2 font-normal">File</th>
-                    <th className="px-3 py-2 font-normal">Holder</th>
+                    <th className="px-3 py-2 font-normal">Checked out by</th>
                     <th className="px-3 py-2 font-normal">Since</th>
                     {showActions && <th className="px-3 py-2 font-normal">Actions</th>}
                   </tr>

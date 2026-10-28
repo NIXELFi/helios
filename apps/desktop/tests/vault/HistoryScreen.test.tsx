@@ -173,7 +173,7 @@ describe("<HistoryScreen>", () => {
     await act(async () => { fireEvent.click(folderRow); });
     // The locked-by-other row names the holder by display name, not the
     // generic fallback.
-    expect(await screen.findByText(/Locked by Alice A/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Locked by other/i)).toBeNull();
+    expect(await screen.findByText(/Checked out by Alice A/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Checked out by someone else/i)).toBeNull();
   });
 });

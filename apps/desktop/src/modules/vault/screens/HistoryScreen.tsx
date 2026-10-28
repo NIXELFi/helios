@@ -138,7 +138,6 @@ export function HistoryScreen() {
             </div>
             <VersionList
               versions={versions}
-              onSelect={() => {}}
               nameById={nameById}
               currentUserId={user?.id ?? null}
               renderActions={

@@ -90,6 +90,9 @@ export function useVaultDropImport({
   const [dragActive, setDragActive] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<DropImportResult[]>([]);
+  // Files in the running import, so the strip can show "3 of 10" and a real
+  // (determinate) bar while `results` fills in.
+  const [total, setTotal] = useState(0);
 
   // Latest-value refs so the long-lived window event handlers (registered once
   // per `enabled` flip) always read current props without re-subscribing on
@@ -255,6 +258,7 @@ export function useVaultDropImport({
 
     setImporting(true);
     setResults([]);
+    setTotal(items.length);
 
     // try/finally: the loop below has six early `return`s (abort checks), and
     // every one of them used to skip the single setImporting(false) at the end,
@@ -353,7 +357,7 @@ export function useVaultDropImport({
     }
   }
 
-  return { hoverFolderId, dragActive, importing, results, clearResults };
+  return { hoverFolderId, dragActive, importing, results, total, clearResults };
 }
 
 /** basename of a slash- OR backslash-separated path. */

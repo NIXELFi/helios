@@ -239,6 +239,9 @@ export function VaultSearch({
                 key={h.file.id}
                 type="button"
                 role="option"
+                title={h.path}
+                // Keep the keyboard-highlighted hit visible as arrows move it.
+                ref={i === activeIdx ? (el) => el?.scrollIntoView?.({ block: "nearest" }) : undefined}
                 aria-selected={i === activeIdx}
                 onMouseEnter={() => setActiveIdx(i)}
                 onClick={() => pick(h)}

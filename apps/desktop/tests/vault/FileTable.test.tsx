@@ -141,7 +141,7 @@ describe("<FileTable>", () => {
     expect(onSelect).toHaveBeenCalledWith("f1");
   });
 
-  it("shows 'Locked by me' badge when current user holds the lock", () => {
+  it("shows 'Checked out by you' badge when current user holds the lock", () => {
     const locks = [{ id: "l1", file_id: "f1", user_id: "u", acquired_at: "x", released_at: null, force_released_by: null }];
     render(
       wrap(
@@ -149,7 +149,7 @@ describe("<FileTable>", () => {
         <FileTable files={files} selected={null} locks={locks as any} currentUserId="u" onSelect={() => {}} />,
       ),
     );
-    expect(screen.getByText(/locked by me/i)).toBeInTheDocument();
+    expect(screen.getByText(/checked out by you/i)).toBeInTheDocument();
   });
 
   it("Check Out button appears on a non-locked file when canEdit", async () => {

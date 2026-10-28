@@ -13,8 +13,8 @@ interface Props {
   selected: FileId | null;
   locks: Lock[];
   /** Resolves a lock holder's user id → display string (email or name) so a
-   *  locked-by-other row shows "Locked by <person>". Optional: callers that
-   *  don't supply it fall through to the generic "Locked by other" label. */
+   *  locked-by-other row shows "Checked out by <person>". Optional: callers that
+   *  don't supply it fall through to the generic "Checked out by someone else" label. */
   holderEmailById?: Map<UserId, string>;
   currentUserId: UserId;
   canEdit?: boolean;
@@ -143,7 +143,7 @@ function deriveRowState(
       state: "locked-other",
       stripe: "border-[#EF5350]",
       pill: PILL.redOther,
-      label: email ? `Locked by ${email}` : "Locked by other",
+      label: email ? `Checked out by ${email}` : "Checked out by someone else",
       glyph: "🔒",
     };
   }
@@ -153,7 +153,7 @@ function deriveRowState(
         state: "locked-me-modified",
         stripe: "border-[#FFB800]",
         pill: PILL.gold,
-        label: "Locked by me · Modified",
+        label: "Checked out by you · Modified",
         glyph: "🔒",
       };
     }
@@ -161,7 +161,7 @@ function deriveRowState(
       state: "locked-me",
       stripe: "border-[#EF5350]",
       pill: PILL.redMe,
-      label: "Locked by me",
+      label: "Checked out by you",
       glyph: "🔒",
     };
   }
@@ -326,7 +326,7 @@ export function FileTable({
 
   // Lock-holder name resolution is supplied by the parent (BrowseScreen wires
   // useVaultUsers). When absent we use an empty map, which falls through to the
-  // generic "Locked by other" label in deriveRowState.
+  // generic "Checked out by someone else" label in deriveRowState.
   const holderEmails = holderEmailById ?? new Map<UserId, string>();
 
   // Normalize the "open in SolidWorks" paths the same way matchLocal compares
@@ -405,14 +405,14 @@ export function FileTable({
                     >
                       <path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" />
                     </svg>
-                    <span className="block max-w-[14rem] xl:max-w-[22rem] truncate text-[13px]">{folder.name}</span>
+                    <span className="block max-w-[14rem] xl:max-w-[22rem] truncate text-[13px]" title={folder.name}>{folder.name}</span>
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-2.5 py-1.5 text-xs text-helios-dim">
                   Folder{count !== undefined ? ` · ${count} file${count === 1 ? "" : "s"}` : ""}
                 </td>
                 <td className="hidden px-2.5 py-1.5 font-mono-num text-xs text-helios-dim lg:table-cell">—</td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-xs text-helios-dim opacity-0 transition-opacity group-hover:opacity-100">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-xs text-helios-dim opacity-40 transition-opacity group-hover:opacity-100">
                   Open →
                 </td>
                 {onRowMenu && <td className="w-8 px-1 py-1.5" />}
@@ -532,7 +532,8 @@ export function FileTable({
                     <button
                       id={`file-row-name-${f.id}`}
                       type="button"
-                      title={`Reveal in ${FILE_MANAGER}`}
+                      title={`${f.name}
+Click to reveal in ${FILE_MANAGER}`}
                       className="block max-w-[14rem] xl:max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -542,7 +543,7 @@ export function FileTable({
                       {f.name}
                     </button>
                   ) : (
-                    <span id={`file-row-name-${f.id}`} className="block max-w-[14rem] xl:max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                    <span id={`file-row-name-${f.id}`} className="block max-w-[14rem] xl:max-w-[22rem] truncate font-mono-num text-[13px]" title={f.name}>{f.name}</span>
                   )}
                 </div>
               </td>
@@ -677,7 +678,7 @@ export function FileTable({
                       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       onRowMenu(f, r.left, r.bottom + 2);
                     }}
-                    className="rounded px-1.5 py-0.5 text-helios-dim opacity-0 transition-opacity hover:bg-helios-line hover:text-helios-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold group-hover:opacity-100"
+                    className="rounded px-1.5 py-0.5 text-helios-dim opacity-40 transition-opacity hover:bg-helios-line hover:text-helios-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold group-hover:opacity-100"
                   >
                     ⋯
                   </button>

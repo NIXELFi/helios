@@ -7,6 +7,7 @@ import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 import { DEVICE_NOUN } from "../../../lib/platform";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
 export function SettingsScreen() {
   const user = useUser();
@@ -21,6 +22,7 @@ export function SettingsScreen() {
   const { root, setRoot, clear } = useVaultFolder({ vaultName: activeVault?.name ?? null });
   const { mode, setMode } = useDownloadMode(activeVaultId);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
 
@@ -156,7 +158,7 @@ export function SettingsScreen() {
                   </div>
                   {vaults.map((v) => (
                     <div key={v.id} className="flex items-baseline gap-2 text-[11px]">
-                      <span className="w-16 shrink-0 truncate text-helios-text">{v.name}</span>
+                      <span className="w-16 shrink-0 truncate text-helios-text" title={v.name}>{v.name}</span>
                       <span className="truncate font-mono-num text-helios-dim">
                         {root.replace(/\/+$/, "")}/{sanitizeVaultName(v.name)}/
                       </span>
@@ -174,12 +176,23 @@ export function SettingsScreen() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => clear()}
+                  onClick={() => setConfirmClear(true)}
                   className="rounded border border-helios-line px-3 py-1 text-xs text-helios-dim hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
                 >
                   Clear
                 </button>
               </div>
+              {confirmClear && (
+                <ConfirmDialog
+                  title="Stop syncing to this folder?"
+                  body={`Helios forgets this sync folder on this ${DEVICE_NOUN}. Files already on disk are left alone, but syncing stops until you pick a folder again.`}
+                  confirmLabel="Clear folder"
+                  confirmTone="danger"
+                  cancelLabel="Keep it"
+                  onConfirm={() => clear()}
+                  onClose={() => setConfirmClear(false)}
+                />
+              )}
             </>
           ) : (
             <button

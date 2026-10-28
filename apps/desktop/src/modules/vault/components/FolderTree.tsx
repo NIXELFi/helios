@@ -553,7 +553,7 @@ export function FolderTree({
       >
         <span className="inline-block w-4 shrink-0" />
         <FileIcon name={file.name} />
-        <span className="truncate font-mono-num text-[12px]">{file.name}</span>
+        <span className="truncate font-mono-num text-[12px]" title={file.name}>{file.name}</span>
         <LockDot kind={lockKind} />
       </div>
     );
@@ -661,7 +661,7 @@ export function FolderTree({
           <span className={"shrink-0 " + (isSelected ? "text-asu-gold" : "text-helios-dim")}>
             <FolderIcon open={isExpanded} />
           </span>
-          <span className="truncate">{node.folder.name}</span>
+          <span className="truncate" title={node.folder.name}>{node.folder.name}</span>
           {folderFiles.length > 0 && (
             <span className="ml-auto shrink-0 rounded bg-helios-line px-1.5 py-0.5 text-[10px] font-mono-num text-helios-dim transition-colors group-hover:text-helios-text">
               {folderFiles.length}
