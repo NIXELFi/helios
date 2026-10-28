@@ -372,7 +372,7 @@ export function WhoHasWhatScreen() {
     const me = user?.id ?? "";
     return sourceGroups.some((g) => g.vaultId === activeVaultId && g.rows.some((r) => r.lock.user_id === me));
   }, [sourceGroups, activeVaultId, user]);
-  const { files: localFilesRaw, scanRoot } = useLocalFolderScan(
+  const { files: localFilesRaw, scanRoot, openInSw } = useLocalFolderScan(
     holdsCheckoutHere && vaultRoot ? vaultRoot : null,
     // One scan on open plus one when the window regains focus (back from
     // SOLIDWORKS): enough to classify, without a watcher on this screen.
@@ -389,6 +389,7 @@ export function WhoHasWhatScreen() {
     vaultId: activeVaultId ?? null,
     locks: locks ?? [],
     currentUserId: user?.id ?? null,
+    openInSw,
   });
   const batchReady = catalog != null && locks != null && localFiles != null;
 

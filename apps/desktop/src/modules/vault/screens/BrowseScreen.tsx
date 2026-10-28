@@ -515,8 +515,30 @@ export function BrowseScreen() {
   const [folderBatch, setFolderBatch] = useState<{
     op: FolderBatchOp;
     scope: React.ComponentProps<typeof FolderBatchDialog>["scope"];
-    files: VaultFile[];
+    /** Selection scope only: the picked file ids. */
+    ids: FileId[];
   } | null>(null);
+  // The dialog's files are derived LIVE from the catalog (not frozen at click
+  // time), so a rename, move or new check-in while the plan is open is seen.
+  const folderBatchFiles = useMemo(() => {
+    if (!folderBatch) return [];
+    const all = allFiles ?? [];
+    const sc = folderBatch.scope;
+    if (sc.kind === "vault") return all;
+    if (sc.kind === "selection") {
+      const want = new Set(folderBatch.ids);
+      return all.filter((f) => want.has(f.id));
+    }
+    const wanted = new Set<FolderId>([sc.folderId]);
+    const stack: FolderId[] = [sc.folderId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      for (const f of folders ?? []) {
+        if (f.parent_id === id && !wanted.has(f.id)) { wanted.add(f.id); stack.push(f.id); }
+      }
+    }
+    return all.filter((f) => f.folder_id !== null && wanted.has(f.folder_id));
+  }, [folderBatch, allFiles, folders]);
   const bulk = useBulkDownload({
     heliosRoot,
     vaultName: vault?.name ?? null,
@@ -1019,7 +1041,7 @@ export function BrowseScreen() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setFolderBatch({ op: "checkout", scope, files: filesToDownloadAll })}
+                      onClick={() => setFolderBatch({ op: "checkout", scope, ids: [] })}
                       title={`Check out ${tip}. Shows what's already checked out first.`}
                       className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
                     >
@@ -1027,7 +1049,7 @@ export function BrowseScreen() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFolderBatch({ op: "checkin", scope, files: filesToDownloadAll })}
+                      onClick={() => setFolderBatch({ op: "checkin", scope, ids: [] })}
                       title={`Check in ${tip}. Shows what will be checked in first.`}
                       className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
                     >
@@ -1258,12 +1280,12 @@ export function BrowseScreen() {
           actions.push({
             label: "Check out folder…",
             disabledReason: n === 0 ? "Folder has no files" : editReason,
-            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "folder", name: folder.name, folderId: folder.id }, files: targetFiles }),
+            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "folder", name: folder.name, folderId: folder.id }, ids: [] }),
           });
           actions.push({
             label: "Check in folder…",
             disabledReason: n === 0 ? "Folder has no files" : editReason,
-            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "folder", name: folder.name, folderId: folder.id }, files: targetFiles }),
+            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "folder", name: folder.name, folderId: folder.id }, ids: [] }),
           });
           actions.push({
             label: "New folder…",
@@ -1353,12 +1375,12 @@ export function BrowseScreen() {
           actions.push({
             label: `Check out ${n} file${n === 1 ? "" : "s"}…`,
             disabledReason: editReasonFiles,
-            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "selection" }, files: targetFiles }),
+            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "selection" }, ids: targetFiles.map((f) => f.id) }),
           });
           actions.push({
             label: `Check in ${n} file${n === 1 ? "" : "s"}…`,
             disabledReason: editReasonFiles,
-            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "selection" }, files: targetFiles }),
+            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "selection" }, ids: targetFiles.map((f) => f.id) }),
           });
           // Delete gating mirrors BulkActionBar: a file is deletable when the
           // current user holds its lock, or is an admin. Enabled only when EVERY
@@ -1486,7 +1508,8 @@ export function BrowseScreen() {
         <FolderBatchDialog
           op={folderBatch.op}
           scope={folderBatch.scope}
-          scopeFiles={folderBatch.files}
+          scopeFiles={folderBatchFiles}
+          locksReady={locks != null}
           ctx={{
             files: allFiles ?? [],
             localFiles,

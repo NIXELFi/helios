@@ -19,7 +19,7 @@ import { useRecordRefs } from "./useRecordRefs";
 import { useRecordProperties } from "./useRecordProperties";
 import { matchLocal, normalizePathForCompare, vaultRelativePath } from "./local-match";
 import { localDestPathStrict } from "./folder-paths";
-import { ledgerRecord } from "./sync-ledger";
+import { ledgerRecord, loadLedger } from "./sync-ledger";
 import { setReadonly, flipSwReadonly } from "./fs-readonly";
 import { activeLockMap, classifyCheckIn, classifyCheckOut, lockKind, type ClassifyCtx } from "./batch-classify";
 import { runPool } from "../lib/pool";
@@ -191,6 +191,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
   /** User Stop. Stays busy ("Stopping...") until in-flight rows finish their
    *  own rollback/finalize, so a new run can't race them. */
   function stop() {
+    if (!abortRef.current) return; // nothing running
     stoppingRef.current = true;
     setStopping(true);
     abortRef.current?.abort();
@@ -209,6 +210,17 @@ export function useVaultBatchOps(ctx: BatchCtx) {
 
     setBusy(true);
     setProgress({ verb: VERB[op], done: 0, total, current: null });
+    // This machine's sync ledger tells an untouched older copy from an edit
+    // (see batch-classify). Best-effort: without it the classifier is just
+    // more conservative.
+    let runCtx: ClassifyCtx = classifyCtx;
+    if (ctx.vaultId && (op === "checkout" || op === "checkin")) {
+      try {
+        runCtx = { ...classifyCtx, ledger: (await loadLedger(ctx.vaultId)).entries };
+      } catch {
+        // keep the conservative classification
+      }
+    }
     let ok = 0;
     // Op-specific counters for the one-line summary.
     const c = { fail: 0, skipped: 0, lockedByOther: 0, alreadyMine: 0, kept: 0, discarded: 0, restoreFailed: 0, notMine: 0 };
@@ -307,7 +319,14 @@ export function useVaultBatchOps(ctx: BatchCtx) {
       // An id missing from the catalog can't get its local copy made writable,
       // so taking the lock would report a checkout that isn't usable.
       if (!file) { c.fail++; fail(id, "This file isn't loaded yet. Try again in a moment."); return; }
-      const cls = classifyCheckOut(file, classifyCtx);
+      // Before the first local scan lands we can't tell an edit from a stale
+      // copy, and the download below would overwrite whatever is on disk.
+      if (ctx.vaultRoot && ctx.localFiles == null) {
+        c.fail++;
+        fail(id, "Still scanning your local vault folder. Try again in a moment.");
+        return;
+      }
+      const cls = classifyCheckOut(file, runCtx);
       // Skip rows that would fail / no-op at the RPC layer, so the summary
       // reads "1/3 (2 checked out by someone else)" instead of "0/3 (3 failed)".
       if (cls.kind === "mine") { c.alreadyMine++; skip(id, "Already checked out to you"); return; }
@@ -319,8 +338,10 @@ export function useVaultBatchOps(ctx: BatchCtx) {
       }
       const r = await acquireLock.run(id);
       // Aborting between acquire and use strands the lock (the abort scope
-      // fires on any selection change). Release before bailing.
-      if (signal.aborted) { await releaseLock.run(id); return; }
+      // fires on any selection change), so release before bailing. Only a lock
+      // THIS call took: a failed acquire may mean the user already holds it
+      // (stale lock list), and releasing that would drop their real checkout.
+      if (signal.aborted) { if (r) await releaseLock.run(id); return; }
       if (!r) {
         c.fail++;
         fail(id, "Couldn't take the checkout (someone may have just checked it out)");
@@ -355,13 +376,12 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), ver.sha256);
         }
         await setReadonly(dest, false);
-        // Tell an open SOLIDWORKS doc too, BEFORE the abort check, so a kept
-        // checkout is editable there as well.
+        // Tell an open SOLIDWORKS doc too, so a kept checkout is editable
+        // there as well. The bytes are right and the copy is writable: the
+        // checkout is done, so an abort after this point KEEPS the lock
+        // (releasing would leave a writable unlocked copy, which sync treats
+        // as unsaved edits forever) and the row counts as checked out.
         flipIfOpen(file, dest, false);
-        // The bytes are right and the copy is writable: the checkout is done,
-        // so an abort here KEEPS the lock (releasing would leave a writable
-        // unlocked copy, which sync treats as unsaved edits forever).
-        if (signal.aborted) return;
       }
       ok++;
     }
@@ -370,7 +390,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
       if (signal.aborted) return;
       const file = filesById.get(id);
       if (!file) { c.skipped++; skip(id, "Not in the file list anymore"); return; }
-      const cls = classifyCheckIn(file, classifyCtx, !!opts.includeUnchangedMine);
+      const cls = classifyCheckIn(file, runCtx, !!opts.includeUnchangedMine);
       if (cls.kind === "other") {
         c.lockedByOther++;
         skip(id, cls.hasLocalEdits
@@ -384,6 +404,11 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         return;
       }
       if (cls.kind === "mine-unchanged") { c.skipped++; skip(id, "No changes"); return; }
+      if (cls.kind === "mine-stale") {
+        c.skipped++;
+        skip(id, "Your local copy is an older version you haven't edited. Get the latest before checking it in.");
+        return;
+      }
       if (cls.kind === "nothing") { c.skipped++; skip(id, "Nothing to check in"); return; }
       const m = matchLocal(file, ctx.localFiles ?? null, ctx.versionsByFileId, ctx.folders);
       const local = m.local!;
@@ -425,7 +450,8 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           // read-only "stale" copy the next sync overwrites, so leave it
           // writable (sync holds back writable edits) and say so.
           const mtimeAfter = await mtimeOf(local.absolutePath);
-          if (mtimeBefore !== null && mtimeAfter !== null && mtimeAfter !== mtimeBefore) {
+          const savedAgain = mtimeBefore !== null && mtimeAfter !== null && mtimeAfter !== mtimeBefore;
+          if (savedAgain) {
             skip(id, "Checked in, but the file was saved again during the upload. Your newer edit was left writable; check it out and in again to keep it.");
           } else {
             await setReadonly(local.absolutePath, true);
@@ -434,7 +460,9 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           }
           // New content: capture assembly references and the data card, like
           // the single-file check-in. Best-effort, never fails the row.
-          if (r.id !== prevVersionId) {
+          // Skipped when the file was saved again: the disk no longer holds the
+          // bytes this version was made from.
+          if (r.id !== prevVersionId && !savedAgain) {
             await Promise.allSettled([
               recordRefs.run(r.id, local.absolutePath, local.basename ?? file.name, ctx.vaultId),
               recordProperties.run(r.id, local.absolutePath, local.basename ?? file.name, true),
@@ -537,7 +565,8 @@ export function useVaultBatchOps(ctx: BatchCtx) {
       }
       if (signal.aborted) return;
       if (r) ok++;
-      else fail(id, deleteFile.error?.message ?? "Delete failed");
+      // deleteFile.error is React state, stale inside this closure.
+      else fail(id, "Delete failed. You need the checkout or vault admin rights.");
     }
   }
 

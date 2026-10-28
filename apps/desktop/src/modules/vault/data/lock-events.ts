@@ -30,7 +30,10 @@ export function subscribeLockChanges(cb: Listener): () => void {
  *  after the LAST notification. */
 export const LOCK_NOTIFY_DEBOUNCE_MS = 250;
 /** Upper bound on how long a continuous burst can defer its trailing refetch. */
-export const LOCK_NOTIFY_MAX_WAIT_MS = 1000;
+// 3s rather than 1s: each trailing fire supersedes the previous in-flight lock
+// fetch, so a cap shorter than one full fetch on a big vault or slow link would
+// keep any refetch from publishing until the burst ends.
+export const LOCK_NOTIFY_MAX_WAIT_MS = 3000;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let pending = false;

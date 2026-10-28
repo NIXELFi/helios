@@ -90,6 +90,26 @@ beforeEach(() => {
   vi.mocked(ledgerRecord).mockClear();
 });
 
+describe("BulkActionBar: check-out before the first local scan", () => {
+  it("refuses rather than downloading over files it can't see yet", async () => {
+    render(
+      <BulkActionBar
+        selectedIds={["f1"]}
+        files={filesFor(["f1"])}
+        onClear={() => {}}
+        onDone={() => {}}
+        currentUserId="u1"
+        locks={[]}
+        vaultRoot="/vault"
+        localFiles={null}
+      />,
+    );
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checked out 0/1 (1 failed)"));
+    expect(acquireLockRun).not.toHaveBeenCalled();
+  });
+});
+
 describe("BulkActionBar — progress", () => {
   it("shows a progress bar while a bulk check-out runs, then clears it", async () => {
     const gate = deferred();
@@ -112,7 +132,7 @@ describe("BulkActionBar — progress", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
     await screen.findByRole("progressbar");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^stop$/i })); });
-    // Still busy while the in-flight acquires finish — no new run can start.
+    // Still busy while the in-flight acquires finish: no new run can start.
     expect(screen.getByText(/stopping/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /check out/i })).toBeDisabled();
     await act(async () => { gate.resolve(); });
@@ -138,7 +158,7 @@ describe("BulkActionBar — progress", () => {
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
     expect(vi.mocked(setReadonly)).toHaveBeenCalledWith("/v/a.sldprt", true);
     expect(vi.mocked(ledgerRecord)).toHaveBeenCalled();
-    // The lock went away server-side with the check-in — never released again.
+    // The lock went away server-side with the check-in, never released again.
     expect(releaseLockRun).not.toHaveBeenCalled();
     vi.mocked(matchLocal).mockReturnValue({ status: "vault-only", local: null } as any);
   });

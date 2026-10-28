@@ -186,7 +186,17 @@ mod tests {
         fn run_helper_waits_for_the_process_and_passes_path_and_mode() {
             let out = std::env::temp_dir().join(format!("helios_swhelper_out_{}", std::process::id()));
             let exe = script("args", &format!("echo \"$1 $2\" > {}", out.display()));
-            assert!(run_helper(&exe, "/some/file.sldprt", "rw", Duration::from_secs(5)));
+            // Exec'ing a just-written script can fail with ETXTBSY on Linux when
+            // another test thread forks while the write fd is briefly open, so
+            // allow a couple of retries before calling it a failure.
+            let ok = (0..3).any(|_| {
+                run_helper(&exe, "/some/file.sldprt", "rw", Duration::from_secs(5))
+                    || {
+                        std::thread::sleep(Duration::from_millis(50));
+                        false
+                    }
+            });
+            assert!(ok);
             // The helper has exited by the time run_helper returns.
             assert_eq!(fs::read_to_string(&out).unwrap().trim(), "/some/file.sldprt rw");
             let _ = fs::remove_file(&exe);

@@ -313,6 +313,11 @@ function LocalCopyChoiceModal({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
+  // The parent passes an inline arrow. Reading it through a ref keeps the
+  // effect below mount-only, so a parent re-render can't re-focus "Keep my
+  // copy" or re-capture the element focus is restored to on close.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
     const restoreTo = document.activeElement as HTMLElement | null;
@@ -321,7 +326,7 @@ function LocalCopyChoiceModal({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onCancel();
+        onCancelRef.current();
         return;
       }
       if (e.key === "Tab") {
@@ -343,7 +348,7 @@ function LocalCopyChoiceModal({
       window.removeEventListener("keydown", onKey);
       restoreTo?.focus?.();
     };
-  }, [onCancel]);
+  }, []);
 
   return (
     <div

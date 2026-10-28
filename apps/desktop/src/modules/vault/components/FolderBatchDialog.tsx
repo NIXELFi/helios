@@ -10,6 +10,7 @@ import {
 import { useVaultBatchOps, type BatchCtx, type BatchResult } from "../data/useVaultBatchOps";
 import { folderPath } from "../data/folder-paths";
 import { relativeWhen, absoluteWhen } from "../lib/when";
+import { loadLedger } from "../data/sync-ledger";
 import type { FileId, FolderId, VaultFile } from "../data/types";
 
 export type FolderBatchOp = "checkout" | "checkin";
@@ -24,6 +25,9 @@ interface Props {
   /** Vault-wide batch context. `files` should be the full catalog so names
    *  resolve for every row. */
   ctx: BatchCtx;
+  /** False while the lock list hasn't loaded (or failed to). The plan would
+   *  otherwise read "nobody holds anything" and the run would act on that. */
+  locksReady?: boolean;
   onClose: () => void;
   /** Called after a run finishes with the ids it touched, so the caller can
    *  refetch those rows. */
@@ -37,12 +41,27 @@ interface Props {
  * The user can proceed with the rest in one click. Then a live progress bar,
  * then a result list naming every file that didn't go through and why.
  */
-export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone }: Props) {
+export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = true, onClose, onDone }: Props) {
   const batch = useVaultBatchOps(ctx);
   const [phase, setPhase] = useState<"plan" | "running" | "done">("plan");
   const [result, setResult] = useState<BatchResult | null>(null);
   const [comment, setComment] = useState("");
   const primaryRef = useRef<HTMLButtonElement>(null);
+  const stopRef = useRef<HTMLButtonElement>(null);
+  // This machine's sync ledger, so the plan tells an untouched older copy from
+  // an edit exactly the way the run will. undefined = still loading.
+  const [ledger, setLedger] = useState<Record<string, { sha256: string }> | null | undefined>(
+    ctx.vaultId ? undefined : null,
+  );
+  useEffect(() => {
+    if (!ctx.vaultId) { setLedger(null); return; }
+    let live = true;
+    loadLedger(ctx.vaultId).then(
+      (l) => { if (live) setLedger(l.entries); },
+      () => { if (live) setLedger(null); },
+    );
+    return () => { live = false; };
+  }, [ctx.vaultId]);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   const lockByFile = useMemo(() => activeLockMap(ctx.locks), [ctx.locks]);
@@ -53,10 +72,12 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone 
     folders: ctx.folders,
     lockByFile,
     currentUserId: ctx.currentUserId,
-  }), [ctx.localFiles, ctx.versionsByFileId, ctx.folders, lockByFile, ctx.currentUserId]);
+    ledger: ledger ?? null,
+  }), [ctx.localFiles, ctx.versionsByFileId, ctx.folders, lockByFile, ctx.currentUserId, ledger]);
 
   // Live while the plan is on screen: a teammate's checkout that lands via
-  // realtime updates the lists. The run re-checks every row as it starts too.
+  // realtime updates the lists. Once running, the server still refuses any
+  // file someone else locked in the meantime, and the result names it.
   const outPlan = useMemo(
     () => (op === "checkout" ? planCheckOut(scopeFiles, classifyCtx) : null),
     [op, scopeFiles, classifyCtx],
@@ -75,6 +96,8 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone 
   const blockedReason =
     op === "checkin" && noLocalFolder ? "Pick a local vault folder first. Check-in uploads your local copies."
       : scanPending ? "Still scanning your local vault folder..."
+      : !locksReady ? "Loading who has what checked out..."
+      : ledger === undefined ? "Loading..."
       : null;
 
   const scopeRoot = scope.kind === "folder" ? folderPath(scope.folderId, ctx.folders) : "";
@@ -90,7 +113,7 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone 
   const busy = batch.busy;
   // Escape closes, except mid-run (use Stop). Focus the primary action.
   useEffect(() => {
-    (primaryRef.current ?? cancelRef.current)?.focus();
+    (phase === "running" ? stopRef.current : primaryRef.current ?? cancelRef.current)?.focus();
   }, [phase]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -199,6 +222,12 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone 
                     rows={inPlan.mineNoLocal.map((f) => ({ key: f.id, path: relPath(f) }))}
                   />
                   <Section
+                    tone="warn"
+                    title={`Checked out to you, but your copy is an older version (${inPlan.mineStale.length}), will be skipped`}
+                    hint="You haven't edited these here, and checking them in would replace the latest. Get the latest first (or check them in from the computer you edited them on)."
+                    rows={inPlan.mineStale.map((f) => ({ key: f.id, path: relPath(f) }))}
+                  />
+                  <Section
                     tone="info"
                     title={`Checked out by someone else (${inPlan.others.length}), not affected`}
                     rows={inPlan.others.map((r) => ({ key: r.file.id, path: relPath(r.file), note: `${holder(r)}, ${relativeWhen(r.lock.acquired_at)}`, noteTitle: absoluteWhen(r.lock.acquired_at) }))}
@@ -282,6 +311,7 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, onClose, onDone 
           )}
           {phase === "running" && (
             <button
+              ref={stopRef}
               type="button"
               onClick={batch.stop}
               disabled={batch.stopping}

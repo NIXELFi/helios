@@ -158,3 +158,38 @@ describe("planCheckOut / planCheckIn", () => {
     expect(plan.others).toEqual([]);
   });
 });
+
+describe("sync-ledger awareness", () => {
+  const withLedger = (c: ClassifyCtx, entries: Record<string, string>): ClassifyCtx => ({
+    ...c,
+    ledger: Object.fromEntries(Object.entries(entries).map(([k, sha]) => [k, { sha256: sha }])),
+  });
+
+  it("an untouched older copy I hold is stale, not a change to check in", () => {
+    // Checked out on another computer: this machine still has v1 (writable,
+    // because sync reconciles my checkouts writable) while the vault is at v2.
+    const c = withLedger(
+      ctx({ versions: [version("a", "v2sha")], locals: [local("a.sldprt", "v1sha", false)], locks: [lock("a", ME)] }),
+      { "a.sldprt": "v1sha" },
+    );
+    expect(classifyCheckIn(file("a"), c, true).kind).toBe("mine-stale");
+    expect(planCheckIn([file("a")], c).mineStale.map((f) => f.id)).toEqual(["a"]);
+  });
+
+  it("an untouched older writable copy is not an edit for check-in or check-out", () => {
+    const c = withLedger(
+      ctx({ versions: [version("a", "v2sha")], locals: [local("a.sldprt", "v1sha", false)] }),
+      { "a.sldprt": "v1sha" },
+    );
+    expect(classifyCheckIn(file("a"), c, true).kind).toBe("nothing");
+    expect(classifyCheckOut(file("a"), c).kind).toBe("eligible");
+  });
+
+  it("a copy that differs from the ledger is still a real edit", () => {
+    const c = withLedger(
+      ctx({ versions: [version("a", "v2sha")], locals: [local("a.sldprt", "edited", false)], locks: [lock("a", ME)] }),
+      { "a.sldprt": "v2sha" },
+    );
+    expect(classifyCheckIn(file("a"), c, true)).toEqual({ kind: "eligible", changed: true, needsLock: false });
+  });
+});

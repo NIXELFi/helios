@@ -3,10 +3,11 @@
 // One pure classifier is shared by the pre-flight plan the folder dialog shows
 // ("38 will be checked out, 2 are checked out by Alice") and by the run itself
 // (useVaultBatchOps), so what the dialog promises is exactly what the run does.
-// The run re-classifies each row at the moment it starts, so a lock taken by a
-// teammate after the dialog opened is still honoured.
+// The run classifies each row against the lock list and local scan as they
+// were when the run started; a lock a teammate takes after that is still
+// refused by the server (one active lock per file) and reported per row.
 
-import { matchLocal } from "./local-match";
+import { matchLocal, normalizePathForCompare, vaultRelativePath } from "./local-match";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 
@@ -17,6 +18,21 @@ export interface ClassifyCtx {
   /** Active (released_at === null) lock per file. */
   lockByFile: Map<FileId, Lock>;
   currentUserId: UserId | null;
+  /** This machine's sync ledger (normalized vault-relative path -> sha it
+   *  last downloaded or checked in there). Lets a writable copy that is
+   *  byte-identical to what this machine last materialized be recognised as
+   *  an older, untouched copy rather than an edit. Omitted = every writable
+   *  differing copy counts as an edit (the conservative reading). */
+  ledger?: Record<string, { sha256: string }> | null;
+}
+
+/** True iff the local copy is exactly what this machine last materialized for
+ *  the file (per the sync ledger): an untouched older copy, not an edit. Same
+ *  rule auto-sync uses to decide a writable copy is safe to refresh. */
+function isUntouchedCopy(file: VaultFile, localSha: string | undefined, ctx: ClassifyCtx): boolean {
+  if (!ctx.ledger || !localSha) return false;
+  const entry = ctx.ledger[normalizePathForCompare(vaultRelativePath(file, ctx.folders))];
+  return !!entry?.sha256 && entry.sha256.toLowerCase() === localSha.toLowerCase();
 }
 
 export function activeLockMap(locks: readonly Lock[]): Map<FileId, Lock> {
@@ -46,7 +62,10 @@ export function classifyCheckOut(file: VaultFile, ctx: ClassifyCtx): CheckOutCla
   if (k === "other") return { kind: "other", lock: ctx.lockByFile.get(file.id)! };
   const m = matchLocal(file, ctx.localFiles, ctx.versionsByFileId, ctx.folders);
   const hasVersion = !!ctx.versionsByFileId.get(file.id)?.[0];
-  if (hasVersion && m.status === "modified" && m.local && m.local.readonly !== true) {
+  if (
+    hasVersion && m.status === "modified" && m.local && m.local.readonly !== true &&
+    !isUntouchedCopy(file, m.local.sha256, ctx)
+  ) {
     return { kind: "local-edits" };
   }
   return { kind: "eligible" };
@@ -65,6 +84,10 @@ export type CheckInClass =
   /** Checked out to you, unchanged, and the caller didn't ask to release
    *  unchanged checkouts. */
   | { kind: "mine-unchanged" }
+  /** Checked out to you, but the local copy is an older version this machine
+   *  downloaded and nobody edited (e.g. you checked it out on another
+   *  computer). Checking it in would replace the latest with old bytes. */
+  | { kind: "mine-stale" }
   /** Nothing to do: not checked out and no local edits (synced, missing, or a
    *  read-only copy that's merely an older version). */
   | { kind: "nothing" };
@@ -76,16 +99,20 @@ export function classifyCheckIn(
 ): CheckInClass {
   const m = matchLocal(file, ctx.localFiles, ctx.versionsByFileId, ctx.folders);
   const modified = m.status === "modified" && !!m.local;
+  // A differing copy this machine materialized and nobody touched is an
+  // older version, not an edit (only possible when the file has a version).
+  const untouched = modified && !!ctx.versionsByFileId.get(file.id)?.[0] && isUntouchedCopy(file, m.local!.sha256, ctx);
   const k = lockKind(ctx, file.id);
   if (k === "other") {
     return {
       kind: "other",
       lock: ctx.lockByFile.get(file.id)!,
-      hasLocalEdits: modified && m.local!.readonly !== true,
+      hasLocalEdits: modified && m.local!.readonly !== true && !untouched,
     };
   }
   if (k === "me") {
     if (!m.local) return { kind: "mine-no-local" };
+    if (untouched) return { kind: "mine-stale" };
     if (modified) return { kind: "eligible", changed: true, needsLock: false };
     return includeUnchangedMine
       ? { kind: "eligible", changed: false, needsLock: false }
@@ -94,7 +121,7 @@ export function classifyCheckIn(
   // Not checked out. Only a WRITABLE differing copy is an edit. A read-only one
   // is a clean copy of an older version (a teammate checked in since we last
   // synced); checking it in would push stale bytes over their work.
-  if (modified && m.local!.readonly !== true) {
+  if (modified && m.local!.readonly !== true && !untouched) {
     return { kind: "eligible", changed: true, needsLock: true };
   }
   return { kind: "nothing" };
@@ -134,11 +161,13 @@ export interface CheckInPlan {
    *  user knows the folder isn't fully theirs. */
   others: HeldRow[];
   mineNoLocal: VaultFile[];
+  /** Checked out to you, but the local copy is an older untouched version. */
+  mineStale: VaultFile[];
 }
 
 export function planCheckIn(files: readonly VaultFile[], ctx: ClassifyCtx): CheckInPlan {
   const plan: CheckInPlan = {
-    eligible: [], changed: 0, unchanged: 0, blocked: [], others: [], mineNoLocal: [],
+    eligible: [], changed: 0, unchanged: 0, blocked: [], others: [], mineNoLocal: [], mineStale: [],
   };
   for (const f of files) {
     const c = classifyCheckIn(f, ctx, true);
@@ -150,6 +179,8 @@ export function planCheckIn(files: readonly VaultFile[], ctx: ClassifyCtx): Chec
       (c.hasLocalEdits ? plan.blocked : plan.others).push({ file: f, lock: c.lock });
     } else if (c.kind === "mine-no-local") {
       plan.mineNoLocal.push(f);
+    } else if (c.kind === "mine-stale") {
+      plan.mineStale.push(f);
     }
   }
   return plan;
