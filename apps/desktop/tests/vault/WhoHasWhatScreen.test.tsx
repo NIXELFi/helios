@@ -15,6 +15,12 @@ vi.mock("../../src/modules/org/data/useOrgData", () => ({
   usePeople: () => ({ data: [], loading: false, error: null }),
 }));
 
+// The screen reads the shared catalog (VaultHome's provider) for the check-in
+// actions; these tests only exercise the lock list, so an empty catalog will do.
+vi.mock("../../src/modules/vault/data/vault-files-context", () => ({
+  useVaultFiles: () => ({ data: [], loading: false, error: null }),
+}));
+
 // The optimistic lock overlay is a module singleton; a force-unlock in one test
 // leaves an entry that would hide the lock row in the next. Reset between tests.
 // localStorage holds the active-vault id (useActiveVault) — clear so a vault id

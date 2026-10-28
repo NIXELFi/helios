@@ -18,11 +18,8 @@ interface CheckoutRow {
 let checkoutsData: CheckoutRow[] = [];
 let foldersData: Folder[] = [];
 
-const checkInRun = vi.fn();
-const checkInErrorRef: { current: Error | null } = { current: null };
 const checkoutsRefetch = vi.fn();
 const locksRefetch = vi.fn();
-const readFile = vi.fn();
 
 function draftRow(over: Partial<CheckoutRow> = {}): CheckoutRow {
   return {
@@ -40,10 +37,27 @@ function draftRow(over: Partial<CheckoutRow> = {}): CheckoutRow {
   };
 }
 
-// ---- Tauri + IO shims ------------------------------------------------------
-vi.mock("@tauri-apps/plugin-fs", () => ({ readFile: (...a: unknown[]) => readFile(...a) }));
-vi.mock("../../data/fs-readonly", () => ({ setReadonly: vi.fn(), flipSwReadonly: vi.fn() }));
-vi.mock("../../data/sync-ledger", () => ({ ledgerRecord: vi.fn() }));
+// ---- Batch hook + its inputs ----------------------------------------------
+// Check-in runs through the shared useVaultBatchOps (its reads, uploads, refs
+// recording and saved-again guard are covered by the hook's own tests); here we
+// pin what THIS screen hands it and how it shows the outcome.
+const batchRun = vi.fn();
+let batchBusy = false;
+let batchCtx: any = null;
+let catalogData: any[] | null = [];
+let scanFiles: any[] | null = [];
+vi.mock("../../data/useVaultBatchOps", () => ({
+  useVaultBatchOps: (ctx: unknown) => {
+    batchCtx = ctx;
+    return { run: batchRun, stop: vi.fn(), abort: vi.fn(), busy: batchBusy, stopping: false, progress: null };
+  },
+}));
+vi.mock("../../data/vault-files-context", () => ({
+  useVaultFiles: () => ({ data: catalogData, loading: false, error: null }),
+}));
+vi.mock("../../data/useLocalFolderScan", () => ({
+  useLocalFolderScan: (root: string | null) => ({ files: scanFiles, scanRoot: root, refetch: vi.fn() }),
+}));
 
 // ---- Identity / role -------------------------------------------------------
 vi.mock("@helios/auth", () => ({ useUser: () => ({ id: "u1" }) }));
@@ -61,10 +75,6 @@ vi.mock("../../data/useCrossVaultFolders", () => ({
   useCrossVaultFolders: () => ({ data: foldersData, error: null }),
 }));
 
-// ---- Check-in primitive (errorRef is the sync-fresh error channel) ---------
-vi.mock("../../data/useCheckIn", () => ({
-  useCheckIn: () => ({ run: checkInRun, loading: false, error: null, result: null, errorRef: checkInErrorRef }),
-}));
 vi.mock("../../data/useForceUnlock", () => ({
   useForceUnlock: () => ({ run: vi.fn(), loading: false, error: null }),
 }));
@@ -84,16 +94,21 @@ vi.mock("../../../org/data/useOrgData", () => ({ usePeople: () => ({ data: [] })
 
 import { WhoHasWhatScreen } from "../WhoHasWhatScreen";
 
+function result(over: Record<string, unknown> = {}) {
+  return { op: "checkin", total: 1, ok: 1, aborted: false, stopped: false, status: "Checked in 1/1", outcomes: [], failedCount: 0, ...over };
+}
+
 beforeEach(() => {
   checkoutsData = [draftRow()];
   foldersData = [];
-  readFile.mockReset();
-  checkInRun.mockReset();
+  batchRun.mockReset();
+  batchRun.mockResolvedValue(result());
+  batchBusy = false;
+  batchCtx = null;
+  catalogData = [{ id: "file1", vault_id: "v1", folder_id: null, name: "part.SLDPRT", latest_version_id: null, latest: null }];
+  scanFiles = [];
   checkoutsRefetch.mockReset();
   locksRefetch.mockReset();
-  checkInErrorRef.current = null;
-  readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
-  checkInRun.mockResolvedValue({ id: "ver1", version_num: 1, sha256: "abc123" });
 });
 afterEach(cleanup);
 
@@ -103,53 +118,64 @@ describe("WhoHasWhatScreen — check in your own checkouts", () => {
     expect(screen.getByRole("button", { name: /check in all mine \(1\)/i })).toBeTruthy();
   });
 
-  it("bulk: reads the working copy and uploads exactly those bytes", async () => {
+  it("bulk: checks in through the batch hook, releasing unchanged checkouts too", async () => {
     render(<WhoHasWhatScreen />);
     fireEvent.click(screen.getByRole("button", { name: /check in all mine/i }));
-
-    await waitFor(() => expect(readFile).toHaveBeenCalledWith("C:/Vault/SDM27/part.SLDPRT"));
-    await waitFor(() => expect(checkInRun).toHaveBeenCalledTimes(1));
-    const [fileId, bytes, comment] = checkInRun.mock.calls[0]!;
-    expect(fileId).toBe("file1");
-    // The CENTRAL integrity claim: the on-disk bytes are what get checked in.
-    expect(bytes).toBeInstanceOf(ArrayBuffer);
-    expect(Array.from(new Uint8Array(bytes as ArrayBuffer))).toEqual([1, 2, 3]);
-    expect(comment).toMatch(/checked in/i);
+    await waitFor(() => expect(batchRun).toHaveBeenCalledTimes(1));
+    const [op, ids, opts] = batchRun.mock.calls[0]!;
+    expect(op).toBe("checkin");
+    expect(ids).toEqual(["file1"]);
+    expect(opts).toMatchObject({ includeUnchangedMine: true });
+    expect(String(opts.comment)).toMatch(/checked in/i);
     await waitFor(() => expect(checkoutsRefetch).toHaveBeenCalled());
   });
 
-  it("resolves a subfolder file's path through the folder tree", async () => {
+  it("hands the hook the vault context it needs (root, folders, catalog, versions, scan)", async () => {
     foldersData = [
       { id: "fld1", vault_id: "v1", parent_id: null, name: "Chassis", created_at: "2026-01-01T00:00:00Z" } as Folder,
     ];
+    catalogData = [{
+      id: "file1", vault_id: "v1", folder_id: "fld1", name: "part.SLDPRT", latest_version_id: "ver1",
+      latest: { id: "ver1", file_id: "file1", version_num: 2, sha256: "abc", size_bytes: 3, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" },
+    }];
     checkoutsData = [draftRow({ folder_id: "fld1" })];
+    scanFiles = [{ basename: "part.SLDPRT", relativePath: "Chassis/part.SLDPRT", absolutePath: "C:/Vault/SDM27/Chassis/part.SLDPRT", sha256: "abc", sizeBytes: 3 }];
     render(<WhoHasWhatScreen />);
-    fireEvent.click(screen.getByRole("button", { name: /check in all mine/i }));
-    await waitFor(() => expect(readFile).toHaveBeenCalledWith("C:/Vault/SDM27/Chassis/part.SLDPRT"));
+    expect(batchCtx.vaultRoot).toBe("C:/Vault/SDM27");
+    expect(batchCtx.vaultId).toBe("v1");
+    expect(batchCtx.currentUserId).toBe("u1");
+    expect(batchCtx.folders).toEqual(foldersData);
+    expect(batchCtx.files).toBe(catalogData);
+    expect(batchCtx.localFiles).toBe(scanFiles);
+    expect(batchCtx.versionsByFileId.get("file1")?.[0]?.sha256).toBe("abc");
   });
 
   it("per-row: a 'Check in' button checks in just that file", async () => {
     render(<WhoHasWhatScreen />);
     fireEvent.click(screen.getByRole("button", { name: /^check in$/i }));
-    await waitFor(() => expect(checkInRun).toHaveBeenCalledTimes(1));
-    expect(checkInRun.mock.calls[0]![0]).toBe("file1");
+    await waitFor(() => expect(batchRun).toHaveBeenCalledTimes(1));
+    expect(batchRun.mock.calls[0]![1]).toEqual(["file1"]);
+    expect(batchRun.mock.calls[0]![2]).toMatchObject({ includeUnchangedMine: true });
   });
 
-  it("surfaces the real check-in error (not a generic message)", async () => {
-    checkInRun.mockResolvedValue(null);
-    checkInErrorRef.current = new Error("editor role required to check in");
+  it("shows the hook's outcome summary and the first failure's reason", async () => {
+    batchRun.mockResolvedValue(result({
+      ok: 0, failedCount: 1, status: "Checked in 0/1 (1 failed)",
+      outcomes: [{ id: "file1", name: "part.SLDPRT", kind: "failed", reason: "editor role required to check in" }],
+    }));
     render(<WhoHasWhatScreen />);
     fireEvent.click(screen.getByRole("button", { name: /^check in$/i }));
-    await waitFor(() => expect(screen.getByText(/editor role required/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/checked in 0\/1 \(1 failed\)/i)).toBeTruthy());
+    expect(screen.getByText(/part\.SLDPRT: editor role required/i)).toBeTruthy();
+    // Nothing succeeded, so the lists are not refetched needlessly.
+    expect(checkoutsRefetch).not.toHaveBeenCalled();
   });
 
-  it("reports when a file has no local copy to check in", async () => {
-    readFile.mockReset();
-    readFile.mockRejectedValue(new Error("ENOENT"));
+  it("disables the check-in buttons until the local scan is ready", () => {
+    scanFiles = null;
     render(<WhoHasWhatScreen />);
-    fireEvent.click(screen.getByRole("button", { name: /check in all mine/i }));
-    await waitFor(() => expect(screen.getByText(/no local copy/i)).toBeTruthy());
-    expect(checkInRun).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: /check in all mine/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /^check in$/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("offers no check-in for the user's checkouts in a NON-active vault", () => {

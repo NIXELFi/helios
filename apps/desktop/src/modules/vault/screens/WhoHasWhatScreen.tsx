@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { readFile } from "@tauri-apps/plugin-fs";
 import { useUser } from "@helios/auth";
 import { useLocks } from "../data/useLocks";
 import { useForceUnlock } from "../data/useForceUnlock";
-import { useCheckIn } from "../data/useCheckIn";
+import { useVaultBatchOps } from "../data/useVaultBatchOps";
+import { useVaultFiles } from "../data/vault-files-context";
+import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useActiveVault } from "../data/useActiveVault";
@@ -13,11 +14,9 @@ import { useActiveCheckouts } from "../data/useActiveCheckouts";
 import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { usePeople } from "../../org/data/useOrgData";
-import { folderPath, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
-import { ledgerRecord } from "../data/sync-ledger";
-import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
+import { folderPath } from "../data/folder-paths";
 import { absoluteWhen } from "../lib/when";
-import type { Lock, VaultUser } from "../data/types";
+import type { FileId, Lock, VaultUser, Version } from "../data/types";
 
 /** Canonical lock-holder label: prefer the human display name, then the email,
  *  else null (caller falls back to a short id). Shared so every screen that
@@ -151,7 +150,6 @@ export function WhoHasWhatScreen() {
   // path means a freshly-uploaded draft whose bytes still match version 1 is just
   // published + released (no duplicate version), while a locally-edited file
   // lands a new version — one code path covers both.
-  const checkIn = useCheckIn();
   const activeVaultName = useMemo(
     () => vaults.find((v) => v.id === activeVaultId)?.name ?? null,
     [vaults, activeVaultId],
@@ -162,15 +160,10 @@ export function WhoHasWhatScreen() {
   // We can only check in when we know BOTH the active vault's local root and its
   // folder tree (to resolve each file's on-disk path).
   const canCheckInActive = vaultRoot != null && folders != null && activeVaultId != null;
-  // file_id currently being checked in (per-row spinner); null = none.
+  // file_id currently being checked in from its own row (per-row spinner); null
+  // = none. A bulk run sets `batch.busy` instead.
   const [checkingInId, setCheckingInId] = useState<string | null>(null);
-  const [checkingInAll, setCheckingInAll] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<string | null>(null);
-  // Aborts the in-flight bulk check-in loop on unmount so it stops reading files
-  // and calling check-in RPCs (and never setState's) after the user navigates
-  // away — same guard convention as BulkActionBar's long-running loops.
-  const checkinAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => checkinAbortRef.current?.abort(), []);
 
   const fileById = useMemo(() => {
     const m = new Map<string, LockFileRow>();
@@ -361,93 +354,82 @@ export function WhoHasWhatScreen() {
     );
   }, [canCheckInActive, sourceGroups, activeVaultId, user]);
 
-  /** Check in ONE of the current user's checkouts from its local working copy.
-   *  Re-reads the bytes from disk each call (so a locally-edited draft publishes
-   *  the EDITED content; an unchanged one hits the RPC's skip-unchanged path).
-   *  Returns the outcome + the real error so callers can surface/total it. */
-  async function checkInOne(
-    row: LockRow,
-  ): Promise<{ status: "ok" | "no-local" | "fail"; error?: Error | null }> {
-    const file = row.file;
-    if (!file || !vaultRoot || folders == null) return { status: "fail" };
-    // STRICT path resolution: if the folder snapshot can't resolve this file's
-    // folder, the non-strict helper collapses the path to the VAULT ROOT — and
-    // this function then reads an unrelated same-named root file's bytes and
-    // publishes them as a new version. "no-local" is the honest degradation.
-    const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
-    if (!dest) return { status: "no-local" };
-    let bytes: ArrayBuffer;
-    try {
-      const local = await readFile(dest);
-      bytes = local.buffer.slice(
-        local.byteOffset,
-        local.byteOffset + local.byteLength,
-      ) as ArrayBuffer;
-    } catch {
-      // No local copy at the expected path — nothing we can hash/upload.
-      return { status: "no-local" };
+  // Check-in runs through the shared batch hook (the same one Browse's bulk bar
+  // and the folder dialog use), so this screen gets the references + data-card
+  // recording, the saved-again guard before freezing a copy, and the per-file
+  // outcomes for free instead of a bare upload loop. It needs the active vault's
+  // catalog (file rows + latest versions) and a disk scan; both are only
+  // loaded while the user actually holds a checkout here.
+  const { data: catalog } = useVaultFiles();
+  const versionsByFileId = useMemo(() => {
+    const m = new Map<FileId, Version[]>();
+    for (const f of catalog ?? []) {
+      if (f.latest) m.set(f.id, [{ ...f.latest, properties: null }]);
     }
-    const ver = await checkIn.run(file.id, bytes, "Checked in from Checkouts");
-    // checkIn.error is stale within this closure (state lands next render), so read
-    // the synchronously-updated ref the hook exposes for the actual reason.
-    if (!ver) return { status: "fail", error: checkIn.errorRef.current };
-    // Published + released now — re-protect the local copy read-only, matching
-    // single-file / bulk check-in elsewhere so auto-sync doesn't read the
-    // writable-but-unlocked copy as an unsaved edit and hold it back.
-    await setReadonly(dest, true);
-    flipSwReadonly(dest, true);
-    if (activeVaultId) {
-      void ledgerRecord(activeVaultId, vaultRelPathFor(file.folder_id, file.name, folders), ver.sha256);
-    }
-    return { status: "ok" };
+    return m;
+  }, [catalog]);
+  const holdsCheckoutHere = useMemo(() => {
+    const me = user?.id ?? "";
+    return sourceGroups.some((g) => g.vaultId === activeVaultId && g.rows.some((r) => r.lock.user_id === me));
+  }, [sourceGroups, activeVaultId, user]);
+  const { files: localFilesRaw, scanRoot } = useLocalFolderScan(
+    holdsCheckoutHere && vaultRoot ? vaultRoot : null,
+    // One scan on open plus one when the window regains focus (back from
+    // SOLIDWORKS): enough to classify, without a watcher on this screen.
+    { intervalMs: 0, rescanOnFocus: true, watchFs: false },
+  );
+  // Never pair another root's snapshot with this vault's rows (see Browse).
+  const localFiles = scanRoot === vaultRoot ? localFilesRaw : null;
+  const batch = useVaultBatchOps({
+    files: catalog ?? [],
+    localFiles,
+    versionsByFileId,
+    vaultRoot,
+    folders: folders ?? [],
+    vaultId: activeVaultId ?? null,
+    locks: locks ?? [],
+    currentUserId: user?.id ?? null,
+  });
+  const batchReady = catalog != null && locks != null && localFiles != null;
+
+  /** Run a check-in of the given rows and show the hook's outcome summary,
+   *  plus the first failure's reason so "1 failed" is never a dead end. */
+  async function runCheckIn(rows: LockRow[]): Promise<boolean> {
+    const r = await batch.run("checkin", rows.map((row) => row.lock.file_id), {
+      comment: "Checked in from Checkouts",
+      // The point of this screen: also release checkouts whose content never
+      // changed (the server just releases them, no new version).
+      includeUnchangedMine: true,
+    });
+    if (!r) return false; // unmounted mid-run
+    if (r.aborted && !r.stopped) return false; // superseded
+    const first = r.outcomes[0];
+    const more = r.outcomes.length - 1;
+    const why = first
+      ? ` ${first.name}: ${first.reason}${more > 0 ? ` (and ${more} more)` : ""}`
+      : "";
+    setCheckinStatus(`${r.status}${why ? `.${why}` : ""}`);
+    return r.ok > 0;
   }
 
   async function checkInRow(row: LockRow) {
-    // Single-flight: never run a per-row check-in while another (per-row or bulk)
-    // is in progress — they share one useCheckIn instance and the spinner state.
-    if (checkingInId !== null || checkingInAll) return;
+    // Single-flight: never start a per-row check-in while another run is going.
+    if (checkingInId !== null || batch.busy) return;
     setCheckingInId(row.lock.file_id);
     setCheckinStatus(null);
-    const r = await checkInOne(row);
+    const anyOk = await runCheckIn([row]);
     setCheckingInId(null);
-    if (r.status === "ok") {
+    if (anyOk) {
       refetch();
       checkouts.refetch();
-    } else if (r.status === "no-local") {
-      setCheckinStatus(`Couldn't find a local copy of "${row.file?.name ?? "file"}" to check in.`);
-    } else {
-      setCheckinStatus(r.error?.message ?? "Check-in failed.");
     }
   }
 
   async function checkInAllMine() {
     const rows = myCheckinableRows;
-    if (rows.length === 0 || checkingInId !== null || checkingInAll) return;
-    // Fresh abort scope; bail between iterations once the screen unmounts.
-    checkinAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    checkinAbortRef.current = ctrl;
-    const signal = ctrl.signal;
-    setCheckingInAll(true);
+    if (rows.length === 0 || checkingInId !== null || batch.busy) return;
     setCheckinStatus(null);
-    let ok = 0, noLocal = 0, fail = 0;
-    let lastError: Error | null = null;
-    for (const row of rows) {
-      if (signal.aborted) return;
-      const r = await checkInOne(row);
-      if (signal.aborted) return;
-      if (r.status === "ok") ok++;
-      else if (r.status === "no-local") noLocal++;
-      else { fail++; lastError = r.error ?? lastError; }
-    }
-    const parts = [`Checked in ${ok}/${rows.length}`];
-    const detail: string[] = [];
-    if (fail) detail.push(`${fail} failed`);
-    if (noLocal) detail.push(`${noLocal} with no local copy`);
-    if (detail.length) parts.push(`(${detail.join(", ")})`);
-    if (fail && lastError) parts.push(`— ${lastError.message}`);
-    setCheckinStatus(parts.join(" "));
-    setCheckingInAll(false);
+    await runCheckIn(rows);
     refetch();
     checkouts.refetch();
   }
@@ -465,11 +447,11 @@ export function WhoHasWhatScreen() {
           <button
             type="button"
             onClick={() => { void checkInAllMine(); }}
-            disabled={checkingInAll || checkingInId !== null}
-            title={`Check in your ${myCheckinableRows.length} checked-out file${myCheckinableRows.length === 1 ? "" : "s"} in ${activeVaultName ?? "this vault"}`}
+            disabled={!batchReady || batch.busy || checkingInId !== null}
+            title={!batchReady ? "Scanning your local files…" : `Check in your ${myCheckinableRows.length} checked-out file${myCheckinableRows.length === 1 ? "" : "s"} in ${activeVaultName ?? "this vault"}`}
             className="rounded-full border border-[#66BB6A]/50 bg-[#66BB6A]/15 px-2.5 py-0.5 text-xs text-[#9CCC65] transition-colors hover:bg-[#66BB6A]/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
           >
-            {checkingInAll ? "Checking in…" : `Check in all mine (${myCheckinableRows.length})`}
+            {batch.busy ? "Checking in…" : `Check in all mine (${myCheckinableRows.length})`}
           </button>
         )}
         <button
@@ -600,7 +582,7 @@ export function WhoHasWhatScreen() {
                                   onClick={() => { void checkInRow({ lock, file, path, nameHidden, isDraft }); }}
                                   // Disable EVERY row's button while any check-in is in
                                   // flight (single useCheckIn instance + shared spinner).
-                                  disabled={checkingInId !== null || checkingInAll}
+                                  disabled={!batchReady || checkingInId !== null || batch.busy}
                                   title="Check this file in — publishes it and releases your lock"
                                   className="rounded bg-[#66BB6A] px-2 py-0.5 text-xs text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
                                 >
