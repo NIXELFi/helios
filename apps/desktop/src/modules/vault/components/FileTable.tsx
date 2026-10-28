@@ -632,6 +632,8 @@ Click to reveal in ${FILE_MANAGER}`}
                         folders={folders}
                         vaultId={vaultId ?? null}
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
+                        latestVersionId={f.latest_version_id ?? null}
+                        localFile={localMatch?.local}
                       />
                     </>
                   )}

@@ -22,6 +22,9 @@ vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({
     run: (sha: string, dest: string) => { dlCalls.push({ sha, dest }); return Promise.resolve(dlResult.ok); },
     loading: false, error: null,
+    // Real hook mirrors the failure here synchronously; `error` state is stale
+    // inside the awaiting closure, so callers must read the ref.
+    errorRef: { current: dlResult.ok ? null : new Error("disk full") },
   }),
 }));
 
@@ -36,8 +39,11 @@ function UserProbe() {
 // source of the bytes that get checked in; the dialog open() picks the file
 // when there's no localFile prop.
 const readFileMock = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
+// stat() feeds the saved-again mtime guard; default = a constant mtime.
+const statMock = vi.fn(async (_p: string) => ({ mtime: new Date(1000) }));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readFile: (...args: unknown[]) => readFileMock(...(args as [])),
+  stat: (p: string) => statMock(p),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue("/tmp/fake.sldprt"),
@@ -151,6 +157,139 @@ describe("RowActions real-vault read-only transitions", () => {
     fireEvent.click(screen.getByRole("button", { name: /check out/i }));
     await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
     expect(dlCalls).toHaveLength(0);
+  });
+
+  describe("check-out over a writable local copy that differs from the vault", () => {
+    const dirty = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "mine", sizeBytes: 4, readonly: false };
+    const renderDirty = (local: any = dirty) =>
+      render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" localFile={local} /><UserProbe /></>));
+
+    it("asks before touching it, and Cancel changes nothing", async () => {
+      renderDirty();
+      await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+      fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+      expect(await screen.findByRole("button", { name: /keep my copy/i })).toBeInTheDocument();
+      expect(dlCalls).toHaveLength(0);
+      expect(capturedRpc).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: /keep my copy/i })).not.toBeInTheDocument());
+      expect(dlCalls).toHaveLength(0);
+      expect(roCalls).toHaveLength(0);
+      // The in-flight guard is released so the user can try again.
+      expect(screen.getByRole("button", { name: /check out/i })).toBeEnabled();
+    });
+
+    it("Keep my copy takes the lock without downloading and leaves it writable", async () => {
+      renderDirty();
+      await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+      fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /keep my copy/i }));
+      await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
+      expect(dlCalls).toHaveLength(0);
+    });
+
+    it("Replace with latest downloads over it (the previous behavior)", async () => {
+      renderDirty();
+      await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+      fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /replace with latest/i }));
+      await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+      expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false });
+    });
+
+    it("does not ask for a read-only stale copy (just refreshed) or a writable copy equal to latest", async () => {
+      renderDirty({ ...dirty, readonly: true });
+      await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+      fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+      await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+      expect(screen.queryByRole("button", { name: /keep my copy/i })).not.toBeInTheDocument();
+    });
+
+    it("does not ask when the writable copy already matches the latest version", async () => {
+      renderDirty({ ...dirty, sha256: "SHA-X" });
+      await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+      fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+      await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
+      expect(screen.queryByRole("button", { name: /keep my copy/i })).not.toBeInTheDocument();
+      expect(dlCalls).toHaveLength(0);
+    });
+  });
+
+  describe("check-in saved-again guard", () => {
+    const local = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "old", sizeBytes: 4, readonly: false };
+
+    it("leaves the copy writable when it was saved again while the modal was open", async () => {
+      statMock.mockReset();
+      statMock.mockResolvedValueOnce({ mtime: new Date(1000) }).mockResolvedValue({ mtime: new Date(2000) });
+      render(wrap(mockClient(), <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} />));
+      fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+      await waitFor(() => expect(capturedRpc?.name).toBe("pdm_check_in"));
+      await waitFor(() => expect(statMock).toHaveBeenCalledTimes(2));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(roCalls).not.toContainEqual({ path: "/v/a.bin", readonly: true });
+      statMock.mockReset();
+      statMock.mockImplementation(async () => ({ mtime: new Date(1000) }));
+    });
+
+    it("freezes it when the mtime is unchanged", async () => {
+      statMock.mockImplementation(async () => ({ mtime: new Date(1000) }));
+      render(wrap(mockClient(), <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} />));
+      fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+      await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true }));
+    });
+
+    it("stands down (still freezes) when stat fails", async () => {
+      statMock.mockReset();
+      statMock.mockRejectedValue(new Error("no stat"));
+      render(wrap(mockClient(), <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} />));
+      fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+      await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true }));
+      statMock.mockReset();
+      statMock.mockImplementation(async () => ({ mtime: new Date(1000) }));
+    });
+  });
+
+  it("undo check-out skips the re-download when the local copy already is the latest", async () => {
+    const same = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "sha-x", sizeBytes: 4, readonly: false };
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" latestVersionId="v1" localFile={same as any} />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
+    await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true }));
+    expect(dlCalls).toHaveLength(0);
+  });
+
+  it("undo check-out still restores when the local copy differs", async () => {
+    const edited = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "mine", sizeBytes: 4, readonly: false };
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" latestVersionId="v1" localFile={edited as any} />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
+    await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+  });
+
+  it("undo check-out surfaces the download failure reason (read from the ref, not stale state) and keeps the edit writable", async () => {
+    dlResult.ok = false;
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" latestVersionId="v1" />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /retry/i }).getAttribute("title")).toMatch(/disk full/));
+    expect(roCalls).toHaveLength(0);
+  });
+
+  it("undo check-out keys 'draft' on latest_version_id, not the embedded latest sha", async () => {
+    // Published file (has a latest_version_id) whose embedded latest row is
+    // briefly null: must NOT offer the draft discard (it soft-deletes the file).
+    const { unmount } = render(wrap(mockClient(), <CancelButton fileId={"f1" as any} latestSha={null} latestVersionId="v1" />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(await screen.findByRole("button", { name: /discard & undo/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /discard draft/i })).toBeNull();
+    unmount();
+    // A genuine draft (no latest_version_id) still offers the discard.
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} latestSha="sha-x" latestVersionId={null} />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(await screen.findByRole("button", { name: /discard draft/i })).toBeTruthy();
   });
 
   it("check-in makes the file read-only after a successful check-in", async () => {

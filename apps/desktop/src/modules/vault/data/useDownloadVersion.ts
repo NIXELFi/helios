@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import { invoke } from "@tauri-apps/api/core";
 import { writeFile, mkdir, rename, remove } from "@tauri-apps/plugin-fs";
@@ -333,6 +333,10 @@ export function useDownloadVersion() {
   const client = useSupabaseClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  // Mirror of `error` updated synchronously inside run(), so a caller that
+  // awaits run() and gets false can read the failure reason in the SAME tick
+  // (the `error` state is stale inside the awaiting closure).
+  const errorRef = useRef<Error | null>(null);
 
   /**
    * Download the bytes for a sha256 + write them to destPath. Overwrites by
@@ -346,17 +350,20 @@ export function useDownloadVersion() {
     async (sha: string, destPath: string, signal?: AbortSignal): Promise<boolean> => {
       setLoading(true);
       setError(null);
+      errorRef.current = null;
       const result = await downloadVersionOnce(client, sha, destPath, { signal });
       if (result.ok) {
         setLoading(false);
         return true;
       }
-      setError(new Error(result.error));
+      const err = new Error(result.error);
+      errorRef.current = err;
+      setError(err);
       setLoading(false);
       return false;
     },
     [client],
   );
 
-  return { run, loading, error };
+  return { run, loading, error, errorRef };
 }

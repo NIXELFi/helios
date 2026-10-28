@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { readFile, stat } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
@@ -74,6 +74,18 @@ async function readArrayBuffer(path: string): Promise<ArrayBuffer> {
   ) as ArrayBuffer;
 }
 
+/** Modification time in ms, or null when it can't be read (the mtime guard
+ *  then stands down rather than blocking the flow). */
+async function mtimeOf(path: string): Promise<number | null> {
+  try {
+    const info = await stat(path);
+    const t = info.mtime;
+    return t instanceof Date ? t.getTime() : t == null ? null : new Date(t as unknown as string).getTime();
+  } catch {
+    return null;
+  }
+}
+
 interface ActionProps extends LocalCtx {
   fileId: FileId;
   onDone?: () => void;
@@ -95,6 +107,11 @@ export function CheckOutButton({
   const download = useDownloadVersion();
   const [rollbackErr, setRollbackErr] = useState<string | null>(null);
   const [whereUsedConfirm, setWhereUsedConfirm] = useState<string | null>(null);
+  // The local copy is writable and differs from the vault (possible unsaved
+  // work): ask keep / replace before touching it. Opens BEFORE the lock is taken.
+  const [copyChoice, setCopyChoice] = useState(false);
+  // The user's keep/replace pick, carried across the where-used dialog.
+  const copyModeRef = useRef<CheckOutCopyMode>("replace");
   // In-flight guard: fetchWhereUsed is async but acquireLock.loading is still
   // false during the fetch, so the button is not yet disabled. Without this a
   // rapid double-click re-enters handleClick and can fire doCheckOut() twice or
@@ -105,7 +122,17 @@ export function CheckOutButton({
   const checkingRef = useRef(false);
   const [checking, setChecking] = useState(false);
 
-  async function doCheckOut() {
+  /** A WRITABLE local copy whose content differs from the latest version. It may
+   *  be unsaved work (e.g. left behind by a failed undo-checkout), so checkout
+   *  must not silently download over it. A read-only differing copy is just
+   *  stale and is refreshed as before. */
+  function hasUnsavedLocalCopy(): boolean {
+    if (!localFile || localFile.readonly === true || !latestSha) return false;
+    if (!localTarget({ vaultRoot, folderId, fileName, folders })) return false;
+    return localFile.sha256?.toLowerCase() !== latestSha.toLowerCase();
+  }
+
+  async function doCheckOut(mode: CheckOutCopyMode = "replace") {
     setRollbackErr(null);
     const result = await acquireLock.run(fileId);
     if (!result) {
@@ -123,7 +150,8 @@ export function CheckOutButton({
       const stale =
         !localFile ||
         (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
-      if (latestSha && stale) {
+      // "Keep my copy": take the lock only, leave the writable local file as is.
+      if (latestSha && stale && mode !== "keep") {
         const ok = await download.run(latestSha, dest);
         if (!ok) {
           // The download failed but the lock is already held. Leaving the
@@ -150,7 +178,11 @@ export function CheckOutButton({
       flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
     }
     recordBreadcrumb("action", `vault: check-out ${fileName ?? "file"}`);
-    toast(`Checked out ${fileName ?? "file"}`);
+    toast(
+      mode === "keep"
+        ? `Checked out ${fileName ?? "file"} (kept your local copy)`
+        : `Checked out ${fileName ?? "file"}`,
+    );
     onDone?.();
   }
 
@@ -170,6 +202,19 @@ export function CheckOutButton({
     if (checkingRef.current) return;
     checkingRef.current = true;
     setChecking(true);
+    // Unsaved local work in the way: let the user choose before anything else.
+    // The guard stays held while the modal is open (cleared by its handlers).
+    if (hasUnsavedLocalCopy()) {
+      setCopyChoice(true);
+      return;
+    }
+    copyModeRef.current = "replace";
+    await startCheckOut();
+  }
+
+  /** The where-used check, then the checkout. The in-flight guard is already
+   *  held by the caller. */
+  async function startCheckOut() {
     // True iff we opened the where-used confirm dialog and are now waiting on
     // the user. In that case the guard MUST stay set (the dialog is open and a
     // second click could fire doCheckOut() concurrently → duplicate lock RPC);
@@ -195,7 +240,7 @@ export function CheckOutButton({
       // start a concurrent checkout.
       if (!awaitingConfirm) clearChecking();
     }
-    void doCheckOut();
+    void doCheckOut(copyModeRef.current);
   }
 
   // Surface the hook's error like GetLatestButton — hover tells the user what
@@ -229,11 +274,123 @@ export function CheckOutButton({
           // Release the re-click guard only now that the dialog has resolved —
           // on BOTH confirm and close — so the button stays disabled (no
           // concurrent doCheckOut / duplicate lock RPC) the whole time it's open.
-          onConfirm={() => { clearChecking(); void doCheckOut(); }}
+          onConfirm={() => { clearChecking(); void doCheckOut(copyModeRef.current); }}
           onClose={() => { clearChecking(); setWhereUsedConfirm(null); }}
         />
       )}
+      {copyChoice && (
+        <LocalCopyChoiceModal
+          fileName={fileName ?? "this file"}
+          onChoose={(mode) => {
+            setCopyChoice(false);
+            copyModeRef.current = mode;
+            void startCheckOut();
+          }}
+          onCancel={() => { setCopyChoice(false); clearChecking(); }}
+        />
+      )}
     </>
+  );
+}
+
+type CheckOutCopyMode = "keep" | "replace";
+
+/**
+ * Shown before a single-file check-out when the local copy is writable and
+ * differs from the latest vault version (it may hold unsaved work). Keep my
+ * copy takes the lock without downloading; Replace with latest is the normal
+ * checkout (download over it); Cancel aborts with nothing changed. Escape
+ * cancels; focus starts on the safe option and is trapped in the dialog.
+ */
+function LocalCopyChoiceModal({
+  fileName,
+  onChoose,
+  onCancel,
+}: {
+  fileName: string;
+  onChoose: (mode: CheckOutCopyMode) => void;
+  onCancel: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const restoreTo = document.activeElement as HTMLElement | null;
+    keepRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+        return;
+      }
+      if (e.key === "Tab") {
+        const focusables = dialogRef.current?.querySelectorAll<HTMLElement>("button");
+        if (!focusables || focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreTo?.focus?.();
+    };
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onCancel}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Local copy differs"
+        onClick={(e) => e.stopPropagation()}
+        className="w-96 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4 shadow-lg"
+      >
+        <h3 className="text-sm font-semibold text-helios-text">Your local copy differs</h3>
+        <p className="text-xs text-helios-text">
+          {fileName} on your machine is writable and is not the latest vault version, so it may hold
+          unsaved work. Keep it and check out without downloading, or replace it with the latest
+          version (your local changes are discarded).
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onChoose("replace")}
+            className="rounded border border-[#EF5350] px-3 py-1 text-xs text-[#EF5350] hover:bg-[#EF5350]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Replace with latest
+          </button>
+          <button
+            ref={keepRef}
+            type="button"
+            onClick={() => onChoose("keep")}
+            className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Keep my copy
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -249,6 +406,9 @@ export function CheckInButton({
   // Source path of the bytes being checked in — captured so we can parse the
   // file's assembly references after a successful check-in (see submit()).
   const pathRef = useRef<string | null>(null);
+  // mtime of that file when its bytes were read (null = unreadable, so the
+  // saved-again guard in submit() stands down).
+  const mtimeRef = useRef<number | null>(null);
 
   async function readBytes(): Promise<ArrayBuffer | null> {
     // Prefer the scan-matched local file, but fall back to the canonical vault
@@ -261,8 +421,10 @@ export function CheckInButton({
       localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
     if (candidate) {
       try {
+        const mtime = await mtimeOf(candidate);
         const buf = await readArrayBuffer(candidate);
         pathRef.current = candidate;
+        mtimeRef.current = mtime;
         return buf;
       } catch {
         // Canonical copy missing / unreadable — fall through to the picker.
@@ -270,8 +432,11 @@ export function CheckInButton({
     }
     const path = await openFileDialog({ multiple: false });
     if (!path || Array.isArray(path)) return null;
+    const mtime = await mtimeOf(path);
+    const buf = await readArrayBuffer(path);
     pathRef.current = path;
-    return readArrayBuffer(path);
+    mtimeRef.current = mtime;
+    return buf;
   }
 
   async function handleClick(e: React.MouseEvent) {
@@ -295,10 +460,24 @@ export function CheckInButton({
       // local copy read-only (real-vault). Prefer the actual file we read; fall
       // back to the computed vault path.
       const dest = localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
-      if (dest) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
-      // Record the just-checked-in content in the ledger (T6): the local copy
-      // now matches result.sha256, so a later local delete is detectable.
-      recordLedger({ folderId, fileName, folders, vaultId }, result.sha256);
+      // Saved again while the comment modal was open or the upload ran? Then the
+      // disk no longer holds what was checked in. Freezing it would turn that
+      // newer edit into a read-only "stale" copy the next sync overwrites, so
+      // leave it writable (sync holds back writable edits) and say so.
+      const mtimeBefore = mtimeRef.current;
+      const mtimeAfter = pathRef.current ? await mtimeOf(pathRef.current) : null;
+      const savedAgain = mtimeBefore !== null && mtimeAfter !== null && mtimeAfter !== mtimeBefore;
+      if (savedAgain) {
+        toast(
+          `${fileName ?? localFile?.basename ?? "File"} was saved again during check-in. Your newer edit was left writable; check it out and in again to keep it.`,
+          "info",
+        );
+      } else {
+        if (dest) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
+        // Record the just-checked-in content in the ledger (T6): the local copy
+        // now matches result.sha256, so a later local delete is detectable.
+        recordLedger({ folderId, fileName, folders, vaultId }, result.sha256);
+      }
       // Record this version's assembly references (best-effort, fire-and-forget
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
@@ -786,8 +965,13 @@ export function RestoreVersionButton({
 }
 
 export function CancelButton({
-  fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha,
-}: ActionProps) {
+  fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha, latestVersionId, localFile,
+}: ActionProps & {
+  /** The file row's latest_version_id. When provided it (not latestSha) decides
+   *  "never-checked-in draft": the embedded latest row can be briefly null on a
+   *  published file, and the draft path soft-deletes the file. */
+  latestVersionId?: string | null;
+}) {
   const releaseLock = useReleaseLock();
   const download = useDownloadVersion();
   const deleteFile = useDeleteFile();
@@ -802,7 +986,7 @@ export function CancelButton({
   // checked-in file doesn't exist for anyone else) — soft-delete the row
   // (which releases the lock server-side); the deleted-file reaper removes
   // the local copy.
-  const isDraft = !latestSha;
+  const isDraft = latestVersionId !== undefined ? latestVersionId === null : !latestSha;
 
   async function doDiscardDraft() {
     const ok = await deleteFile.run(fileId);
@@ -825,18 +1009,30 @@ export function CancelButton({
     // too (not only via auto-sync). The download clears read-only before the
     // write, so restoring over a read-only file is safe.
     const dest = localTarget({ vaultRoot, folderId, fileName, folders });
+    if (dest && !latestSha) {
+      // Published file whose latest version row isn't loaded yet: nothing to
+      // restore from. The lock is released; leave the local copy untouched.
+      toast(`Released ${fileName ?? "file"}. Its latest version isn't loaded yet, so the local copy was left as is.`, "info");
+      onDone?.();
+      return;
+    }
     if (dest && latestSha) {
       // Restore the latest version (discarding local edits), THEN read-only —
       // but only freeze if the restore actually SUCCEEDED. On a failed download
       // the local edit is still on disk; leaving it writable keeps the
       // held-back rule protecting it. A read-only-but-dirty file would look like
       // a clean stale copy and get clobbered on the next pass.
-      const restored = await download.run(latestSha, dest);
+      // Untouched checkout: the copy already IS the latest, so skip the
+      // re-download and just make it read-only again.
+      const unchanged = !!localFile?.sha256 && localFile.sha256.toLowerCase() === latestSha.toLowerCase();
+      const restored = unchanged || await download.run(latestSha, dest);
       if (!restored) {
         // The lock IS released but the latest version was NOT restored — the
         // local edit is still on disk (writable + held back). Surface it and
         // offer Retry (restore only) instead of silently signalling success.
-        setRestoreError(download.error?.message ?? "could not restore the latest version");
+        // Read the reason from the hook's ref: `download.error` is stale state
+        // inside this already-running closure.
+        setRestoreError(download.errorRef?.current?.message ?? "could not restore the latest version");
         return;
       }
       await setReadonly(dest, true); flipSwReadonly(dest, true);
