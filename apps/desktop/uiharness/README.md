@@ -24,6 +24,8 @@ Views:
 | `?view=wizard&dirty=1` | …with a fixture whose pre-flight fails |
 | `?view=review` | The reviewer's queue |
 | `?view=help` | The author help drawer |
+| `?view=folder-checkout` | Vault folder check-out pre-flight (teammate locks, local edits) |
+| `?view=folder-checkin` | Vault folder check-in pre-flight (blocked, missing local, comment) |
 
 The wizard's later steps are reached by **clicking**, not by a query flag — that
 way the screenshots show states the real state machine produced. Drive it with a
