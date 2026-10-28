@@ -70,8 +70,11 @@ export function reconcileLockOverlay(fresh: Lock[]): void {
 export function applyOverlay(base: Lock[], ov: Map<FileId, OverlayEntry>): Lock[] {
   if (ov.size === 0) return base;
   const out = base.filter((l) => ov.get(l.file_id)?.kind !== "remove");
+  // Set lookup: a 300-file batch holds ~300 overlay entries against thousands
+  // of locks, so a per-entry `out.some` scan was O(locks x overlay) per render.
+  const held = new Set(out.map((l) => l.file_id));
   for (const [fileId, e] of ov) {
-    if (e.kind === "add" && !out.some((l) => l.file_id === fileId)) out.push(e.lock);
+    if (e.kind === "add" && !held.has(fileId)) out.push(e.lock);
   }
   return out;
 }

@@ -28,6 +28,10 @@ interface Props {
   currentUserId?: UserId | null;
   /** Lock-holder names, for "checked out by Alice" in the failure list. */
   holderLabelById?: Map<UserId, string>;
+  /** Whether the viewer may modify files in this vault. False hides Check Out,
+   *  Cancel Checkout and Check In Changes (every row would fail at RLS); Get
+   *  Latest and Delete (separately admin-gated) are unaffected. Default true. */
+  canEdit?: boolean;
 }
 
 const EMPTY_VERSIONS = new Map<FileId, Version[]>();
@@ -45,6 +49,7 @@ export function BulkActionBar({
   locks = [],
   currentUserId = null,
   holderLabelById,
+  canEdit = true,
 }: Props) {
   // Per-vault admin (global admin rows count everywhere): matches what the
   // pdm_delete_file / pdm_force_unlock RPCs actually authorize, so the bar
@@ -145,42 +150,46 @@ export function BulkActionBar({
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2 text-xs">
       <span className="text-helios-dim">{selectedIds.length} selected</span>
-      <button
-        type="button"
-        onClick={() => { void start("checkout"); }}
-        // Disabled when no row in the selection is actually checkout-able
-        // (every one is locked or already yours). Saves the user from a
-        // "Checked out 0/N (N skipped)" surprise.
-        disabled={busy || eligibility.canCheckOut === 0}
-        title={
-          eligibility.canCheckOut === 0
-            ? "All selected files are already locked"
-            : eligibility.lockedByOtherForCheckOut > 0
-            ? `${eligibility.canCheckOut} of ${selectedIds.length} can be checked out`
-            : undefined
-        }
-        className="rounded bg-asu-gold px-2 py-1 text-white hover:bg-asu-gold/90 disabled:opacity-50"
-      >
-        Check Out
-      </button>
-      <button
-        type="button"
-        onClick={() => setConfirmCancel(true)}
-        // Disabled when nothing in the selection is locked by the current
-        // user. (Cancelling someone else's lock requires force-unlock.)
-        disabled={busy || eligibility.canCancel === 0}
-        title={
-          eligibility.canCancel === 0
-            ? "None of the selected files are checked out to you"
-            : eligibility.notMineForCancel > 0
-            ? `${eligibility.canCancel} of ${selectedIds.length} are yours to release`
-            : undefined
-        }
-        className="rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line disabled:opacity-50"
-      >
-        Cancel Checkout
-      </button>
-      {hasModifiedLocal && (
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => { void start("checkout"); }}
+          // Disabled when no row in the selection is actually checkout-able
+          // (every one is locked or already yours). Saves the user from a
+          // "Checked out 0/N (N skipped)" surprise.
+          disabled={busy || eligibility.canCheckOut === 0}
+          title={
+            eligibility.canCheckOut === 0
+              ? "All selected files are already locked"
+              : eligibility.lockedByOtherForCheckOut > 0
+              ? `${eligibility.canCheckOut} of ${selectedIds.length} can be checked out`
+              : undefined
+          }
+          className="rounded bg-asu-gold px-2 py-1 text-white hover:bg-asu-gold/90 disabled:opacity-50"
+        >
+          Check Out
+        </button>
+      )}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => setConfirmCancel(true)}
+          // Disabled when nothing in the selection is locked by the current
+          // user. (Cancelling someone else's lock requires force-unlock.)
+          disabled={busy || eligibility.canCancel === 0}
+          title={
+            eligibility.canCancel === 0
+              ? "None of the selected files are checked out to you"
+              : eligibility.notMineForCancel > 0
+              ? `${eligibility.canCancel} of ${selectedIds.length} are yours to release`
+              : undefined
+          }
+          className="rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line disabled:opacity-50"
+        >
+          Cancel Checkout
+        </button>
+      )}
+      {canEdit && hasModifiedLocal && (
         <button
           type="button"
           onClick={() => { void start("checkin"); }}

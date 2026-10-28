@@ -225,6 +225,49 @@ describe("<BulkActionBar>", () => {
     expect(screen.getByRole("button", { name: /get latest/i })).toBeInTheDocument();
   });
 
+  it("canEdit=false hides Check Out / Cancel Checkout / Check In Changes but keeps Get Latest", () => {
+    const files = [
+      { id: "f1", vault_id: "v", folder_id: null, name: "frame.sldprt", latest_version_id: "ver1", created_at: "x" },
+    ];
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    // A modified local copy: Check In Changes would show for an editor.
+    const localFiles = [
+      { basename: "frame.sldprt", relativePath: "frame.sldprt", absolutePath: "/Users/me/Vault/frame.sldprt", sha256: "different", sizeBytes: 1 },
+    ];
+    const props = {
+      selectedIds: ["f1"],
+      onClear: () => {},
+      onDone: () => {},
+      files: files as any,
+      localFiles,
+      versionsByFileId: versions as any,
+      vaultRoot: "/Users/me/Vault",
+      folders: [],
+    };
+    const { unmount } = render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <BulkActionBar {...props} />
+      </SupabaseAuthProvider>,
+    );
+    // Default (editor): all three editor actions are present.
+    expect(screen.getByRole("button", { name: /^check out$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cancel checkout/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /check in changes/i })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <BulkActionBar {...props} canEdit={false} />
+      </SupabaseAuthProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /^check out$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel checkout/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /check in changes/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /get latest/i })).toBeInTheDocument();
+  });
+
   it("bulk check out reports success status after running", async () => {
     const onDone = vi.fn();
     const c = mockClient(false);

@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider, useAuthLoading } from "@helios/auth";
 import { useAcquireLock } from "../../src/modules/vault/data/useAcquireLock";
+import { subscribeLockChanges, resetLockEventsForTests } from "../../src/modules/vault/data/lock-events";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -66,6 +67,8 @@ const wrap = (c: SupabaseClient) =>
     <SupabaseAuthProvider client={c}>{children}</SupabaseAuthProvider>;
 
 describe("useAcquireLock", () => {
+  beforeEach(() => resetLockEventsForTests());
+
   it("inserts a lock row with file_id + the current user id", async () => {
     observed = null;
     const c = mockClient({
@@ -153,5 +156,50 @@ describe("useAcquireLock", () => {
     await waitFor(() => expect(result.current.authLoading).toBe(false));
     await act(async () => { await result.current.hook.run("f1"); });
     expect(result.current.hook.error?.message).toMatch(/already checked out/i);
+  });
+
+  it("mirrors the failure into errorRef synchronously and clears it on the next attempt", async () => {
+    const c = mockClient(null, { message: "duplicate key value violates unique constraint", code: "23505" });
+    const { result } = renderHook(
+      () => ({ hook: useAcquireLock(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    let reason: string | undefined;
+    await act(async () => {
+      const r = await result.current.hook.run("f1");
+      // Read in the same tick the batch hook would: state hasn't re-rendered yet.
+      reason = result.current.hook.errorRef.current?.message;
+      expect(r).toBeNull();
+    });
+    expect(reason).toMatch(/already checked out/i);
+  });
+
+  it("a 23505 broadcasts a lock refetch so a stale pill self-heals; other errors do not", async () => {
+    const cb = vi.fn();
+    const unsub = subscribeLockChanges(cb);
+    try {
+      const dup = mockClient(null, { message: "dup", code: "23505" });
+      const a = renderHook(
+        () => ({ hook: useAcquireLock(), authLoading: useAuthLoading() }),
+        { wrapper: wrap(dup) },
+      );
+      await waitFor(() => expect(a.result.current.authLoading).toBe(false));
+      await act(async () => { await a.result.current.hook.run("f1"); });
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      resetLockEventsForTests();
+      cb.mockClear();
+      const rls = mockClient(null, { message: "permission denied", code: "42501" });
+      const b = renderHook(
+        () => ({ hook: useAcquireLock(), authLoading: useAuthLoading() }),
+        { wrapper: wrap(rls) },
+      );
+      await waitFor(() => expect(b.result.current.authLoading).toBe(false));
+      await act(async () => { await b.result.current.hook.run("f1"); });
+      expect(cb).not.toHaveBeenCalled();
+    } finally {
+      unsub();
+    }
   });
 });

@@ -1097,6 +1097,7 @@ export function BrowseScreen() {
                   locks={locks ?? []}
                   currentUserId={user?.id ?? null}
                   holderLabelById={holderEmailById}
+                  canEdit={canEdit}
                 />
                 <FileTable
                   files={files ?? []}

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import type { FileId, Lock } from "./types";
 import { friendlyPgError } from "./pg-errors";
@@ -11,11 +11,17 @@ export function useAcquireLock() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [result, setResult] = useState<Lock | null>(null);
+  // Mirror of `error` updated synchronously inside run(), so a caller that
+  // awaits run() and gets null (e.g. the batch hook) can read the failure
+  // reason in the SAME tick; the `error` state is stale in that closure.
+  const errorRef = useRef<Error | null>(null);
 
   const run = useCallback(
     async (file_id: FileId): Promise<Lock | null> => {
       if (!user) {
-        setError(new Error("Your session has expired — please sign in again."));
+        const expired = new Error("Your session has expired — please sign in again.");
+        errorRef.current = expired;
+        setError(expired);
         // Clear any result from a prior successful acquire so hook state
         // reflects this (failed) attempt rather than a stale lock.
         setResult(null);
@@ -23,6 +29,7 @@ export function useAcquireLock() {
       }
       setLoading(true);
       setError(null);
+      errorRef.current = null;
       // Optimistic: show "locked by me" on the pill this frame, before the
       // insert round-trips. reconcile (in useLocks) drops it once the canonical
       // row confirms it; the catch below reverts it on failure.
@@ -48,7 +55,14 @@ export function useAcquireLock() {
         // mapping gives a readable string instead of a raw FK / unique
         // constraint violation.
         clearLockOverlay(file_id); // revert the optimistic pill
-        setError(new Error(friendlyPgError(err, "lock").message));
+        const failure = new Error(friendlyPgError(err, "lock").message);
+        errorRef.current = failure;
+        setError(failure);
+        // Our lock list was stale: the file IS locked (possibly by this very
+        // user, e.g. a lock whose pill never refreshed). Refetch so the pill
+        // self-heals instead of offering Check Out again. Coalesced, so a bulk
+        // run hitting many locked rows costs a couple of refetches, not N.
+        if (err.code === "23505") notifyLockChange();
         return null;
       }
       setResult(data);
@@ -60,5 +74,5 @@ export function useAcquireLock() {
     [client, user],
   );
 
-  return { run, loading, error, result };
+  return { run, loading, error, result, errorRef };
 }
