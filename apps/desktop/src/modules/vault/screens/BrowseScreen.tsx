@@ -1139,6 +1139,11 @@ export function BrowseScreen() {
         vaultRoot={vaultFolderPath}
         folders={folders ?? []}
         canEdit={canEdit}
+        heldByMe={
+          selectedFile
+            ? (locks ?? []).some((l) => l.file_id === selectedFile && l.released_at === null && l.user_id === user?.id)
+            : undefined
+        }
         vaultId={vaultId ?? null}
         isWatched={selectedFile ? isWatched(selectedFile) : false}
         onToggleWatch={toggleWatch}

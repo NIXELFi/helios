@@ -893,6 +893,10 @@ interface RestoreVersionButtonProps {
   folders: Folder[];
   vaultId?: string | null;
   onDone?: () => void;
+  /** When set, the button is disabled and this is its tooltip. The restore RPC
+   *  requires the caller's own active lock, so a caller that knows the user
+   *  doesn't hold it passes the reason here instead of letting the click fail. */
+  disabledReason?: string;
 }
 
 /**
@@ -903,7 +907,7 @@ interface RestoreVersionButtonProps {
  * History is never destroyed: the previous latest stays as an older version.
  */
 export function RestoreVersionButton({
-  version, fileId, fileName, folderId, vaultRoot, folders, vaultId, onDone,
+  version, fileId, fileName, folderId, vaultRoot, folders, vaultId, onDone, disabledReason,
 }: RestoreVersionButtonProps) {
   const restore = useRestoreVersion();
   const download = useDownloadVersion();
@@ -933,9 +937,11 @@ export function RestoreVersionButton({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-        disabled={restore.loading || download.loading}
+        disabled={restore.loading || download.loading || !!disabledReason}
         title={
-          err
+          disabledReason
+            ? disabledReason
+            : err
             ? `Restore failed: ${err}`
             : `Make version ${version.version_num} the new latest (requires the file to be checked out by you; checks it back in with this version's content)`
         }

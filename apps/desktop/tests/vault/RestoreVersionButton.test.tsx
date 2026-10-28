@@ -18,6 +18,10 @@ vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
     loading: false, error: null,
   }),
 }));
+const ledgerCalls = vi.hoisted(() => [] as Array<[string, string, string]>);
+vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
+  ledgerRecord: (v: string, rel: string, sha: string) => { ledgerCalls.push([v, rel, sha]); return Promise.resolve(); },
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue("/tmp/fake.sldprt"),
   save: vi.fn().mockResolvedValue("/tmp/picked-save.sldprt"),
@@ -53,7 +57,7 @@ const v2 = {
 };
 
 describe("RestoreVersionButton (SW-PDM rollback — non-destructive)", () => {
-  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; dlResult.ok = true; });
+  beforeEach(() => { capturedRpc = null; ledgerCalls.length = 0; roCalls.length = 0; dlCalls.length = 0; dlResult.ok = true; });
 
   it("renders nothing when the version has no sha256", () => {
     const { container } = render(wrap(mockClient(),
@@ -98,5 +102,24 @@ describe("RestoreVersionButton (SW-PDM rollback — non-destructive)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /restore as latest/i }));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(roCalls).toHaveLength(0); // failed download never flips read-only
+  });
+
+  it("records the restored content in the sync ledger when a vaultId is supplied", async () => {
+    render(wrap(mockClient(),
+      <RestoreVersionButton version={v2 as any} fileId={"f1" as any} fileName="a.bin" folderId={null} vaultRoot="/v" folders={[]} vaultId="vault-1" />));
+    fireEvent.click(screen.getByRole("button", { name: /^restore$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /restore as latest/i }));
+    await waitFor(() => expect(ledgerCalls).toContainEqual(["vault-1", "a.bin", "sha-old"]));
+  });
+
+  it("is disabled with the reason as its tooltip when told the user doesn't hold the checkout", () => {
+    render(wrap(mockClient(),
+      <RestoreVersionButton version={v2 as any} fileId={"f1" as any} fileName="a.bin" folderId={null} vaultRoot="/v" folders={[]} disabledReason="Check the file out first" />));
+    const btn = screen.getByRole("button", { name: /^restore$/i });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "Check the file out first");
+    fireEvent.click(btn);
+    expect(screen.queryByRole("button", { name: /restore as latest/i })).toBeNull();
+    expect(capturedRpc).toBeNull();
   });
 });

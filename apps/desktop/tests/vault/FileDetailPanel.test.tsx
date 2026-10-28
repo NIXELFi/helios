@@ -121,6 +121,29 @@ describe("<FileDetailPanel>", () => {
     expect(screen.queryByRole("button", { name: /set revision/i })).toBeNull();
   });
 
+  it("disables Restore on old versions when the user is known not to hold the checkout", async () => {
+    const versions = [
+      { id: "vv2", file_id: "file-1", version_num: 2, sha256: "s2", size_bytes: 1, author_id: null, comment: "second", parent_version_id: "vv1", created_at: "2026-01-02" },
+      { id: "vv1", file_id: "file-1", version_num: 1, sha256: "s1", size_bytes: 1, author_id: null, comment: "first", parent_version_id: null, created_at: "2026-01-01" },
+    ];
+    const { rerender } = render(
+      <SupabaseAuthProvider client={mockClient(versions)}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} vaultRoot="/v" folders={[]} canEdit heldByMe={false} vaultId={"v1" as any} />
+      </SupabaseAuthProvider>,
+    );
+    const restore = await screen.findByRole("button", { name: /^restore$/i });
+    expect(restore).toBeDisabled();
+    expect(restore.getAttribute("title")).toMatch(/check the file out first/i);
+
+    // Holding the checkout (or not knowing) leaves it enabled.
+    rerender(
+      <SupabaseAuthProvider client={mockClient(versions)}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} vaultRoot="/v" folders={[]} canEdit heldByMe vaultId={"v1" as any} />
+      </SupabaseAuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: /^restore$/i })).toBeEnabled());
+  });
+
   it("V13: handles a selectedFile that no longer exists in the file list", async () => {
     render(
       <SupabaseAuthProvider client={mockClient()}>

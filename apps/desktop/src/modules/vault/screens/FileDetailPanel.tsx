@@ -30,6 +30,11 @@ interface Props {
   /** Whether the current user may edit (editor/admin/owner). Gates the
    *  "Set Revision" action — viewers don't see it. */
   canEdit?: boolean;
+  /** Whether the current user holds this file's checkout. Restore Version is a
+   *  check-in server-side and needs the caller's own lock, so when this is
+   *  explicitly false the Restore action is disabled with a hint instead of
+   *  failing on click. Omitted = unknown, left enabled. */
+  heldByMe?: boolean;
   /** Active vault id — required to load the BOM graph for assembly files. */
   vaultId?: VaultId | null;
   /** Watch/unwatch callbacks from useWatchedFiles — when provided the panel
@@ -38,7 +43,7 @@ interface Props {
   onToggleWatch?: (fileId: FileId) => void;
 }
 
-export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, vaultId, isWatched, onToggleWatch }: Props) {
+export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, heldByMe, vaultId, isWatched, onToggleWatch }: Props) {
   if (!fileId) {
     // Placeholder panel is hidden on narrow windows — it carries no content,
     // and the space matters more (SQUEEZE). Selecting a file still shows the
@@ -76,6 +81,7 @@ export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, va
       vaultRoot={vaultRoot ?? null}
       folders={folders ?? []}
       canEdit={canEdit ?? false}
+      heldByMe={heldByMe}
       vaultId={vaultId ?? null}
       isWatched={isWatched}
       onToggleWatch={onToggleWatch}
@@ -89,7 +95,7 @@ function isAssembly(name: string | null): boolean {
 }
 
 function FileDetailLoader({
-  fileId, fileName, folderId, vaultRoot, folders, canEdit, vaultId, isWatched, onToggleWatch,
+  fileId, fileName, folderId, vaultRoot, folders, canEdit, heldByMe, vaultId, isWatched, onToggleWatch,
 }: {
   fileId: FileId;
   fileName: string | null;
@@ -97,6 +103,7 @@ function FileDetailLoader({
   vaultRoot: string | null;
   folders: Folder[];
   canEdit: boolean;
+  heldByMe?: boolean;
   vaultId: VaultId | null;
   isWatched?: boolean;
   onToggleWatch?: (fileId: FileId) => void;
@@ -139,6 +146,8 @@ function FileDetailLoader({
               folderId={folderId}
               vaultRoot={vaultRoot}
               folders={folders}
+              vaultId={vaultId}
+              disabledReason={heldByMe === false ? "Check the file out first: restoring a version checks it in with that version's content" : undefined}
               onDone={refetch}
             />
           )}
