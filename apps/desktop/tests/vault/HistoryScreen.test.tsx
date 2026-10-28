@@ -88,7 +88,7 @@ function mockClient(opts: Opts = {}): SupabaseClient {
       return okChain([]);
     }),
     rpc: (name: string) => {
-      if (name === "pdm_admin_list_users") return Promise.resolve({ data: users, error: null });
+      if (name === "pdm_admin_list_users" || name === "pdm_list_vault_roles") return Promise.resolve({ data: users, error: null });
       return Promise.resolve({ data: false, error: null });
     },
   } as any;

@@ -102,16 +102,16 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
   it("stops acquiring locks after selection is cleared mid-loop", async () => {
     const gate = deferred();
     // First acquireLock call blocks until the gate releases; second should never fire.
-    acquireLockRun
-      .mockImplementationOnce(async () => {
-        await gate.promise;
-        return { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null };
-      })
-      .mockResolvedValue({ id: "l2", file_id: "f2", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null });
+    // Every acquire blocks on the gate, so the 3 pool lanes all stall and
+    // the 4th file is only reachable if the pool ignores the abort.
+    acquireLockRun.mockImplementation(async () => {
+      await gate.promise;
+      return { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null };
+    });
 
     const { rerender } = render(
       <BulkActionBar
-        selectedIds={["f1", "f2"]}
+        selectedIds={["f1", "f2", "f3", "f4"]}
         onClear={() => {}}
         onDone={() => {}}
         currentUserId="u1"
@@ -123,7 +123,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
     await act(async () => { fireEvent.click(checkOutBtn); });
 
     // First lock acquire is in flight (blocked on gate); second hasn't started.
-    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(3));
 
     // Clear selection → triggers the useEffect cleanup → aborts the in-flight scope.
     rerender(
@@ -144,7 +144,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     // The loop must have seen signal.aborted after the first acquire resolved
     // and returned without starting the second file's lock acquisition.
-    expect(acquireLockRun).toHaveBeenCalledTimes(1);
+    expect(acquireLockRun).toHaveBeenCalledTimes(3);
   });
 
   it("does not call setState (setBusy/setStatus) after abort", async () => {
@@ -152,14 +152,14 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
     // React "Can't perform a state update on an unmounted component" warning
     // (or act() warning). We unmount instead of rerender to trigger abort.
     const gate = deferred();
-    acquireLockRun.mockImplementationOnce(async () => {
+    acquireLockRun.mockImplementation(async () => {
       await gate.promise;
       return { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null };
     });
 
     const { unmount } = render(
       <BulkActionBar
-        selectedIds={["f1", "f2"]}
+        selectedIds={["f1", "f2", "f3", "f4"]}
         onClear={() => {}}
         onDone={() => {}}
         currentUserId="u1"
@@ -169,7 +169,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     const checkOutBtn = screen.getByRole("button", { name: /check out/i });
     await act(async () => { fireEvent.click(checkOutBtn); });
-    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(3));
 
     // Unmount mid-flight to trigger abort
     unmount();
@@ -181,7 +181,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
       await flushAsync();
     });
 
-    expect(acquireLockRun).toHaveBeenCalledTimes(1);
+    expect(acquireLockRun).toHaveBeenCalledTimes(3);
   });
 });
 

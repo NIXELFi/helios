@@ -53,6 +53,7 @@ import { VaultSearch } from "../components/VaultSearch";
 import { useVaultProperties } from "../data/useVaultProperties";
 import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
 import { RecentActivity } from "../components/RecentActivity";
+import { usePeopleNames } from "../data/usePeopleNames";
 import { useMoveFile } from "../data/useMoveFile";
 import { toast } from "../data/toast";
 import { fetchWhereUsed } from "../data/useReferences";
@@ -247,14 +248,17 @@ export function BrowseScreen() {
   // raise for non-members; we ignore the error and fall back to the generic
   // label, so a viewer still sees the screen.
   const { data: vaultUsers } = useVaultUsers(vaultId);
+  // Org directory names as the fallback base so a non-admin member (for whom
+  // the vault user RPC raises) still sees "Locked by Jane", not "by other".
+  const peopleNames = usePeopleNames(vaultUsers);
   const holderEmailById = useMemo(() => {
-    const m = new Map<UserId, string>();
+    const m = new Map<UserId, string>(peopleNames);
     for (const u of vaultUsers ?? []) {
       const label = u.email ?? u.display_name;
       if (label) m.set(u.user_id, label);
     }
     return m;
-  }, [vaultUsers]);
+  }, [vaultUsers, peopleNames]);
   // Memoized: findUnmatchedLocal allocates a fresh array each call, so without
   // this every render handed a new identity to <UnmatchedFilesBanner>.
   // Consistency-gated (same discipline as useAutoSync / the reaper / the
@@ -855,7 +859,8 @@ export function BrowseScreen() {
         </div>
         <RecentActivity
           allFiles={allFiles ?? []}
-          holderEmailById={holderEmailById}
+          nameById={peopleNames}
+          currentUserId={user?.id ?? null}
           onPick={jumpToFile}
         />
         {/* Lock-dot legend — the tree's blue/red dots are otherwise learned by

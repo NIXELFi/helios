@@ -348,16 +348,20 @@ describe("<BulkActionBar>", () => {
     const files = [
       { id: "f1", vault_id: "v", folder_id: null, name: "a.sldprt", latest_version_id: "v1", created_at: "x" },
       { id: "f2", vault_id: "v", folder_id: null, name: "b.sldprt", latest_version_id: "v2", created_at: "x" },
+      { id: "f3", vault_id: "v", folder_id: null, name: "c.sldprt", latest_version_id: "v3", created_at: "x" },
+      { id: "f4", vault_id: "v", folder_id: null, name: "d.sldprt", latest_version_id: "v4", created_at: "x" },
     ];
     const versions = new Map([
       ["f1", [{ id: "v1", file_id: "f1", version_num: 1, sha256: "aa", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
       ["f2", [{ id: "v2", file_id: "f2", version_num: 1, sha256: "bb", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+      ["f3", [{ id: "v3", file_id: "f3", version_num: 1, sha256: "cc", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+      ["f4", [{ id: "v4", file_id: "f4", version_num: 1, sha256: "dd", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
     ]);
 
     const { unmount } = render(
       <SupabaseAuthProvider client={client}>
         <BulkActionBar
-          selectedIds={["f1", "f2"]}
+          selectedIds={["f1", "f2", "f3", "f4"]}
           onClear={() => {}}
           onDone={() => {}}
           files={files as any}
@@ -371,9 +375,9 @@ describe("<BulkActionBar>", () => {
 
     const getLatest = await screen.findByRole("button", { name: /get latest/i });
     await act(async () => { fireEvent.click(getLatest); });
-    // The first download is in flight (blocked on the gate); the second hasn't
-    // started yet because the loop awaits each download in turn.
-    await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    // The first BULK_CONCURRENCY (3) downloads are in flight (blocked on the
+    // gate); the 4th waits for a free lane.
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(3));
 
     // Unmount mid-flight, then release the in-flight download and let every
     // queued microtask + macrotask settle. With the abort guard the loop
@@ -388,8 +392,8 @@ describe("<BulkActionBar>", () => {
       for (let i = 0; i < 10; i++) await Promise.resolve();
     });
 
-    // The loop saw the abort after the first download resolved and returned —
-    // it never started the second file's download.
-    expect(download).toHaveBeenCalledTimes(1);
+    // The pool saw the abort once the in-flight downloads resolved and never
+    // started the 4th file's download.
+    expect(download).toHaveBeenCalledTimes(3);
   });
 });

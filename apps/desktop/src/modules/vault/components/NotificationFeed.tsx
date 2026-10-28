@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { IconBell } from "@tabler/icons-react";
 import type { Notification } from "../lib/notifications";
+import { absoluteWhen } from "../lib/when";
 import type { FileId } from "../data/types";
 
 interface Props {
@@ -27,7 +28,7 @@ interface Props {
 function actorLabel(actorId: string, actorNames?: Map<string, string>): string {
   const name = actorNames?.get(actorId);
   if (name && name.trim()) return name;
-  return `${actorId.slice(0, 8)}…`;
+  return "Unknown member";
 }
 
 const KIND_LABELS: Record<Notification["kind"], string> = {
@@ -116,13 +117,15 @@ export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJump
         )}
       </button>
 
-      {/* Feed panel — absolutely positioned below the bell, in the NavRail */}
+      {/* Feed panel — the bell sits at the BOTTOM of the NavRail, so the panel
+          opens beside it and grows UPWARD (bottom-0), capped to the viewport.
+          It used to anchor top-0 and extend downward off the screen. */}
       {open && (
         <div
           ref={panelRef}
           role="dialog"
           aria-label="Notification feed"
-          className="absolute left-full top-0 z-50 ml-1 w-72 rounded-lg border border-helios-line bg-helios-panel shadow-xl"
+          className="absolute bottom-0 left-full z-50 ml-1 flex max-h-[calc(100vh-6rem)] w-72 flex-col rounded-lg border border-helios-line bg-helios-panel shadow-xl"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-helios-line px-3 py-2">
@@ -152,7 +155,7 @@ export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJump
           </div>
 
           {/* Items */}
-          <div className="max-h-80 overflow-y-auto">
+          <div className="min-h-0 max-h-96 flex-1 overflow-y-auto">
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
                 <IconBell size={28} strokeWidth={1} className="text-helios-dim/50" />
@@ -182,7 +185,7 @@ export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJump
                         <span className="truncate text-xs font-medium text-helios-text">
                           {n.fileName}
                         </span>
-                        <span className="shrink-0 text-[10px] text-helios-dim">{relTime(n.at)}</span>
+                        <span className="shrink-0 text-[10px] text-helios-dim" title={absoluteWhen(n.at)}>{relTime(n.at)}</span>
                       </div>
                       <div className="flex items-center gap-1 text-[10px] text-helios-dim">
                         <span
@@ -198,7 +201,7 @@ export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJump
                           {KIND_LABELS[n.kind]}
                         </span>
                         {n.actorId && (
-                          <span className="truncate" title={actorNames?.get(n.actorId) ?? n.actorId}>
+                          <span className="truncate" title={actorLabel(n.actorId, actorNames)}>
                             by {actorLabel(n.actorId, actorNames)}
                           </span>
                         )}

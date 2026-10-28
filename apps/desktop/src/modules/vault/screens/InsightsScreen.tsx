@@ -22,6 +22,7 @@ import { useVaultInsightsExtra } from "../data/useVaultInsightsExtra";
 import { useVaultMass } from "../data/useVaultMass";
 import { MassPanel } from "../components/MassPanel";
 import { holderLabel } from "./WhoHasWhatScreen";
+import { usePeopleNames } from "../data/usePeopleNames";
 import type { VaultFile } from "../data/types";
 
 export function InsightsScreen() {
@@ -32,6 +33,8 @@ export function InsightsScreen() {
   const { data: folders } = useFolders(vaultId ?? undefined);
   const { data: locks } = useLocks();
   const { data: users } = useVaultUsers(); // admin-gated; errors ignored (fallback below)
+  // Org directory names so members (no admin list) still see who did what.
+  const peopleNames = usePeopleNames();
   // Spotlight writes go through the vaults UPDATE policy (bridged, PER-VAULT
   // is_admin_in) — gate the affordance on the same probe, not the legacy-only
   // global pdm_is_admin, so per-vault and capability-only admins get it too.
@@ -71,17 +74,17 @@ export function InsightsScreen() {
 
   // id -> label resolvers for the deep-analytics section (RPC returns raw ids).
   const userMap = useMemo(() => {
-    const m = new Map<string, string>();
+    const m = new Map<string, string>(peopleNames);
     for (const u of userList) {
       const l = holderLabel(u);
       if (l) m.set(u.user_id, l);
     }
     return m;
-  }, [userList]);
+  }, [userList, peopleNames]);
   const fileById = useMemo(() => new Map(fileList.map((f) => [f.id, f])), [fileList]);
-  const authorName = (id: string | null) => (id ? userMap.get(id) ?? `${id.slice(0, 8)}…` : "Imported");
+  const authorName = (id: string | null) => (id ? userMap.get(id) ?? "Unknown member" : "Imported");
   const fileNameOf = (id: string) => fileById.get(id)?.name ?? `${id.slice(0, 8)}…`;
-  const holderName = (id: string) => userMap.get(id) ?? `${id.slice(0, 8)}…`;
+  const holderName = (id: string) => userMap.get(id) ?? "Unknown member";
 
   async function pickSpotlight(fileId: string | null) {
     if (!vaultId) return;

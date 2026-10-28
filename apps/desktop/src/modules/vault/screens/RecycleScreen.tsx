@@ -6,25 +6,15 @@ import { useFolders } from "../data/useFolders";
 import { useRestoreFile } from "../data/useRestoreFile";
 import { useRestoreFolder } from "../data/useRestoreFolder";
 import { folderPath } from "../data/folder-paths";
+import { useVaultUsers } from "../data/useVaultUsers";
+import { usePeopleNames } from "../data/usePeopleNames";
+import { useUser } from "@helios/auth";
+import { toast } from "../data/toast";
+import { absoluteWhen, relativeWhen, whoLabel } from "../lib/when";
 import type { FileId, FolderId } from "../data/types";
 
-/** Short relative-time string ("3h ago", "2d ago"), falling back to the full
- *  locale date for old timestamps. (Local copy of the WhoHasWhat helper.) */
 function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return iso;
-  const diff = Date.now() - t;
-  if (diff < 0) return "just now";
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  return new Date(iso).toLocaleString();
+  return iso ? relativeWhen(iso) : "";
 }
 
 /**
@@ -37,6 +27,10 @@ export function RecycleScreen() {
   const { data: files, loading: filesLoading, error: filesError, refetch: refetchFiles } = useDeletedFiles(activeVaultId ?? undefined);
   const { data: deletedFolders, loading: foldersLoading, error: foldersError, refetch: refetchDeletedFolders } = useDeletedFolders(activeVaultId ?? undefined);
   const { data: liveFolders, refetch: refetchLiveFolders } = useFolders(activeVaultId ?? undefined);
+  // "Deleted by" names — org directory for members, vault list on top.
+  const { data: vaultUsers } = useVaultUsers(activeVaultId);
+  const nameById = usePeopleNames(vaultUsers);
+  const user = useUser();
   const restore = useRestoreFile();
   const restoreFolder = useRestoreFolder();
   // Track the row mid-restore so its button alone disables (others stay live).
@@ -72,6 +66,7 @@ export function RecycleScreen() {
           name: f.name,
           displayPath,
           deletedAt: f.deleted_at ?? null,
+          deletedBy: f.deleted_by ?? null,
           batchFileCount,
         };
       }),
@@ -85,7 +80,9 @@ export function RecycleScreen() {
         return {
           id: f.id,
           path: dir ? `${dir}/${f.name}` : f.name,
+          name: f.name,
           deletedAt: f.deleted_at ?? null,
+          deletedBy: f.deleted_by ?? null,
         };
       }),
     [deletedFiles, allFoldersLookup],
@@ -96,6 +93,7 @@ export function RecycleScreen() {
     const ok = await restore.run(id);
     setRestoringId(null);
     if (ok) {
+      toast(`Restored ${fileRows.find((r) => r.id === id)?.name ?? "file"}`);
       refetchFiles();
       refetchDeletedFolders();
       refetchLiveFolders();
@@ -107,6 +105,7 @@ export function RecycleScreen() {
     const ok = await restoreFolder.run(id);
     setRestoringFolderId(null);
     if (ok) {
+      toast(`Restored folder ${folderRows.find((r) => r.id === id)?.name ?? ""}`.trimEnd());
       refetchDeletedFolders();
       refetchFiles();
       refetchLiveFolders();
@@ -147,6 +146,7 @@ export function RecycleScreen() {
                     <tr>
                       <th className="px-3 py-2 font-normal">Folder</th>
                       <th className="px-3 py-2 font-normal">Deleted</th>
+                      <th className="px-3 py-2 font-normal">By</th>
                       <th className="px-3 py-2 font-normal">Actions</th>
                     </tr>
                   </thead>
@@ -161,8 +161,11 @@ export function RecycleScreen() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-helios-dim" title={r.deletedAt ?? undefined}>
+                        <td className="px-3 py-2 text-helios-dim" title={r.deletedAt ? absoluteWhen(r.deletedAt) : undefined}>
                           {relativeTime(r.deletedAt)}
+                        </td>
+                        <td className="px-3 py-2 text-helios-dim">
+                          {r.deletedBy ? whoLabel(r.deletedBy, nameById, user?.id) : "—"}
                         </td>
                         <td className="px-3 py-2">
                           <button
@@ -190,6 +193,7 @@ export function RecycleScreen() {
                     <tr>
                       <th className="px-3 py-2 font-normal">File</th>
                       <th className="px-3 py-2 font-normal">Deleted</th>
+                      <th className="px-3 py-2 font-normal">By</th>
                       <th className="px-3 py-2 font-normal">Actions</th>
                     </tr>
                   </thead>
@@ -199,8 +203,11 @@ export function RecycleScreen() {
                         <td className="px-3 py-2 text-helios-text">
                           <span title={r.path}>{r.path}</span>
                         </td>
-                        <td className="px-3 py-2 text-helios-dim" title={r.deletedAt ?? undefined}>
+                        <td className="px-3 py-2 text-helios-dim" title={r.deletedAt ? absoluteWhen(r.deletedAt) : undefined}>
                           {relativeTime(r.deletedAt)}
+                        </td>
+                        <td className="px-3 py-2 text-helios-dim">
+                          {r.deletedBy ? whoLabel(r.deletedBy, nameById, user?.id) : "—"}
                         </td>
                         <td className="px-3 py-2">
                           <button

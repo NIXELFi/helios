@@ -16,6 +16,7 @@ import { usePeople } from "../../org/data/useOrgData";
 import { folderPath, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
+import { absoluteWhen } from "../lib/when";
 import type { Lock, VaultUser } from "../data/types";
 
 /** Canonical lock-holder label: prefer the human display name, then the email,
@@ -584,10 +585,10 @@ export function WhoHasWhatScreen() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-helios-text" title={lock.user_id}>
+                        <td className="px-3 py-2 text-helios-text">
                           {holderName}
                         </td>
-                        <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
+                        <td className="px-3 py-2 text-helios-dim" title={absoluteWhen(lock.acquired_at)}>
                           {relativeTime(lock.acquired_at)}
                         </td>
                         {showActions && (

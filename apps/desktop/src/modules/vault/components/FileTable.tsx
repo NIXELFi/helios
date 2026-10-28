@@ -660,6 +660,7 @@ export function FileTable({
                         vaultId={vaultId ?? null}
                         onDone={onActionComplete}
                         variant={downloadMode}
+                        localModified={localMatch?.status === "modified"}
                       />
                     );
                   })()}

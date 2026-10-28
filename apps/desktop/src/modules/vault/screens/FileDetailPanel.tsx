@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useUser } from "@helios/auth";
 import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
 import { GetVersionButton, RestoreVersionButton } from "../components/RowActions";
@@ -8,6 +9,7 @@ import { BomPanel } from "../components/BomPanel";
 import { WatchToggleButton } from "../components/WatchToggleButton";
 import { useSetRevision } from "../data/useSetRevision";
 import { useVaultBom } from "../data/useVaultBom";
+import { usePeopleNames } from "../data/usePeopleNames";
 import type { FileId, FolderId, Folder, VaultFile, VaultId, Version } from "../data/types";
 
 interface Props {
@@ -103,6 +105,9 @@ function FileDetailLoader({
   // for B (MED defect).
   useEffect(() => { setShowBom(false); }, [fileId]);
   const { data, loading, error, refetch } = useVersions(fileId);
+  // Author names for the version rows (org directory; cached per session).
+  const nameById = usePeopleNames();
+  const user = useUser();
   const setRevision = useSetRevision();
   // Load BOM graph only when the file is an assembly and the user opened the panel.
   const bomResult = useVaultBom(showBom && vaultId ? vaultId : undefined);
@@ -259,7 +264,13 @@ function FileDetailLoader({
           <div className="p-3 text-sm text-helios-dim">No versions yet.</div>
         ) : (
           <>
-            <VersionList versions={data} onSelect={() => {}} renderActions={renderActions} />
+            <VersionList
+              versions={data}
+              onSelect={() => {}}
+              renderActions={renderActions}
+              nameById={nameById}
+              currentUserId={user?.id ?? null}
+            />
             {/* SolidWorks data card + assembly references for the latest version. */}
             <PropertiesPanel
               version={data[0] ?? null}

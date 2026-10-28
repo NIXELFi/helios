@@ -49,9 +49,25 @@ describe("<VersionList>", () => {
     expect(screen.queryByText("2026-03-01")).toBeNull();
     expect(screen.queryByText("2026-02-01")).toBeNull();
     expect(screen.queryByText("2026-01-01")).toBeNull();
-    // A locale-formatted date (slash-separated, not the dashed ISO form)
-    // appears instead — one per row.
-    expect(screen.getAllByText(/\d+\/\d+\/\d{4}/).length).toBe(versions.length);
+    // A human date ("Sun, Mar 1, 2026, …") appears instead — one per row, on
+    // the always-visible "by <who> · <when>" line.
+    // (Any year: a bare "2026-01-01" is UTC midnight, i.e. Dec 31 2025 in a
+    // US timezone.)
+    expect(screen.getAllByText(/^by .*\b20\d\d\b/).length).toBe(versions.length);
+  });
+
+  it("shows who checked each version in, with 'You' for the current user", () => {
+    const names = new Map([["u", "Alice A"]]);
+    const { unmount } = render(<VersionList versions={versions as any} onSelect={() => {}} nameById={names} />);
+    expect(screen.getAllByText("Alice A").length).toBe(versions.length);
+    unmount();
+    render(<VersionList versions={versions as any} onSelect={() => {}} nameById={names} currentUserId="u" />);
+    expect(screen.getAllByText("You").length).toBe(versions.length);
+  });
+
+  it("never shows a raw author id when the name is unknown", () => {
+    render(<VersionList versions={versions as any} onSelect={() => {}} />);
+    expect(screen.getAllByText("Unknown member").length).toBe(versions.length);
   });
 
   it("X8: shows an empty state when there are no versions", () => {

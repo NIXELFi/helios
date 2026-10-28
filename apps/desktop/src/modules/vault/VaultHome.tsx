@@ -15,6 +15,7 @@ import { useActiveVault } from "./data/useActiveVault";
 import { VaultFilesProvider, useVaultFiles } from "./data/vault-files-context";
 import { useVaultRealtimeFeed } from "./data/useVaultRealtime";
 import { useVaultUsers } from "./data/useVaultUsers";
+import { usePeopleNames } from "./data/usePeopleNames";
 import { useWatchedFiles } from "./data/useWatchedFiles";
 import { useNotifications } from "./data/useNotifications";
 import { WatchedFilesContext } from "./data/WatchedFilesContext";
@@ -80,15 +81,9 @@ function VaultHomeShell({ vaultId }: { vaultId: VaultId | undefined }) {
   // Resolve notification actor ids → human labels (email / display name) so the
   // feed shows "by jane@asu.edu" instead of a raw UUID prefix. Best-effort: the
   // RPC raises for non-members and the feed falls back to the id prefix.
+  // Org directory as the base so non-admin members resolve names too.
   const { data: vaultUsers } = useVaultUsers(vaultId ?? null);
-  const actorNames = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const u of vaultUsers ?? []) {
-      const label = u.email ?? u.display_name;
-      if (label) m.set(u.user_id, label);
-    }
-    return m;
-  }, [vaultUsers]);
+  const actorNames = usePeopleNames(vaultUsers);
 
   // Jump to file: switch to browse screen. Full navigation (open the folder +
   // select the file) requires more wiring; for v1 this at least surfaces the
