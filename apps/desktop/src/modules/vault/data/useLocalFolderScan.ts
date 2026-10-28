@@ -4,6 +4,11 @@ import { readDir, readFile, stat, watchImmediate } from "@tauri-apps/plugin-fs";
 import { useThrottledFocus } from "../../../lib/use-throttled-focus";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 
+/** `<name>.<uuid>.part` — the atomic-download staging file. Never a vault file. */
+export function isDownloadTemp(name: string): boolean {
+  return /\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i.test(name);
+}
+
 export interface LocalFile {
   basename: string;
   relativePath: string;
@@ -104,6 +109,9 @@ async function walk(
   for (const e of entries) {
     // Skip hidden + common cruft.
     if (e.name.startsWith(".")) continue;
+    // In-flight download temps (`<dest>.<uuid>.part`, see useDownloadVersion).
+    // They used to be scanned as new local files and auto-added to the vault.
+    if (isDownloadTemp(e.name)) continue;
     // SolidWorks writes a `~$<name>` sidecar next to a file while it's open for
     // editing and deletes it on close. Never let these enter the LocalFile list
     // (they'd otherwise leak into the "not in vault" unmatched banner). Instead
@@ -240,6 +248,7 @@ async function listPathsJs(
   for (const e of entries) {
     // Same skip rules as `walk`, in the same order.
     if (e.name.startsWith(".")) continue;
+    if (isDownloadTemp(e.name)) continue;
     if (e.name.startsWith("~$")) {
       const realName = e.name.slice(2);
       if (realName) {

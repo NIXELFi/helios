@@ -38,6 +38,8 @@ follow [semver](https://semver.org/).
 - **Names show for every vault member, not just admins.** Non-admin members used to see "Locked by other" or a shortened user ID. They now see real names in History, Recent check-ins, notifications, Insights, the Deleted screen and lock labels.
 
 ### Fixed
+- **The vault "restored from vault" banner no longer fills the screen.** When many files are restored at once (for example after a vault folder was wiped), it shows the first few names and an "and N more" list you can expand. The wording no longer implies you deleted each one.
+- **Interrupted downloads no longer end up in the vault.** Leftover download temp files (`<name>.<id>.part`) were being picked up by the folder scan and added to the vault as new files. They are now ignored.
 - **Vault notifications no longer run off the bottom of the screen.** The panel now opens upward from the bell and stays within the window.
 - **Vault Get Latest no longer overwrites changes you haven't checked in.** On a file row it asks first; a bulk Get Latest keeps those files and reports them as "kept — local changes". It used to replace them without warning.
 - **Failed Check Out, Check In and Get Latest now show an error toast.** Before, the only sign was a red "Retry" button with the reason in its tooltip.
