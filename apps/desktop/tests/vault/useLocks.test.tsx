@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import { useLocks } from "../../src/modules/vault/data/useLocks";
-import { notifyLockChange } from "../../src/modules/vault/data/lock-events";
+import { notifyLockChange, resetLockEventsForTests } from "../../src/modules/vault/data/lock-events";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -37,6 +37,8 @@ const wrap = (c: SupabaseClient) =>
     <SupabaseAuthProvider client={c}>{children}</SupabaseAuthProvider>;
 
 describe("useLocks", () => {
+  beforeEach(() => resetLockEventsForTests());
+
   it("queries active locks with .is('released_at', null)", async () => {
     observed = null;
     const c = mockClient([
@@ -90,5 +92,45 @@ describe("useLocks", () => {
     // Simulate a lock mutation succeeding.
     act(() => { notifyLockChange(); });
     await waitFor(() => expect(callCount).toBe(2));
+  });
+
+  it("collapses a burst of notifications into a couple of refetches and keeps identity when nothing changed", async () => {
+    let callCount = 0;
+    const rows = [
+      { id: "l1", file_id: "f1", user_id: "u", acquired_at: "t", released_at: null, force_released_by: null },
+    ];
+    const c = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u" } } }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      from: () => ({
+        select: () => ({
+          is: () => ({
+            order: () => ({
+              range: (from: number, to: number) => {
+                if (from === 0) callCount++;
+                // Fresh objects each time: identity must be preserved structurally.
+                return Promise.resolve({ data: rows.slice(from, to + 1).map((r) => ({ ...r })), error: null });
+              },
+            }),
+          }),
+        }),
+      }),
+    } as any;
+    const { result } = renderHook(() => useLocks(), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const first = result.current.data;
+    expect(callCount).toBe(1);
+
+    act(() => {
+      for (let i = 0; i < 300; i++) notifyLockChange();
+    });
+    await waitFor(() => expect(callCount).toBe(2)); // leading edge only so far
+    await waitFor(() => expect(callCount).toBe(3), { timeout: 2000 }); // one trailing
+    await new Promise((r) => setTimeout(r, 600));
+    expect(callCount).toBe(3);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toBe(first);
   });
 });

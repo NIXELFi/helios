@@ -26,9 +26,64 @@ export function subscribeLockChanges(cb: Listener): () => void {
   };
 }
 
-/** Call this from a lock-mutation hook after a successful RPC. Triggers an
- *  immediate refetch in every component currently rendering useLocks(),
- *  closing the staleness window before useVaultRealtime's event arrives. */
+/** Quiet period that closes a burst: the trailing refetch fires this long
+ *  after the LAST notification. */
+export const LOCK_NOTIFY_DEBOUNCE_MS = 250;
+/** Upper bound on how long a continuous burst can defer its trailing refetch. */
+export const LOCK_NOTIFY_MAX_WAIT_MS = 1000;
+
+let timer: ReturnType<typeof setTimeout> | null = null;
+let pending = false;
+let pendingSince = 0;
+
+function fire(): void {
+  for (const cb of [...listeners]) cb();
+}
+
+function onTimer(): void {
+  timer = null;
+  if (!pending) return; // quiet window elapsed with nothing queued: back to idle
+  pending = false;
+  fire();
+  // Keep the window open after a trailing fire so the next stragglers coalesce too.
+  timer = setTimeout(onTimer, LOCK_NOTIFY_DEBOUNCE_MS);
+}
+
+/** Call this from a lock-mutation hook after a successful RPC. Triggers a
+ *  refetch in every component currently rendering useLocks(), closing the
+ *  staleness window before useVaultRealtime's event arrives.
+ *
+ *  Coalesced: the first call of a burst fires immediately (leading edge, so a
+ *  single checkout still converges at once); further calls inside the window
+ *  collapse into one trailing fire after LOCK_NOTIFY_DEBOUNCE_MS of quiet, but
+ *  never later than LOCK_NOTIFY_MAX_WAIT_MS after the first deferred call. A
+ *  300-file folder checkout therefore costs a couple of full lock refetches per
+ *  mounted useLocks() instead of hundreds. The optimistic lock overlay
+ *  (lock-overlay.ts) keeps the actor's own pills instant in the meantime. */
 export function notifyLockChange(): void {
-  for (const cb of listeners) cb();
+  if (timer === null) {
+    fire();
+    timer = setTimeout(onTimer, LOCK_NOTIFY_DEBOUNCE_MS);
+    return;
+  }
+  const now = Date.now();
+  if (!pending) {
+    pending = true;
+    pendingSince = now;
+  }
+  clearTimeout(timer);
+  const left = pendingSince + LOCK_NOTIFY_MAX_WAIT_MS - now;
+  if (left <= 0) {
+    onTimer();
+    return;
+  }
+  timer = setTimeout(onTimer, Math.min(LOCK_NOTIFY_DEBOUNCE_MS, left));
+}
+
+/** Test isolation: drop any queued trailing fire and return to idle. */
+export function resetLockEventsForTests(): void {
+  if (timer !== null) clearTimeout(timer);
+  timer = null;
+  pending = false;
+  pendingSince = 0;
 }

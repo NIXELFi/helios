@@ -10,6 +10,27 @@ import {
   subscribeLockOverlay,
 } from "./lock-overlay";
 
+/** Same active-lock set (id, file, holder, release state)? Used to keep the
+ *  previous array identity across a refetch that changed nothing, so consumers
+ *  keyed on `locks` (useAutoSync's pass, memoised joins) don't churn. */
+function sameLocks(a: Lock[], b: Lock[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.id !== y.id ||
+      x.file_id !== y.file_id ||
+      x.user_id !== y.user_id ||
+      x.released_at !== y.released_at ||
+      x.force_released_by !== y.force_released_by
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function useLocks(): QueryResult<Lock[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<Lock[] | null>(null);
@@ -30,6 +51,9 @@ export function useLocks(): QueryResult<Lock[]> {
   }, []);
 
   useEffect(() => {
+    // `mounted` doubles as the supersede guard: the cleanup below runs when a
+    // newer tick (or unmount) replaces this effect, so a slow older response
+    // can never overwrite the newer tick's result.
     let mounted = true;
     setLoading(true);
     setError(null);
@@ -53,7 +77,7 @@ export function useLocks(): QueryResult<Lock[]> {
         // Drop optimistic overlay entries the server now confirms, then publish
         // the canonical rows — applyOverlay below reflects the reduced overlay.
         reconcileLockOverlay(rows);
-        setData(rows);
+        setData((prev) => (prev && sameLocks(prev, rows) ? prev : rows));
       }
       setLoading(false);
     })();

@@ -294,7 +294,15 @@ export function useBridgeSync(): void {
     };
   }, [reloadStructure, reloadLocks]);
 
-  useEffect(() => subscribeLockChanges(() => { void reloadLocks(); }), [reloadLocks]);
+  // Lock mutations refresh the bridge snapshot only while the add-in is
+  // connected (its sole consumer); a (re)connect fires an immediate reload via
+  // the event above, so nothing is lost by skipping the pull when it is absent.
+  useEffect(
+    () => subscribeLockChanges(() => {
+      void (async () => { if (await addinActive()) void reloadLocks(); })();
+    }),
+    [reloadLocks, addinActive],
+  );
 
   // Periodic refreshes, but only while the add-in is connected — an idle session
   // (no SOLIDWORKS) does zero bridge network traffic. The cheap addinActive()

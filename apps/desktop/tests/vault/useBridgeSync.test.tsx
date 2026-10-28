@@ -24,6 +24,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { useBridgeSync } from "../../src/modules/vault/data/useBridgeSync";
+import { notifyLockChange, resetLockEventsForTests } from "../../src/modules/vault/data/lock-events";
 
 // Recording client: every table read goes through fetchAllRows, which calls
 // .range() last. We record which tables were queried so a test can assert
@@ -69,6 +70,7 @@ describe("useBridgeSync add-in gating", () => {
     addinActive = false;
     connectHandler = null;
     invokeMock.mockClear();
+    resetLockEventsForTests();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -112,5 +114,34 @@ describe("useBridgeSync add-in gating", () => {
       await vi.advanceTimersByTimeAsync(310_000); // past the 5-min files interval
     });
     expect(structureQueried()).toBe(false);
+  });
+
+  it("ignores lock-change broadcasts while the add-in is not connected", async () => {
+    addinActive = false;
+    renderHook(() => useBridgeSync(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    queriedTables = [];
+    await act(async () => {
+      notifyLockChange();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(queriedTables).not.toContain("locks");
+  });
+
+  it("refreshes locks on a lock-change broadcast while the add-in is connected", async () => {
+    addinActive = true;
+    renderHook(() => useBridgeSync(), { wrapper });
+    await waitFor(() => expect(queriedTables).toContain("locks"));
+    queriedTables = [];
+    await act(async () => {
+      notifyLockChange();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(queriedTables).toContain("locks"));
   });
 });
