@@ -27,6 +27,25 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault: check out or check in a whole folder.** Right-click a folder and pick Check out folder or Check in folder, or use the new Check out / Check in buttons in the toolbar (they act on the folder you're in and all its subfolders, or the whole vault at the top level). Right-clicking a multi-selection in the folder tree offers the same. Before anything happens you see what will happen: files already checked out to you, files someone else has checked out (with their name and how long ago), local edits that won't be overwritten, and checkouts missing a local copy. One click does the rest, and the results list every file that didn't go through and why.
+- **Folder check-in releases unchanged checkouts and takes one comment.** Files you checked out but didn't change are checked back in without a new version, like SolidWorks PDM. The comment you type applies to every changed file.
+
+### Changed
+- **Bulk check-out and Get Latest are faster.** They now work on 6 files at a time (was 3).
+- **Big check-outs and check-ins no longer flood the app with refreshes.** Lock changes are batched, so a 300-file folder check-out triggers a handful of lock reloads instead of hundreds, and auto-sync isn't restarted after every file.
+- **Bulk actions are hidden from viewers.** Check Out, Cancel Checkout and Check In Changes no longer show to members who can't edit, since every file would fail.
+- **The Checkouts screen's "Check in all mine" uses the same engine as folder check-in**, so it records references and data cards and releases unchanged checkouts.
+
+### Fixed
+- **Bulk check-in could overwrite a teammate's newer work.** Selecting files and pressing Check In Changes would check in an old read-only copy if a teammate had checked in a newer version you hadn't synced yet. Only real local edits (writable copies) are checked in now.
+- **Check-out no longer overwrites unsaved local edits.** Bulk and folder check-out skip a writable copy that differs from the vault. Single-file check-out asks whether to keep your copy or replace it with the latest.
+- **Bulk check-in now records assembly references and data cards**, like a single check-in. Before, files checked in together lost both.
+- **Saving a file during check-in no longer loses the new edit.** If the file changes while it's uploading, it stays writable instead of being locked read-only and later overwritten by sync.
+- **Undo check-out can no longer delete a published file.** It treated a file as a never-checked-in draft when its latest version hadn't loaded yet. Undo also skips re-downloading files you didn't change.
+- **Restore Version is only offered when you hold the checkout** (the server requires it), and the restored copy is now recorded for sync.
+- **Large check-outs no longer start a SolidWorks helper process per file.** The in-session read-only switch runs one at a time, and only for files that are open in SolidWorks.
+
 ## [6.4.0] - 2026-10-28
 
 ### Added
