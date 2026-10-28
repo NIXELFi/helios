@@ -14,6 +14,7 @@ import { useAcquireLock } from "./useAcquireLock";
 import { useReleaseLock } from "./useReleaseLock";
 import { useDeleteFile } from "./useDeleteFile";
 import { useCheckIn } from "./useCheckIn";
+import { isStaleBaseError } from "./pg-errors";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { useRecordRefs } from "./useRecordRefs";
 import { useRecordProperties } from "./useRecordProperties";
@@ -436,7 +437,12 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         ) as ArrayBuffer;
         const comment = opts.comment === undefined ? "bulk check-in" : opts.comment;
         let why: string | null = null;
-        const r = await checkIn.run(id, ab, comment, (e) => { why = e.message; });
+        // Base version = what this machine last put at this path. Only for
+        // files with a version (a draft has nothing to be stale against).
+        const baseSha = prevVersionId
+          ? runCtx.ledger?.[normalizePathForCompare(vaultRelativePath(file, ctx.folders))]?.sha256 ?? null
+          : null;
+        const r = await checkIn.run(id, ab, comment, { onError: (e) => { why = e.message; }, baseSha });
         // Aborted before the RPC landed: give the lock back and stop. If it DID
         // land, fall through: the read-only + ledger finalize must run even on
         // abort, or the checked-in copy stays writable and reads as an unsaved
@@ -476,7 +482,9 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           // theirs; they were mid-edit).
           if (acquiredHere) await releaseLock.run(id);
           c.fail++;
-          fail(id, why ?? "Check-in failed");
+          fail(id, isStaleBaseError(why)
+            ? `${why} To keep your copy anyway, check this file in on its own.`
+            : why ?? "Check-in failed");
         }
       } catch (e) {
         if (acquiredHere) await releaseLock.run(id);

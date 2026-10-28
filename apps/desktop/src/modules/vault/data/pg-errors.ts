@@ -167,3 +167,9 @@ function nounFor(context: PgErrorContext, fallback: string): string {
     default: return fallback;
   }
 }
+
+/** True iff a check-in failed because a newer version landed after the local
+ *  copy was made (pdm.check_in's base guard). The message is the server's. */
+export function isStaleBaseError(message: string | null | undefined): boolean {
+  return !!message && /newer version \(v\d+\) was checked in after your copy/i.test(message);
+}

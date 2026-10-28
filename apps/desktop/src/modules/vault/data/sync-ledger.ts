@@ -380,3 +380,15 @@ export function ledgerTombstone(vaultId: string, relPath: string): Promise<void>
     };
   });
 }
+
+/** The sha this machine last materialized at `relPath` (downloaded or checked
+ *  in), or undefined. Check-in sends it as the base version so the server can
+ *  refuse an upload made from an older copy. Never throws. */
+export async function ledgerShaFor(vaultId: string, relPath: string): Promise<string | undefined> {
+  try {
+    const l = await loadLedger(vaultId);
+    return l.entries[normalizePathForCompare(relPath)]?.sha256;
+  } catch {
+    return undefined;
+  }
+}

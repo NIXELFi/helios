@@ -82,10 +82,16 @@ export function useCheckIn() {
       file_id: FileId,
       bytes: ArrayBuffer,
       comment: string | null,
-      // Per-call failure callback. errorRef is shared by every in-flight call
-      // on this hook instance, so a caller running several check-ins at once
-      // (the batch hook) reads its own row's reason here instead.
-      onError?: (err: Error) => void,
+      opts: {
+        // Per-call failure callback. errorRef is shared by every in-flight call
+        // on this hook instance, so a caller running several check-ins at once
+        // (the batch hook) reads its own row's reason here instead.
+        onError?: (err: Error) => void;
+        // sha of the version the local copy was made from (the sync ledger
+        // entry). The server refuses the check-in if a different version is
+        // latest now, instead of silently replacing it. Omit to skip the check.
+        baseSha?: string | null;
+      } = {},
     ): Promise<Version | null> => {
       setLoading(true);
       setError(null);
@@ -141,6 +147,7 @@ export function useCheckIn() {
           p_sha256: sha,
           p_size: bytes.byteLength,
           p_comment: comment,
+          ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
         });
         if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
         // pdm_check_in releases the caller's lock server-side. Clear the pill
@@ -157,7 +164,7 @@ export function useCheckIn() {
         const err = e instanceof Error ? e : new Error(String(e));
         errorRef.current = err;
         setError(err);
-        onError?.(err);
+        opts.onError?.(err);
         return null;
       } finally {
         setLoading(false);

@@ -16,6 +16,13 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
 // runtime in jsdom, so reject — useRecordRefs swallows it, keeping these tests
 // focused on the check-in/lock behavior they assert.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockRejectedValue(new Error("no tauri in test")) }));
+// Base version for the check-in stale guard: what the ledger says this machine
+// last materialized at the file's path.
+const ledgerSha = vi.hoisted(() => ({ value: undefined as string | undefined }));
+vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
+  ledgerRecord: vi.fn().mockResolvedValue(undefined),
+  ledgerShaFor: vi.fn(async () => ledgerSha.value),
+}));
 const dlCalls = vi.hoisted(() => [] as Array<{ sha: string; dest: string }>);
 const dlResult = vi.hoisted(() => ({ ok: true }));
 vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
@@ -212,6 +219,45 @@ describe("RowActions real-vault read-only transitions", () => {
       await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
       expect(screen.queryByRole("button", { name: /keep my copy/i })).not.toBeInTheDocument();
       expect(dlCalls).toHaveLength(0);
+    });
+  });
+
+  describe("check-in base-version guard", () => {
+    const local = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "edited", sizeBytes: 4, readonly: false };
+    const STALE = "A newer version (v3) was checked in after your copy was made, so checking it in would replace that work. Get the latest, redo your change, then check in.";
+
+    it("sends the ledger base, and on a stale refusal offers Check in anyway without it", async () => {
+      ledgerSha.value = "base-sha";
+      const calls: any[] = [];
+      const base = mockClient();
+      const client = {
+        ...base,
+        rpc: (name: string, args: any) => {
+          if (name !== "pdm_check_in") return base.rpc(name, args);
+          calls.push(args);
+          return Promise.resolve(calls.length === 1
+            ? { data: null, error: { code: "P0001", message: STALE } }
+            : { data: VERSION_ROW, error: null });
+        },
+      } as any;
+      render(wrap(client, <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} vaultId="vault-1" />));
+      fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+      expect(await screen.findByText(/a newer version is in the vault/i)).toBeInTheDocument();
+      expect(calls[0].p_base_sha256).toBe("base-sha");
+      fireEvent.click(screen.getByRole("button", { name: /check in anyway/i }));
+      await waitFor(() => expect(calls.length).toBe(2));
+      expect(calls[1].p_base_sha256).toBeUndefined();
+      ledgerSha.value = undefined;
+    });
+
+    it("sends no base when the ledger has none", async () => {
+      ledgerSha.value = undefined;
+      render(wrap(mockClient(), <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} vaultId="vault-1" />));
+      fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+      await waitFor(() => expect(capturedRpc?.name).toBe("pdm_check_in"));
+      expect(capturedRpc!.args.p_base_sha256).toBeUndefined();
     });
   });
 

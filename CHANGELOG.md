@@ -27,6 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault check-in refuses to overwrite a newer version.** When you check in, Helios now tells the server which version your copy started from. If someone checked in a newer version since then, the check-in stops (nothing is uploaded and you keep the checkout) instead of silently replacing their work. Checking in a single file offers "Check in anyway" for when your copy already includes their changes; folder check-in lists those files and points you there.
+
+### Fixed
+- **Files in the Deleted list can't be checked out or checked in.** The server now refuses both (live on the vault server since 2026-10-28), so an out-of-date file list can't lock or add a version to a deleted file. Restore it first.
+
 ## [6.4.1] - 2026-10-28
 
 ### Added

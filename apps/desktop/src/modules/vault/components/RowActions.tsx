@@ -4,6 +4,7 @@ import { readFile, stat } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
+import { isStaleBaseError } from "../data/pg-errors";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDeleteFile } from "../data/useDeleteFile";
 import { useDownloadVersion } from "../data/useDownloadVersion";
@@ -12,7 +13,7 @@ import { useRecordProperties } from "../data/useRecordProperties";
 import { useRestoreVersion } from "../data/useRestoreVersion";
 import { folderResolvable, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
-import { ledgerRecord } from "../data/sync-ledger";
+import { ledgerRecord, ledgerShaFor } from "../data/sync-ledger";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 import { toast } from "../data/toast";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -414,6 +415,12 @@ export function CheckInButton({
   // mtime of that file when its bytes were read (null = unreadable, so the
   // saved-again guard in submit() stands down).
   const mtimeRef = useRef<number | null>(null);
+  // True when the bytes came from the vault working copy (not a file picked by
+  // hand), so the sync ledger's entry for that path is their base version.
+  const fromWorkingCopyRef = useRef(false);
+  // The server refused the check-in because a newer version landed after this
+  // copy was made. Held so "Check in anyway" can resend the same bytes.
+  const [staleRetry, setStaleRetry] = useState<{ bytes: ArrayBuffer; comment: string | null; message: string } | null>(null);
 
   async function readBytes(): Promise<ArrayBuffer | null> {
     // Prefer the scan-matched local file, but fall back to the canonical vault
@@ -430,6 +437,7 @@ export function CheckInButton({
         const buf = await readArrayBuffer(candidate);
         pathRef.current = candidate;
         mtimeRef.current = mtime;
+        fromWorkingCopyRef.current = true;
         return buf;
       } catch {
         // Canonical copy missing / unreadable — fall through to the picker.
@@ -441,6 +449,7 @@ export function CheckInButton({
     const buf = await readArrayBuffer(path);
     pathRef.current = path;
     mtimeRef.current = mtime;
+    fromWorkingCopyRef.current = false;
     return buf;
   }
 
@@ -458,7 +467,17 @@ export function CheckInButton({
     if (!pendingBytes) return;
     const bytes = pendingBytes;
     setPendingBytes(null);
-    const result = await checkIn.run(fileId, bytes, comment);
+    await send(bytes, comment, false);
+  }
+
+  /** `force` skips the base-version check (the user chose "Check in anyway"). */
+  async function send(bytes: ArrayBuffer, comment: string | null, force: boolean) {
+    const rel = relForCtx({ folderId, fileName, folders });
+    const baseSha = !force && fromWorkingCopyRef.current && vaultId && rel
+      ? (await ledgerShaFor(vaultId, rel)) ?? null
+      : null;
+    let why: string | null = null;
+    const result = await checkIn.run(fileId, bytes, comment, { baseSha, onError: (e) => { why = e.message; } });
     if (result) {
       recordBreadcrumb("action", `vault: check-in ${fileName ?? "file"}`);
       // The file is now the latest version and no longer checked out → make the
@@ -492,8 +511,10 @@ export function CheckInButton({
       }
       toast(`Checked in ${fileName ?? localFile?.basename ?? "file"} — v${result.version_num}`);
       onDone?.();
+    } else if (isStaleBaseError(why)) {
+      // Nothing was written and the checkout is still held. Let the user decide.
+      setStaleRetry({ bytes, comment, message: why! });
     } else {
-      const why = checkIn.errorRef?.current?.message;
       toast(`Check-in of ${fileName ?? localFile?.basename ?? "file"} failed${why ? `: ${why}` : ""}`, "error");
     }
   }
@@ -523,6 +544,21 @@ export function CheckInButton({
           loading={checkIn.loading}
           onSubmit={(comment) => { void submit(comment); }}
           onCancel={() => setPendingBytes(null)}
+        />
+      )}
+      {staleRetry && (
+        <ConfirmDialog
+          title="A newer version is in the vault"
+          body={
+            <span className="whitespace-pre-line">
+              {`${staleRetry.message}\n\nCheck in anyway only if your copy already includes those changes. Your file becomes the latest version; the newer one stays in History.`}
+            </span>
+          }
+          confirmLabel="Check in anyway"
+          confirmTone="danger"
+          cancelLabel="Keep it checked out"
+          onConfirm={() => { const r = staleRetry; setStaleRetry(null); void send(r.bytes, r.comment, true); }}
+          onClose={() => setStaleRetry(null)}
         />
       )}
     </>

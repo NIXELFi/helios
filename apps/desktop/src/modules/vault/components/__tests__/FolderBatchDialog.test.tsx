@@ -234,8 +234,8 @@ describe("FolderBatchDialog: check out", () => {
   });
 
   it("reports the check-in failure reason for its own row", async () => {
-    checkInRun.mockImplementation(async (id: string, _b: unknown, _c: unknown, onError?: (e: Error) => void) => {
-      if (id === "caliper") { onError?.(new Error("upload: quota exceeded")); return null; }
+    checkInRun.mockImplementation(async (id: string, _b: unknown, _c: unknown, opts?: { onError?: (e: Error) => void }) => {
+      if (id === "caliper") { opts?.onError?.(new Error("upload: quota exceeded")); return null; }
       return { id: `v-${id}`, file_id: id, sha256: "x", version_num: 1 };
     });
     renderDialog("checkin", baseCtx({
@@ -318,6 +318,24 @@ describe("FolderBatchDialog: check in", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check in 1 file/i })); });
     await waitFor(() => expect(screen.getByText(/checked in 1 of 1 file/i)).toBeInTheDocument());
     expect(checkInRun.mock.calls.map((c) => c[0])).toEqual(["caliper"]);
+  });
+
+  it("sends this machine's ledger sha as the base, and explains a stale refusal", async () => {
+    ledgerEntries["brakes/caliper.sldprt"] = { sha256: "sha-caliper" };
+    const stale = "A newer version (v3) was checked in after your copy was made, so checking it in would replace that work. Get the latest, redo your change, then check in.";
+    checkInRun.mockImplementation(async (_id: string, _b: unknown, _c: unknown, opts?: { onError?: (e: Error) => void }) => {
+      opts?.onError?.(new Error(stale));
+      return null;
+    });
+    renderDialog("checkin", baseCtx({
+      locks: [lock("caliper", ME)],
+      localFiles: [local("Brakes/caliper.sldprt", "edited", false)],
+    }));
+    await act(async () => {}); // ledger load
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check in 1 file/i })); });
+    await waitFor(() => expect(screen.getByText(/checked in 0 of 1 file/i)).toBeInTheDocument());
+    expect(checkInRun.mock.calls[0]![3]).toMatchObject({ baseSha: "sha-caliper" });
+    expect(screen.getByText(/check this file in on its own/i)).toBeInTheDocument();
   });
 
   it("leaves a file writable when it was saved again during the upload", async () => {
