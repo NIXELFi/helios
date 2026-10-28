@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.4.1] - 2026-10-28
+
 ### Added
 - **Vault: check out or check in a whole folder.** Right-click a folder and pick Check out folder or Check in folder, or use the new Check out / Check in buttons in the toolbar (they act on the folder you're in and all its subfolders, or the whole vault at the top level). Right-clicking a multi-selection in the folder tree offers the same. Before anything happens you see what will happen: files already checked out to you, files someone else has checked out (with their name and how long ago), local edits that won't be overwritten, and checkouts missing a local copy. One click does the rest, and the results list every file that didn't go through and why.
 - **Folder check-in releases unchanged checkouts and takes one comment.** Files you checked out but didn't change are checked back in without a new version, like SolidWorks PDM. The comment you type applies to every changed file.
