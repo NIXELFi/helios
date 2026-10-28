@@ -108,7 +108,11 @@ export function CheckOutButton({
   async function doCheckOut() {
     setRollbackErr(null);
     const result = await acquireLock.run(fileId);
-    if (!result) return;
+    if (!result) {
+      // The red "Retry" tint + hover title is easy to miss — say it out loud.
+      toast(`Couldn't check out ${fileName ?? "file"}`, "error");
+      return;
+    }
     // Real-vault: checking out gets you the latest version (download it if you
     // don't have it locally) and makes the local copy WRITABLE so you can edit.
     const dest = localTarget({ vaultRoot, folderId, fileName, folders });
@@ -131,6 +135,7 @@ export function CheckOutButton({
           // rolled back in that case is a lie that leaves an invisible lock
           // teammates can't work around, so branch and name the recovery.
           const rolledBack = await release.run(fileId);
+          toast(`Check-out of ${fileName ?? "file"} failed — couldn't download the latest version`, "error");
           setRollbackErr(
             rolledBack
               ? "couldn't download the latest version — check-out was rolled back. Try again."
@@ -303,6 +308,9 @@ export function CheckInButton({
       }
       toast(`Checked in ${fileName ?? localFile?.basename ?? "file"} — v${result.version_num}`);
       onDone?.();
+    } else {
+      const why = checkIn.errorRef?.current?.message;
+      toast(`Check-in of ${fileName ?? localFile?.basename ?? "file"} failed${why ? `: ${why}` : ""}`, "error");
     }
   }
 
@@ -324,7 +332,7 @@ export function CheckInButton({
             : "bg-green-700 text-white hover:bg-green-600")
         }
       >
-        {checkIn.loading ? "…" : err ? "Retry" : "Check In…"}
+        {checkIn.loading ? "Uploading…" : err ? "Retry" : "Check In…"}
       </button>
       {pendingBytes && (
         <CheckInCommentModal
@@ -461,6 +469,10 @@ interface GetLatestButtonProps {
   /** Active vault id — records a successful into-vault download in the ledger. */
   vaultId?: string | null;
   onDone?: () => void;
+  /** The local copy differs from the vault (unsaved edits). Get Latest then
+   *  asks before overwriting — it used to clobber local work silently, unlike
+   *  Get Version / bulk download which already guard this. */
+  localModified?: boolean;
   /**
    * Visual + behavioral variant.
    *
@@ -485,16 +497,27 @@ export function GetLatestButton({
   vaultId,
   onDone,
   variant = "auto",
+  localModified = false,
 }: GetLatestButtonProps) {
   const download = useDownloadVersion();
+  const [confirming, setConfirming] = useState(false);
   // Without a version sha we can't download anything — keep the row clean.
   if (!latestSha) return null;
   // Auto-mode keeps its original "needs a vault folder" gate. Manual mode
   // works with or without a vault folder (it falls back to save dialog).
   if (variant === "auto" && !vaultRoot) return null;
 
-  async function handleClick(e: React.MouseEvent) {
+  function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
+    if (vaultRoot && localModified) {
+      setConfirming(true);
+      return;
+    }
+    void doGet();
+  }
+
+  async function doGet() {
+    setConfirming(false);
     let dest: string;
     let intoVault = false;
     if (vaultRoot) {
@@ -529,6 +552,8 @@ export function GetLatestButton({
       }
       toast(`Downloaded ${fileName}`);
       onDone?.();
+    } else {
+      toast(`Couldn't download ${fileName}`, "error");
     }
   }
 
@@ -546,6 +571,7 @@ export function GetLatestButton({
           : "Choose where to save the latest version")
       : "Download latest version to local vault folder";
   return (
+    <>
     <button
       type="button"
       onClick={handleClick}
@@ -560,6 +586,22 @@ export function GetLatestButton({
     >
       {download.loading ? "…" : err ? "Retry" : idleLabel}
     </button>
+    {confirming && (
+      // The dialog renders inside the file row; stop its clicks (backdrop,
+      // Cancel) bubbling into the row's select handler.
+      <span onClick={(e) => e.stopPropagation()}>
+      <ConfirmDialog
+        title={`Overwrite your changes to ${fileName}?`}
+        body={`Your local copy of ${fileName} has changes that aren't checked in. Getting the latest version replaces it and those changes are lost. To keep them, check the file in instead.`}
+        confirmLabel="Discard my changes"
+        confirmTone="danger"
+        cancelLabel="Keep my copy"
+        onConfirm={() => { void doGet(); }}
+        onClose={() => setConfirming(false)}
+      />
+      </span>
+    )}
+    </>
   );
 }
 

@@ -53,6 +53,7 @@ import { VaultSearch } from "../components/VaultSearch";
 import { useVaultProperties } from "../data/useVaultProperties";
 import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
 import { RecentActivity } from "../components/RecentActivity";
+import { usePeopleNames } from "../data/usePeopleNames";
 import { useMoveFile } from "../data/useMoveFile";
 import { toast } from "../data/toast";
 import { fetchWhereUsed } from "../data/useReferences";
@@ -240,21 +241,24 @@ export function BrowseScreen() {
     void ensureLocalFolderTree(folders, vaultFolderPath);
   }, [folders, vaultFolderPath, vaultId]);
   // Lock-holder names: map each user id → email (fall back to display name) so
-  // the FileTable can render "Locked by <person>" instead of "Locked by other".
+  // the FileTable can render "Checked out by <person>" instead of the generic label.
   // Resolve via the VAULT-SCOPED list (pdm_list_vault_roles): the global RPC
   // (pdm_admin_list_users) is gated to GLOBAL admins only, so a per-vault admin
-  // got an empty map and saw "Locked by other" for their own teammates. Both
+  // got an empty map and saw the generic "someone else" label for their own teammates. Both
   // raise for non-members; we ignore the error and fall back to the generic
   // label, so a viewer still sees the screen.
   const { data: vaultUsers } = useVaultUsers(vaultId);
+  // Org directory names as the fallback base so a non-admin member (for whom
+  // the vault user RPC raises) still sees "Checked out by Jane".
+  const peopleNames = usePeopleNames(vaultUsers);
   const holderEmailById = useMemo(() => {
-    const m = new Map<UserId, string>();
+    const m = new Map<UserId, string>(peopleNames);
     for (const u of vaultUsers ?? []) {
-      const label = u.email ?? u.display_name;
+      const label = u.display_name?.trim() || u.email;
       if (label) m.set(u.user_id, label);
     }
     return m;
-  }, [vaultUsers]);
+  }, [vaultUsers, peopleNames]);
   // Memoized: findUnmatchedLocal allocates a fresh array each call, so without
   // this every render handed a new identity to <UnmatchedFilesBanner>.
   // Consistency-gated (same discipline as useAutoSync / the reaper / the
@@ -855,7 +859,8 @@ export function BrowseScreen() {
         </div>
         <RecentActivity
           allFiles={allFiles ?? []}
-          holderEmailById={holderEmailById}
+          nameById={peopleNames}
+          currentUserId={user?.id ?? null}
           onPick={jumpToFile}
         />
         {/* Lock-dot legend — the tree's blue/red dots are otherwise learned by
@@ -997,6 +1002,7 @@ export function BrowseScreen() {
               {canEdit && (
                 <button
                   onClick={() => openPrompt("file")}
+                  title="Create an empty file entry (no versions yet)"
                   className="rounded px-2 py-0.5 text-xs text-helios-dim hover:bg-helios-line hover:text-helios-text"
                 >
                   + File
@@ -1125,7 +1131,7 @@ export function BrowseScreen() {
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold text-helios-text">
               {dropImport.importing
-                ? "Importing dropped files…"
+                ? `Importing ${Math.min(dropImport.results.length + 1, dropImport.total)} of ${dropImport.total}…`
                 : (() => {
                     const ok = dropImport.results.filter((r) => r.ok).length;
                     const total = dropImport.results.length;
@@ -1145,7 +1151,10 @@ export function BrowseScreen() {
           </div>
           {dropImport.importing && (
             <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-helios-line">
-              <div className="h-full w-1/3 animate-pulse bg-asu-gold" />
+              <div
+                className="h-full rounded-full bg-asu-gold transition-[width] duration-300"
+                style={{ width: `${dropImport.total ? (dropImport.results.length / dropImport.total) * 100 : 0}%` }}
+              />
             </div>
           )}
           {dropImport.results.length > 0 && (
@@ -1161,7 +1170,10 @@ export function BrowseScreen() {
                 >
                   <span className={"inline-block h-1.5 w-1.5 shrink-0 rounded-full " + (r.ok ? "bg-green-400" : "bg-[#EF5350]")} />
                   <span className="truncate">{r.name}</span>
-                  {!r.ok && r.error && <span className="ml-auto shrink-0 text-[10px]">failed</span>}
+                  {!r.ok && r.error && (
+                    // The reason inline, not hover-only.
+                    <span className="ml-auto min-w-0 truncate text-[10px]">{r.error}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1424,28 +1436,14 @@ export function BrowseScreen() {
         />
       )}
       {actionError && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setActionError(null)}
-        >
-          <div
-            role="alert"
-            className="w-80 space-y-3 rounded-lg border border-[#EF5350]/50 bg-helios-panel p-4 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold text-helios-text">Action failed</h3>
-            <p className="text-xs text-red-200">{actionError}</p>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setActionError(null)}
-                className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold/90"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Action failed"
+          body={<span className="text-red-200">{actionError}</span>}
+          confirmLabel="Dismiss"
+          confirmTone="default"
+          onConfirm={() => {}}
+          onClose={() => setActionError(null)}
+        />
       )}
       {prompt && (
         <div
@@ -1453,13 +1451,31 @@ export function BrowseScreen() {
           onClick={() => setPrompt(null)}
         >
           <form
+            role="dialog"
+            aria-modal="true"
+            aria-label={prompt.kind === "folder" ? "New folder" : "New file"}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setPrompt(null); } }}
             onSubmit={handlePromptSubmit}
             className="w-80 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4 shadow-lg"
           >
             <h3 className="text-sm font-semibold text-helios-text">
               {prompt.kind === "folder" ? "New folder" : "New file"}
+              {/* Say WHERE it lands — the toolbar parents at the navigation
+                  selection, the context menu at the clicked folder. */}
+              <span className="mt-0.5 block truncate text-[11px] font-normal text-helios-dim">
+                in {(() => {
+                  const target = prompt.kind === "folder" ? (promptParent ?? selectedFolder) : selectedFolder;
+                  return target ? `${folderPath(target, folders ?? [])}/` : "the vault root";
+                })()}
+              </span>
             </h3>
+            {prompt.kind === "file" && (
+              <p className="text-[11px] text-helios-dim">
+                Creates an empty vault entry with no versions yet. To add a file from your
+                computer, drop it into the vault folder or onto a folder here.
+              </p>
+            )}
             <input
               autoFocus
               type="text"

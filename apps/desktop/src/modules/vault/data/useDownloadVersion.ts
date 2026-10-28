@@ -161,20 +161,23 @@ export async function downloadVersionOnceInWebview(
       const tmpPath = `${destPath}.${crypto.randomUUID()}.part`;
       try {
         await writeFile(tmpPath, arr);
+        // Last-chance abort check: the temp write above is awaited IO, so a
+        // supersede/abort can land while it runs. Without this re-check the
+        // rename still commits a superseded pass's bytes over a path a newer
+        // pass (or a fresh check-out) now owns. Checked BEFORE un-protecting
+        // the destination: an aborted download must leave the old copy
+        // read-only — a writable stale copy reads as an unsaved edit that sync
+        // holds back (and bulk Get Latest "keeps") forever.
+        if (signal?.aborted) {
+          try { await remove(tmpPath); } catch { /* best-effort */ }
+          return { ok: false, error: "aborted" };
+        }
         // The real-vault model leaves non-checked-out files read-only. Renaming
         // onto a read-only destination fails on Windows (MoveFileExW →
         // ACCESS_DENIED), so clear the bit first; the caller (auto-sync
         // reconciliation / check-in) re-applies read-only after. Best-effort:
         // no-ops when the dest doesn't exist yet (first download).
         await setReadonly(destPath, false);
-        // Last-chance abort check: the temp write above is awaited IO, so a
-        // supersede/abort can land while it runs. Without this re-check the
-        // rename still commits a superseded pass's bytes over a path a newer
-        // pass (or a fresh check-out) now owns.
-        if (signal?.aborted) {
-          try { await remove(tmpPath); } catch { /* best-effort */ }
-          return { ok: false, error: "aborted" };
-        }
         await rename(tmpPath, destPath);
       } catch (writeErr) {
         try { await remove(tmpPath); } catch { /* best-effort; temp may not exist */ }
@@ -296,16 +299,17 @@ export async function downloadVersionOnce(
         catch { /* mkdir errors when the dir exists in some Tauri versions */ }
       }
       try {
-        // The real-vault model leaves non-checked-out files read-only, and
-        // renaming onto a read-only destination fails on Windows.
-        await setReadonly(destPath, false);
         // Last-chance abort check: a supersede can land while the transfer
         // ran. Without this the rename commits a superseded pass's bytes over
-        // a path a newer pass now owns.
+        // a path a newer pass now owns. Checked BEFORE un-protecting the
+        // destination so an aborted download leaves the old copy read-only.
         if (signal?.aborted) {
           try { await remove(native.tempPath); } catch { /* best-effort */ }
           return { ok: false, error: "aborted" };
         }
+        // The real-vault model leaves non-checked-out files read-only, and
+        // renaming onto a read-only destination fails on Windows.
+        await setReadonly(destPath, false);
         await rename(native.tempPath, destPath);
       } catch (writeErr) {
         try { await remove(native.tempPath); } catch { /* best-effort */ }

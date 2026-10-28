@@ -88,7 +88,7 @@ function mockClient(opts: Opts = {}): SupabaseClient {
       return okChain([]);
     }),
     rpc: (name: string) => {
-      if (name === "pdm_admin_list_users") return Promise.resolve({ data: users, error: null });
+      if (name === "pdm_admin_list_users" || name === "pdm_list_vault_roles") return Promise.resolve({ data: users, error: null });
       return Promise.resolve({ data: false, error: null });
     },
   } as any;
@@ -173,7 +173,7 @@ describe("<HistoryScreen>", () => {
     await act(async () => { fireEvent.click(folderRow); });
     // The locked-by-other row names the holder by display name, not the
     // generic fallback.
-    expect(await screen.findByText(/Locked by Alice A/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Locked by other/i)).toBeNull();
+    expect(await screen.findByText(/Checked out by Alice A/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Checked out by someone else/i)).toBeNull();
   });
 });

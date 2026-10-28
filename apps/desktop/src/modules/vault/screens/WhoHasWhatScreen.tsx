@@ -16,6 +16,7 @@ import { usePeople } from "../../org/data/useOrgData";
 import { folderPath, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
+import { absoluteWhen } from "../lib/when";
 import type { Lock, VaultUser } from "../data/types";
 
 /** Canonical lock-holder label: prefer the human display name, then the email,
@@ -24,7 +25,7 @@ import type { Lock, VaultUser } from "../data/types";
  *  BrowseScreen email-first vs WhoHasWhat name-first inconsistency (HOLDER-LABEL).
  *  Standardized on display_name-first. */
 export function holderLabel(u: Pick<VaultUser, "display_name" | "email">): string | null {
-  return u.display_name ?? u.email ?? null;
+  return u.display_name?.trim() || u.email || null;
 }
 
 /** Resolve a lock-holder's display name from an ordered list of id→name maps.
@@ -545,7 +546,7 @@ export function WhoHasWhatScreen() {
                 <thead className="text-left text-xs uppercase tracking-wider text-helios-dim">
                   <tr>
                     <th className="px-3 py-2 font-normal">File</th>
-                    <th className="px-3 py-2 font-normal">Holder</th>
+                    <th className="px-3 py-2 font-normal">Checked out by</th>
                     <th className="px-3 py-2 font-normal">Since</th>
                     {showActions && <th className="px-3 py-2 font-normal">Actions</th>}
                   </tr>
@@ -584,10 +585,10 @@ export function WhoHasWhatScreen() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-helios-text" title={lock.user_id}>
+                        <td className="px-3 py-2 text-helios-text">
                           {holderName}
                         </td>
-                        <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
+                        <td className="px-3 py-2 text-helios-dim" title={absoluteWhen(lock.acquired_at)}>
                           {relativeTime(lock.acquired_at)}
                         </td>
                         {showActions && (

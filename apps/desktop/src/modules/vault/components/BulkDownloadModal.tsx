@@ -21,8 +21,15 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
       onClick={api.close}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Bulk download"
+        tabIndex={-1}
+        // Focus once so Escape works; never steal focus back from its buttons.
+        ref={(el) => { if (el && !el.contains(document.activeElement)) el.focus(); }}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); api.close(); } }}
         onClick={(e) => e.stopPropagation()}
-        className="w-[28rem] rounded-lg border border-helios-line bg-helios-panel p-5 shadow-xl"
+        className="w-[28rem] outline-none rounded-lg border border-helios-line bg-helios-panel p-5 shadow-xl"
       >
         <h3 className="mb-2 text-sm font-semibold text-helios-text">
           Downloading {api.total} files

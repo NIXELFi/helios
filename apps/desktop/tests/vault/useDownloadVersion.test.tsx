@@ -135,6 +135,21 @@ describe("useDownloadVersion", () => {
     expect(roOrder).toBeLessThan(renameOrder);
   });
 
+  it("an abort during the temp write leaves the old copy READ-ONLY (never un-protected)", async () => {
+    // Stop during a bulk Get Latest used to clear the dest's read-only bit and
+    // THEN bail — leaving a stale copy writable, which sync then holds back as
+    // an "unsaved edit" forever.
+    const bytes = new Uint8Array([7, 7, 7]);
+    const sha = await sha256Hex(bytes);
+    const c = mockClient({ data: makeBlob(bytes), error: null });
+    const ctrl = new AbortController();
+    vi.mocked(fs.writeFile).mockImplementationOnce(async () => { ctrl.abort(); });
+    const r = await downloadVersionOnce(c, sha, "/v/x.sldprt", { signal: ctrl.signal });
+    expect(r.ok).toBe(false);
+    expect(vi.mocked(fsReadonly.setReadonly)).not.toHaveBeenCalledWith("/v/x.sldprt", false);
+    expect(fs.rename).not.toHaveBeenCalled();
+  });
+
   it("uses a DIFFERENT temp name per call so concurrent writers to the same dest can't collide", async () => {
     // Two parallel downloads of the same dest (e.g. a retry racing the original,
     // or two callers) must stage to distinct temp paths. With a fixed `.part`

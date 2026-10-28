@@ -136,6 +136,11 @@ fn walk(
         if name.starts_with('.') {
             continue;
         }
+        // In-flight download temps (`<dest>.<uuid>.part`, see download.rs).
+        // They used to be scanned as new local files and auto-added to the vault.
+        if is_download_temp(&name) {
+            continue;
+        }
         // SOLIDWORKS writes a `~$<name>` sidecar next to a file while it is
         // open for editing. These are never entries; they are the live
         // "open in SOLIDWORKS" signal, keyed exactly like relative_path below
@@ -226,6 +231,19 @@ fn walk(
             });
         }
     }
+}
+
+/// `<name>.<uuid>.part` — the atomic-download staging file written by
+/// `download.rs` / useDownloadVersion. Never a vault file.
+fn is_download_temp(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".part") else { return false };
+    let Some(dot) = stem.rfind('.') else { return false };
+    let uuid = &stem[dot + 1..];
+    uuid.len() == 36
+        && uuid.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        })
 }
 
 /// Streaming sha256 — never holds more than `HASH_BUF` of a file in memory.
@@ -372,6 +390,24 @@ mod tests {
             find(&res, "Sub/inner.txt").absolute_path,
             format!("{}/Sub/inner.txt", root.to_str().unwrap())
         );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn skips_in_flight_download_temps() {
+        let root = scratch("parts");
+        write(&root.join("Part.SLDPRT"), "hello");
+        write(&root.join("Part.SLDPRT.b0935473-36dd-48e2-994a-f18cb1caf54a.part"), "x");
+        // Not a download temp: a user file that merely ends in .part.
+        write(&root.join("engine.part"), "hello");
+
+        let mut cache = ShaCache::new();
+        let (res, _) = scan_dir(root.to_str().unwrap(), &mut cache);
+        let mut rels: Vec<&str> = res.entries.iter().map(|e| e.relative_path.as_str()).collect();
+        rels.sort();
+        assert_eq!(rels, vec!["Part.SLDPRT", "engine.part"]);
+        assert!(!is_download_temp("x.SLDPRT.not-a-uuid.part"));
 
         fs::remove_dir_all(&root).ok();
     }

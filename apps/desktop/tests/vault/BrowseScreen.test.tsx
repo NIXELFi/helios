@@ -422,7 +422,7 @@ describe("<BrowseScreen>", () => {
 
   it("resolves the lock-holder email into the FileTable (H17)", async () => {
     // A root file locked by u2 + a vault-users RPC that maps u2 → alice@x.com
-    // should render "Locked by alice@x.com", not the generic "Locked by other".
+    // should render "Checked out by alice@x.com", not the generic label.
     const c = buildLockHolderClient();
     render(
       <SupabaseAuthProvider client={c}>
@@ -434,6 +434,6 @@ describe("<BrowseScreen>", () => {
     // rocker.sldprt appears in both the folder tree and the file table, so use
     // the getAllBy variant; the holder label is unique to the file table.
     await waitFor(() => expect(screen.getAllByText("rocker.sldprt").length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByText(/Locked by alice@x\.com/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Checked out by alice@x\.com/i)).toBeInTheDocument());
   });
 });

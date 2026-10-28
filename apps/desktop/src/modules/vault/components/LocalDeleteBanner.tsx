@@ -22,6 +22,42 @@ import { osNotify } from "../data/notify";
  *
  * Returns null when both lists are empty.
  */
+/** How many names a banner shows before collapsing to "and N more". */
+const NAMES_SHOWN = 5;
+
+/**
+ * A long file list without the wall of text: the first few names inline, the
+ * rest behind "and N more", which expands into a capped, scrollable box. A
+ * whole-folder restore (hundreds of files) used to dump every name into the
+ * banner and push the vault off the screen.
+ */
+function NameList({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  const rest = names.length - NAMES_SHOWN;
+  if (rest <= 0) return <span className="font-mono-num">{names.join(", ")}</span>;
+  return (
+    <>
+      <span className="font-mono-num">{names.slice(0, NAMES_SHOWN).join(", ")}</span>
+      {" "}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="underline decoration-dotted underline-offset-2 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
+      >
+        {open ? "show less" : `and ${rest} more`}
+      </button>
+      {open && (
+        <ul className="mt-1.5 max-h-40 overflow-auto rounded border border-[#FFB800]/30 bg-black/20 px-2 py-1 font-mono-num text-xs">
+          {names.map((n) => (
+            <li key={n} className="truncate" title={n}>{n}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 export function LocalDeleteBanner() {
   const [blockedNames, setBlockedNames] = useState<string[]>([]);
   const [propagatedNames, setPropagatedNames] = useState<string[]>([]);
@@ -41,7 +77,7 @@ export function LocalDeleteBanner() {
       const body =
         n === 1
           ? `"${names[0]!}" was deleted locally but isn't checked out — restored from vault. Check out first to delete.`
-          : `${n} file(s) deleted locally but not checked out — restored from vault. Check out first to delete.`;
+          : `${n} files were missing locally and have been restored from the vault.`;
       void osNotify("Helios Vault", body);
     });
 
@@ -106,8 +142,9 @@ export function LocalDeleteBanner() {
                 </>
               ) : (
                 <>
-                  {blockedNames.length} file(s) deleted locally but not checked out — restored from vault. Check out first to delete:{" "}
-                  <span className="font-mono-num">{blockedNames.join(", ")}</span>
+                  {blockedNames.length} files were missing from your local folder and have been
+                  restored from the vault. To delete a file from the vault, check it out first.{" "}
+                  <NameList names={blockedNames} />
                 </>
               )}
             </span>
@@ -131,8 +168,8 @@ export function LocalDeleteBanner() {
                 </>
               ) : (
                 <>
-                  {heldBackNames.length} vault-deleted file(s) had unsaved local changes — kept on disk. Restore them from Deleted or delete the local copies manually:{" "}
-                  <span className="font-mono-num">{heldBackNames.join(", ")}</span>
+                  {heldBackNames.length} vault-deleted files had unsaved local changes — kept on disk. Restore them from Deleted or delete the local copies manually.{" "}
+                  <NameList names={heldBackNames} />
                 </>
               )}
             </span>

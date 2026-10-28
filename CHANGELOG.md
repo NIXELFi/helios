@@ -27,6 +27,28 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault — who did it and when.** Every version in History and the file panel now shows who checked it in and the exact date and time, plus a short relative time like "3h ago". Your own check-ins show as "You". Recent check-ins show the person and time on each row.
+- **Vault History opens on recent activity.** Before you pick a file, History lists the most recently changed files (up to 50) across the vault or in the selected folder. Each row shows who checked it in last and when, and you can filter to one person. Click a row to open that file's history.
+- **Vault bulk actions show progress.** Bulk Check In, Get Latest, Check Out, Undo Checkout and Delete show a progress bar, a count ("Checking in 4 of 12…") and the current file name. A Stop button ends the run early.
+- **Vault Deleted screen shows who deleted each item.** Restoring a file or folder now shows a confirmation toast.
+
+### Changed
+- **Vault bulk Check In, Get Latest and Check Out are faster.** They now handle 3 files at a time instead of one after another.
+- **Names show for every vault member, not just admins.** Non-admin members used to see "Locked by other" or a shortened user ID. They now see real names in History, Recent check-ins, notifications, Insights, the Deleted screen and lock labels.
+
+### Fixed
+- **The vault "restored from vault" banner no longer fills the screen.** When many files are restored at once (for example after a vault folder was wiped), it shows the first few names and an "and N more" list you can expand. The wording no longer implies you deleted each one.
+- **Interrupted downloads no longer end up in the vault.** Leftover download temp files (`<name>.<id>.part`) were being picked up by the folder scan and added to the vault as new files. They are now ignored.
+- **Vault notifications no longer run off the bottom of the screen.** The panel now opens upward from the bell and stays within the window.
+- **Vault Get Latest no longer overwrites changes you haven't checked in.** On a file row it asks first; a bulk Get Latest keeps those files and reports them as "kept — local changes". It used to replace them without warning.
+- **Failed Check Out, Check In and Get Latest now show an error toast.** Before, the only sign was a red "Retry" button with the reason in its tooltip.
+- **Escape now closes vault dialogs** (bulk Delete, Undo Checkout, Action failed, the new-folder prompt and the bulk download window). It no longer clears your tree selection instead.
+- **Vault wording is consistent:** "Checked out by <name>" everywhere (it was a mix of "Locked by", "Holder" and "checked out"). Names show the same way on every screen.
+- **Set Revision and Settings → Clear now ask before acting.** Set Revision also confirms when it is done.
+- **Drag-and-drop import shows real progress** ("Importing 3 of 10…") and failure reasons in the list, not only on hover.
+- **Smaller vault fixes:** long file and folder names show in full on hover; the row ⋯ menu and "Open →" are faintly visible before you hover; arrow keys in search keep the highlighted result in view; version rows no longer look clickable when they aren't; and the new-file prompt says which folder it creates into.
+
 ## [6.3.0] - 2026-10-20
 
 ### Added
