@@ -301,6 +301,25 @@ describe("FolderBatchDialog: check in", () => {
     expect(vi.mocked(setReadonly)).toHaveBeenCalledWith("/vault/Brakes/Rotors/front.sldprt", true);
   });
 
+  it("can leave unchanged checkouts alone (they may be in use on another computer)", async () => {
+    checkInRun.mockImplementation(async (id: string) => ({ id: `v-${id}-2`, file_id: id, sha256: "x", version_num: 2 }));
+    renderDialog("checkin", baseCtx({
+      locks: [lock("caliper", ME), lock("front", ME)],
+      localFiles: [
+        local("Brakes/caliper.sldprt", "edited", false),
+        local("Brakes/Rotors/front.sldprt", "sha-front", false),
+      ],
+    }));
+    await act(async () => {}); // ledger load
+    const box = screen.getByRole("checkbox", { name: /also release my 1 unchanged checkout/i });
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(screen.getByTestId("folder-batch-eligible")).toHaveTextContent("1 file will be checked in.");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check in 1 file/i })); });
+    await waitFor(() => expect(screen.getByText(/checked in 1 of 1 file/i)).toBeInTheDocument());
+    expect(checkInRun.mock.calls.map((c) => c[0])).toEqual(["caliper"]);
+  });
+
   it("leaves a file writable when it was saved again during the upload", async () => {
     checkInRun.mockResolvedValue({ id: "v-caliper-2", file_id: "caliper", sha256: "x", version_num: 2 });
     statMock

@@ -101,7 +101,8 @@ export function classifyCheckIn(
   const modified = m.status === "modified" && !!m.local;
   // A differing copy this machine materialized and nobody touched is an
   // older version, not an edit (only possible when the file has a version).
-  const untouched = modified && !!ctx.versionsByFileId.get(file.id)?.[0] && isUntouchedCopy(file, m.local!.sha256, ctx);
+  const hasVersion = !!ctx.versionsByFileId.get(file.id)?.[0];
+  const untouched = modified && hasVersion && isUntouchedCopy(file, m.local!.sha256, ctx);
   const k = lockKind(ctx, file.id);
   if (k === "other") {
     return {
@@ -112,7 +113,10 @@ export function classifyCheckIn(
   }
   if (k === "me") {
     if (!m.local) return { kind: "mine-no-local" };
-    if (untouched) return { kind: "mine-stale" };
+    // Read-only while checked out to me means this machine never made the
+    // copy editable (the checkout happened elsewhere) and nobody edited it
+    // here: a differing read-only copy is an older version, not an edit.
+    if (untouched || (modified && hasVersion && m.local.readonly === true)) return { kind: "mine-stale" };
     if (modified) return { kind: "eligible", changed: true, needsLock: false };
     return includeUnchangedMine
       ? { kind: "eligible", changed: false, needsLock: false }
@@ -155,6 +159,10 @@ export interface CheckInPlan {
   eligible: VaultFile[];
   changed: number;
   unchanged: number;
+  /** The unchanged ones (checked out to you, identical to the vault). Checking
+   *  them in only releases the checkout, which may be one you hold from
+   *  another computer, so the dialog lists them and makes it optional. */
+  unchangedFiles: VaultFile[];
   /** Checked out by someone else, and you have local edits to it. */
   blocked: HeldRow[];
   /** Checked out by someone else, no local edits. Untouched, listed so the
@@ -167,14 +175,14 @@ export interface CheckInPlan {
 
 export function planCheckIn(files: readonly VaultFile[], ctx: ClassifyCtx): CheckInPlan {
   const plan: CheckInPlan = {
-    eligible: [], changed: 0, unchanged: 0, blocked: [], others: [], mineNoLocal: [], mineStale: [],
+    eligible: [], changed: 0, unchanged: 0, unchangedFiles: [], blocked: [], others: [], mineNoLocal: [], mineStale: [],
   };
   for (const f of files) {
     const c = classifyCheckIn(f, ctx, true);
     if (c.kind === "eligible") {
       plan.eligible.push(f);
       if (c.changed) plan.changed++;
-      else plan.unchanged++;
+      else { plan.unchanged++; plan.unchangedFiles.push(f); }
     } else if (c.kind === "other") {
       (c.hasLocalEdits ? plan.blocked : plan.others).push({ file: f, lock: c.lock });
     } else if (c.kind === "mine-no-local") {

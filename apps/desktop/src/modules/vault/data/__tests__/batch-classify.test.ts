@@ -192,4 +192,11 @@ describe("sync-ledger awareness", () => {
     );
     expect(classifyCheckIn(file("a"), c, true)).toEqual({ kind: "eligible", changed: true, needsLock: false });
   });
+
+  it("a read-only differing copy I hold is stale even with no ledger entry", () => {
+    // Checked out (and still being edited) on another computer; this machine
+    // never made its copy writable, so it can't hold an edit.
+    const c = ctx({ versions: [version("a", "v2sha")], locals: [local("a.sldprt", "v1sha", true)], locks: [lock("a", ME)] });
+    expect(classifyCheckIn(file("a"), c, true).kind).toBe("mine-stale");
+  });
 });

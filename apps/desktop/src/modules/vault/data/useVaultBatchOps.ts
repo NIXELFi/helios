@@ -368,9 +368,11 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           const got = await download.run(ver.sha256, dest, signal);
           if (signal.aborted) { await releaseLock.run(id); return; }
           if (!got) {
-            await releaseLock.run(id);
+            const released = await releaseLock.run(id);
             c.fail++;
-            fail(id, "Couldn't download the latest version, so the checkout was rolled back");
+            fail(id, released
+              ? "Couldn't download the latest version, so the checkout was rolled back"
+              : "Couldn't download the latest version, and the checkout couldn't be released. It's still checked out to you; use Undo check-out.");
             return;
           }
           if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), ver.sha256);
@@ -400,7 +402,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
       }
       if (cls.kind === "mine-no-local") {
         c.skipped++;
-        skip(id, "Checked out to you, but there's no local copy to check in. Use Undo check-out to release it.");
+        skip(id, "Helios couldn't read a local copy. It may be missing, or open or locked by another program. Close it and try again.");
         return;
       }
       if (cls.kind === "mine-unchanged") { c.skipped++; skip(id, "No changes"); return; }

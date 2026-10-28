@@ -46,6 +46,10 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
   const [phase, setPhase] = useState<"plan" | "running" | "done">("plan");
   const [result, setResult] = useState<BatchResult | null>(null);
   const [comment, setComment] = useState("");
+  // Folder check-in releases unchanged checkouts by default (SolidWorks PDM
+  // style). They're listed and this can be turned off, since one of them may
+  // be a checkout you're using on another computer.
+  const [releaseUnchanged, setReleaseUnchanged] = useState(true);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const stopRef = useRef<HTMLButtonElement>(null);
   // This machine's sync ledger, so the plan tells an untouched older copy from
@@ -86,7 +90,13 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
     () => (op === "checkin" ? planCheckIn(scopeFiles, classifyCtx) : null),
     [op, scopeFiles, classifyCtx],
   );
-  const eligible = outPlan?.eligible ?? inPlan?.eligible ?? [];
+  const eligible = useMemo(() => {
+    if (outPlan) return outPlan.eligible;
+    if (!inPlan) return [];
+    if (releaseUnchanged) return inPlan.eligible;
+    const skip = new Set(inPlan.unchangedFiles.map((f) => f.id));
+    return inPlan.eligible.filter((f) => !skip.has(f.id));
+  }, [outPlan, inPlan, releaseUnchanged]);
 
   // Without a finished local scan we can't tell a stale copy from a local edit:
   // a check-out would re-download (and could overwrite) every file, and a
@@ -132,7 +142,7 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
     const where = scope.kind === "selection" ? "" : ` (${scope.kind === "folder" ? scopeRoot || scope.name : scope.name})`;
     const ids = eligible.map((f) => f.id);
     const r = await batch.run(op, ids, op === "checkin"
-      ? { includeUnchangedMine: true, comment: comment.trim() || `folder check-in${where}` }
+      ? { includeUnchangedMine: releaseUnchanged, comment: comment.trim() || `folder check-in${where}` }
       : {});
     if (!r) return; // unmounted
     setResult(r);
@@ -179,7 +189,7 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
                   : n === 0
                     ? "Nothing here to check in."
                     : `${n} file${n === 1 ? "" : "s"} will be checked in` +
-                      (inPlan && inPlan.unchanged > 0
+                      (inPlan && inPlan.unchanged > 0 && releaseUnchanged
                         ? ` (${inPlan.changed} changed, ${inPlan.unchanged} unchanged: those just release your checkout).`
                         : ".")}
               </p>
@@ -217,8 +227,8 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
                   />
                   <Section
                     tone="warn"
-                    title={`Checked out to you but missing locally (${inPlan.mineNoLocal.length}), will be skipped`}
-                    hint="There's no local copy to upload. Get it back, or use Undo check-out to release it."
+                    title={`Checked out to you but no local copy found (${inPlan.mineNoLocal.length}), will be skipped`}
+                    hint="Helios couldn't read these. They may be missing, or open or locked by another program. Close them and reopen this dialog."
                     rows={inPlan.mineNoLocal.map((f) => ({ key: f.id, path: relPath(f) }))}
                   />
                   <Section
@@ -232,6 +242,29 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
                     title={`Checked out by someone else (${inPlan.others.length}), not affected`}
                     rows={inPlan.others.map((r) => ({ key: r.file.id, path: relPath(r.file), note: `${holder(r)}, ${relativeWhen(r.lock.acquired_at)}`, noteTitle: absoluteWhen(r.lock.acquired_at) }))}
                   />
+                  {inPlan.unchanged > 0 && (
+                    <section className="mt-3">
+                      <label className="flex items-center gap-2 font-medium">
+                        <input
+                          type="checkbox"
+                          checked={releaseUnchanged}
+                          onChange={(e) => setReleaseUnchanged(e.target.checked)}
+                          className="accent-asu-gold"
+                        />
+                        Also release my {inPlan.unchanged} unchanged checkout{inPlan.unchanged === 1 ? "" : "s"}
+                      </label>
+                      <p className="mt-0.5 text-helios-dim">
+                        Identical to the vault on this computer. Untick if you're editing any of them on another computer.
+                      </p>
+                      <ul className="mt-1 max-h-40 overflow-y-auto rounded-sm border border-helios-line bg-helios-panel">
+                        {inPlan.unchangedFiles.map((f) => (
+                          <li key={f.id} className="truncate border-b border-helios-line px-2 py-1 font-mono-num last:border-b-0" title={relPath(f)}>
+                            {relPath(f)}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   {n > 0 && (
                     <label className="mt-3 block">
                       <span className="text-helios-dim">Comment (applies to every changed file)</span>

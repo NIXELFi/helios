@@ -518,6 +518,8 @@ export function BrowseScreen() {
     /** Selection scope only: the picked file ids. */
     ids: FileId[];
   } | null>(null);
+  // A vault switch must not leave a plan open over the other vault's files.
+  useEffect(() => { setFolderBatch(null); }, [vaultId]);
   // The dialog's files are derived LIVE from the catalog (not frozen at click
   // time), so a rename, move or new check-in while the plan is open is seen.
   const folderBatchFiles = useMemo(() => {
