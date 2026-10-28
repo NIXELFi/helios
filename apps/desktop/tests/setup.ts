@@ -1,9 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { resetLockEventsForTests } from "../src/modules/vault/data/lock-events";
 
 // Ensure RTL cleans up after every test so renders don't accumulate across tests.
 afterEach(cleanup);
+// notifyLockChange coalesces bursts via a module-level timer; drop any open window
+// so one test's broadcast can't swallow the next test's leading-edge fire.
+afterEach(resetLockEventsForTests);
 
 // jsdom does not implement matchMedia; stub it for any code that touches it.
 if (typeof window !== "undefined" && !window.matchMedia) {
