@@ -1,34 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { readFile } from "@tauri-apps/plugin-fs";
-import { useAcquireLock } from "../data/useAcquireLock";
-import { useReleaseLock } from "../data/useReleaseLock";
-import { useDeleteFile } from "../data/useDeleteFile";
+import { useEffect, useMemo, useState } from "react";
 import { useIsVaultAdmin } from "../data/useVaultRole";
-import { useCheckIn } from "../data/useCheckIn";
-import { useDownloadVersion } from "../data/useDownloadVersion";
-import { matchLocal, vaultRelativePath } from "../data/local-match";
-import { localDestPathStrict } from "../data/folder-paths";
-import { ledgerRecord } from "../data/sync-ledger";
-import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
-import { runPool } from "../lib/pool";
-import { toast } from "../data/toast";
+import { matchLocal } from "../data/local-match";
+import { activeLockMap } from "../data/batch-classify";
+import { useVaultBatchOps, type BatchOp } from "../data/useVaultBatchOps";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
-
-/** Files processed in parallel by the bulk check-in / get-latest / check-out
- *  loops. Each row is independent (its own lock, read, upload, RPC); 3 keeps
- *  large SOLIDWORKS uploads from saturating the link while hiding per-file
- *  round-trip latency, which is what made big batches feel slow. */
-const BULK_CONCURRENCY = 3;
-
-interface BulkProgress {
-  verb: string;
-  done: number;
-  total: number;
-  /** Most recently started file, shown beside the bar. */
-  current: string | null;
-}
 
 interface Props {
   selectedIds: FileId[];
@@ -41,7 +18,7 @@ interface Props {
   // Download support (optional)
   vaultRoot?: string | null;
   folders?: Folder[];
-  /** Active vault id — records successful bulk get-latest / check-in
+  /** Active vault id: records successful bulk get-latest / check-in
    *  materializations in the sync ledger (T6). Optional; null disables it. */
   vaultId?: string | null;
   // Lock state. When supplied, bulk actions gate per-row so e.g. Check Out
@@ -49,7 +26,11 @@ interface Props {
   // surfacing a cryptic count). Without these, the bar runs un-gated.
   locks?: Lock[];
   currentUserId?: UserId | null;
+  /** Lock-holder names, for "checked out by Alice" in the failure list. */
+  holderLabelById?: Map<UserId, string>;
 }
+
+const EMPTY_VERSIONS = new Map<FileId, Version[]>();
 
 export function BulkActionBar({
   selectedIds,
@@ -57,159 +38,60 @@ export function BulkActionBar({
   onDone,
   files = [],
   localFiles,
-  versionsByFileId = new Map(),
+  versionsByFileId = EMPTY_VERSIONS,
   vaultRoot,
   folders = [],
   vaultId = null,
   locks = [],
   currentUserId = null,
+  holderLabelById,
 }: Props) {
-  const acquireLock = useAcquireLock();
-  const releaseLock = useReleaseLock();
-  const deleteFile = useDeleteFile();
-  const checkIn = useCheckIn();
-  const download = useDownloadVersion();
-  // Per-vault admin (global admin rows count everywhere) — matches what the
+  // Per-vault admin (global admin rows count everywhere): matches what the
   // pdm_delete_file / pdm_force_unlock RPCs actually authorize, so the bar
   // never shows actions the DB would reject for a vault-scoped member.
   const isAdmin = useIsVaultAdmin(vaultId);
-  const [busy, setBusy] = useState(false);
+  const batch = useVaultBatchOps({
+    files, localFiles, versionsByFileId, vaultRoot, folders, vaultId, locks, currentUserId, holderLabelById,
+  });
+  const busy = batch.busy;
+  const progress = batch.progress;
+  const stopping = batch.stopping;
   const [status, setStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState<BulkProgress | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
-  // AbortController for the in-flight long-running loop (Get Latest /
-  // Check In Changes — the two that write files and call setState across many
-  // awaits). The loops poll `signal.aborted` between iterations and after each
-  // await, so once the controller fires they stop reading files, stop calling
-  // RPCs, and never touch state. Each invocation installs a fresh controller
-  // (aborting any prior). We abort on unmount and whenever the selection
-  // changes, which covers the audit case where the bar kept writing files /
-  // calling setState after the user cleared the selection or navigated away.
-  const abortRef = useRef<AbortController | null>(null);
   // Key the selection-change effect on the selection's CONTENT, not the array
-  // identity — the parent passes a fresh `Array.from(selected)` on every
-  // render, so depending on the array reference would abort an in-flight loop
-  // on every unrelated re-render. This string only changes when the actual set
-  // of selected ids changes.
+  // identity: the parent passes a fresh `Array.from(selected)` on every
+  // render, so depending on the array reference would abort an in-flight run
+  // on every unrelated re-render. When the actual selection changes (e.g.
+  // cleared), cancel any run still chewing through the previous one so it
+  // can't keep reading/writing files for rows the user no longer has selected.
   const selectionKey = selectedIds.join(",");
-  useEffect(() => {
-    // Cancel any loop still chewing through a previous selection on unmount or
-    // when the selection content changes (e.g. cleared), so it can't finish
-    // reading/writing files or calling setState for rows the user no longer
-    // has selected.
-    return () => {
-      abortRef.current?.abort();
-      abortRef.current = null;
-    };
-  }, [selectionKey]);
+  useEffect(() => () => batch.abort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- abort is stable in effect; keyed on selection content
+    [selectionKey]);
 
-  // Unmounted → an aborted run's drain must not touch state.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-  // Set by the Stop button so the drain can tell a user stop from a superseded
-  // run (selection change). Mirrored in state for the "Stopping…" label.
-  const stoppingRef = useRef(false);
-  const [stopping, setStopping] = useState(false);
+  const lockByFile = useMemo(() => activeLockMap(locks), [locks]);
 
-  /** runPool that never rejects: an unexpected worker throw is logged and
-   *  toasted, and the caller's normal finish (status, busy=false / endAborted)
-   *  still runs — otherwise one throw left every bulk button disabled. */
-  async function runPoolSafe(...args: Parameters<typeof runPool<FileId>>) {
-    try {
-      await runPool(...args);
-    } catch (e) {
-      console.error("[vault] bulk action worker threw", e);
-      if (mountedRef.current) toast("A bulk action hit an unexpected error — some files may not have been processed.", "error");
-    }
-  }
-
-  /** Wrap a per-file worker so the progress bar tracks it. */
-  function tracked(fn: (id: FileId) => Promise<void>) {
-    return async (id: FileId) => {
-      setProgress((p) => p && { ...p, current: filesById.get(id)?.name ?? null });
-      try {
-        await fn(id);
-      } finally {
-        setProgress((p) => p && { ...p, done: p.done + 1 });
-      }
-    };
-  }
-
-  /** User-initiated stop: abort only. The bar stays busy ("Stopping…") until
-   *  the in-flight rows finish their own rollback/finalize — re-enabling the
-   *  buttons immediately let a new run race those rows (e.g. a check-in on a
-   *  file whose stopped check-out was still releasing its lock). */
-  function stopRun() {
-    stoppingRef.current = true;
-    setStopping(true);
-    abortRef.current?.abort();
-  }
-
-  /** Called once an aborted run's pool has drained (every in-flight row done).
-   *  Clears the busy state, reports a user Stop, and refetches so rows that
-   *  landed mid-stop show up. */
-  function endAborted(ok: number, verbPast: string) {
-    if (!mountedRef.current) return;
-    const wasStop = stoppingRef.current;
-    stoppingRef.current = false;
-    setStopping(false);
-    setBusy(false);
-    setProgress(null);
-    if (wasStop) setStatus(`Stopped — ${verbPast} ${ok} of ${selectedIds.length}`);
-    onDone();
-  }
-
-  /** Start a fresh abort scope for a long-running loop, superseding any prior. */
-  function beginAbortScope(): AbortSignal {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    return ctrl.signal;
-  }
-
-  // O(1) lookup of the currently-active lock by file_id. Used to skip rows
-  // for which a bulk action would silently fail at the RPC layer (e.g.
-  // Check Out on a file someone else already holds).
-  const lockByFile = useMemo(() => {
-    const m = new Map<FileId, Lock>();
-    for (const l of locks) {
-      if (l.released_at === null) m.set(l.file_id, l);
-    }
-    return m;
-  }, [locks]);
-
-  function lockKindFor(fileId: FileId): "none" | "me" | "other" {
-    const l = lockByFile.get(fileId);
-    if (!l) return "none";
-    return l.user_id === currentUserId ? "me" : "other";
-  }
-
-  // Per-action eligibility — counted up-front so the action buttons and
-  // the status message agree on what's actually going to run.
+  // Per-action eligibility, counted up-front so the action buttons and the
+  // status message agree on what's actually going to run.
   const eligibility = useMemo(() => {
     let canCheckOut = 0, lockedByOtherForCheckOut = 0, alreadyMine = 0;
     let canCancel = 0, notMineForCancel = 0;
     for (const id of selectedIds) {
-      const kind = lockKindFor(id);
-      if (kind === "none") { canCheckOut++; }
-      else if (kind === "me") { canCancel++; alreadyMine++; }
+      const l = lockByFile.get(id);
+      if (!l) { canCheckOut++; }
+      else if (l.user_id === currentUserId) { canCancel++; alreadyMine++; }
       else { lockedByOtherForCheckOut++; notMineForCancel++; }
     }
     return { canCheckOut, lockedByOtherForCheckOut, alreadyMine, canCancel, notMineForCancel };
-  }, [selectedIds, lockByFile, currentUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectionKey stands in for selectedIds
+  }, [selectionKey, lockByFile, currentUserId]);
 
-  // O(1) file lookup by id. The action loops and the two flags below used
-  // `files.find` per selected id — O(selected x files) on a ~13k-file vault.
+  // O(1) file lookup by id (a ~13k-file vault made per-id `files.find` slow).
   const filesById = useMemo(() => new Map(files.map((f) => [f.id, f])), [files]);
 
-  // Determine which selected files have a modified local copy available.
-  // Memoized on the selection CONTENT (selectionKey) — selectedIds is a fresh
-  // array every render — so this doesn't re-match on unrelated re-renders.
+  // Which selected files have a modified local copy available.
   const hasModifiedLocal = useMemo(
     () =>
       localFiles != null &&
@@ -223,7 +105,7 @@ export function BulkActionBar({
     [selectionKey, filesById, localFiles, versionsByFileId, folders],
   );
 
-  // Determine if Get Latest is applicable for any selected file.
+  // Whether Get Latest is applicable for any selected file.
   const hasGetLatest = useMemo(
     () =>
       vaultRoot != null &&
@@ -238,337 +120,23 @@ export function BulkActionBar({
     [selectionKey, vaultRoot, filesById, localFiles, versionsByFileId, folders],
   );
 
-  async function bulkCheckInChanges() {
-    const signal = beginAbortScope();
-    setBusy(true);
+  async function start(op: BatchOp) {
     setStatus(null);
-    setProgress({ verb: "Checking in", done: 0, total: selectedIds.length, current: null });
-    let ok = 0, fail = 0, skipped = 0, lockedByOther = 0;
-    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
-      // Bail the moment the run is superseded (unmount / selection cleared) so
-      // we stop reading files and calling check-in RPCs for rows the user is
-      // no longer acting on.
-      if (signal.aborted) return;
-      const file = filesById.get(id);
-      if (!file) { skipped++; return; }
-      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
-      if (m.status !== "modified" || !m.local) { skipped++; return; }
-      // Lock-state gate: never try to acquire a lock another user holds —
-      // the RPC will fail anyway and we'd waste a local file read. The bar
-      // surfaces the count below so the user knows why some rows skipped.
-      if (lockKindFor(id) === "other") { lockedByOther++; return; }
-      // Acquire lock if we don't already hold it. Stop the row if we can't.
-      // `acquiredHere` records that THIS pass took the lock, so every exit path
-      // below can compensate. Without it, a readFile throw (the common case:
-      // the part is open in SOLIDWORKS with an exclusive handle) counted the
-      // row as failed but left the lock held — the user silently ended up with
-      // files checked out to them that only an admin force-unlock could clear.
-      // bulkCheckOut already compensates this way on its own failure paths.
-      let acquiredHere = false;
-      if (lockKindFor(id) === "none") {
-        const acquired = await acquireLock.run(id);
-        // Abort between acquire and use is ALSO a leak: the effect's abort
-        // scope fires on any selection change, so a user clicking away mid-run
-        // would strand the lock. Release before bailing.
-        if (signal.aborted) { await releaseLock.run(id); return; }
-        if (!acquired) { fail++; return; }
-        acquiredHere = true;
-      }
-      try {
-        const fileBytes = await readFile(m.local.absolutePath);
-        if (signal.aborted) { if (acquiredHere) await releaseLock.run(id); return; }
-        const ab = fileBytes.buffer.slice(
-          fileBytes.byteOffset,
-          fileBytes.byteOffset + fileBytes.byteLength,
-        ) as ArrayBuffer;
-        const r = await checkIn.run(id, ab, "bulk check-in");
-        // A SUCCESSFUL check-in releases the lock server-side, so only
-        // compensate when we still hold it (r === null / abort before the RPC
-        // landed is indistinguishable here — releasing a lock we no longer hold
-        // is a harmless no-op, whereas keeping one we do is the bug).
-        // Aborted before the RPC landed → give the lock back and stop. If it DID
-        // land, fall through: the read-only + ledger finalize below must run even
-        // on abort, or the checked-in copy stays writable and reads as an
-        // unsaved edit that sync holds back forever.
-        if (signal.aborted && !r) { if (acquiredHere) await releaseLock.run(id); return; }
-        if (r) {
-          ok++;
-          // pdm_check_in released the lock server-side — we no longer hold it,
-          // so a later throw in this block must NOT try to release it again.
-          acquiredHere = false;
-          // P0: the file is now the latest version and no longer checked out, so
-          // re-protect the local copy read-only — mirroring single-file CheckIn.
-          // Without this the writable-but-unlocked copy reads as an unsaved edit
-          // and gets held back from sync indefinitely (the next reconciliation
-          // only freezes it a pass later, if at all).
-          await setReadonly(m.local.absolutePath, true);
-          flipSwReadonly(m.local.absolutePath, true);
-          // Record the just-checked-in content in the ledger (T6).
-          if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), r.sha256);
-        } else {
-          // check-in RPC/upload failed — the lock is still ours, and we only
-          // took it for this attempt. Give it back so the row is retryable
-          // (and doesn't read as "checked out" to teammates).
-          if (acquiredHere) await releaseLock.run(id);
-          fail++;
-        }
-      } catch {
-        // readFile / setReadonly threw. Same rule: never leave a lock this pass
-        // acquired behind on a failed row.
-        if (acquiredHere) await releaseLock.run(id);
-        if (signal.aborted) return;
-        fail++;
-      }
-    }), signal);
-    if (signal.aborted) { endAborted(ok, "checked in"); return; }
-    const parts: string[] = [`Checked in ${ok}/${selectedIds.length}`];
-    const detail: string[] = [];
-    if (fail) detail.push(`${fail} failed`);
-    if (skipped) detail.push(`${skipped} skipped`);
-    if (lockedByOther) detail.push(`${lockedByOther} checked out by someone else`);
-    if (detail.length) parts.push(`(${detail.join(", ")})`);
-    setStatus(parts.join(" "));
-    setBusy(false);
-    setProgress(null);
-    onDone();
-  }
-
-  async function bulkGetLatest() {
-    const signal = beginAbortScope();
-    setBusy(true);
-    setStatus(null);
-    setProgress({ verb: "Downloading", done: 0, total: selectedIds.length, current: null });
-    let ok = 0, fail = 0, skipped = 0, kept = 0;
-    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
-      // Bail before starting the next download once the run is superseded
-      // (unmount / selection cleared) — and pass the signal through so an
-      // in-flight download drops its terminal disk write too.
-      if (signal.aborted) return;
-      const file = filesById.get(id);
-      if (!file) { skipped++; return; }
-      const ver = versionsByFileId.get(id)?.[0];
-      if (!ver) { skipped++; return; }
-      // Never overwrite a WRITABLE copy that differs from the vault — it may be
-      // unsaved work (the row button asks; a bulk run just keeps it). A
-      // read-only differing copy is a clean, stale copy and is refreshed.
-      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
-      if (m.status === "modified" && m.local && m.local.readonly !== true) { kept++; return; }
-      // Strict: an unresolvable folder id would collapse the destination to
-      // the vault root (stranding an orphan / clobbering a same-named root
-      // file). Skip the row; the folder refetch makes it work next attempt.
-      const dest = localDestPathStrict(vaultRoot!, file.folder_id, file.name, folders);
-      if (!dest) { skipped++; return; }
-      const r = await download.run(ver.sha256, dest, signal);
-      if (signal.aborted) return;
-      if (r) {
-        ok++;
-        // Record the freshly-downloaded latest version in the ledger (T6).
-        if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
-      } else fail++;
-    }), signal);
-    if (signal.aborted) { endAborted(ok, "downloaded"); return; }
-    const detail: string[] = [];
-    if (fail) detail.push(`${fail} failed`);
-    if (skipped) detail.push(`${skipped} skipped`);
-    if (kept) detail.push(`${kept} kept — local changes`);
-    setStatus(`Downloaded ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""));
-    setBusy(false);
-    setProgress(null);
-    onDone();
-  }
-
-  async function bulkCheckOut() {
-    const signal = beginAbortScope();
-    setBusy(true);
-    setStatus(null);
-    setProgress({ verb: "Checking out", done: 0, total: selectedIds.length, current: null });
-    let ok = 0, fail = 0, lockedByOther = 0, alreadyMine = 0;
-    await runPoolSafe(selectedIds, BULK_CONCURRENCY, tracked(async (id) => {
-      // Bail the moment the run is superseded (unmount / selection cleared) so
-      // we stop acquiring locks for rows the user is no longer acting on.
-      if (signal.aborted) return;
-      const kind = lockKindFor(id);
-      // Skip rows that would fail / no-op at the RPC layer. Pre-filtering
-      // here turns "0/3 (3 failed)" into "1/3 (2 locked by other user)" —
-      // the user can act on that.
-      if (kind === "me") { alreadyMine++; return; }
-      if (kind === "other") { lockedByOther++; return; }
-      const r = await acquireLock.run(id);
-      // Aborting between acquire and use strands the lock exactly like a failed
-      // download does (see the rollbacks below), and the abort scope fires on
-      // any selection change — release before bailing.
-      if (signal.aborted) { await releaseLock.run(id); return; }
-      if (!r) { fail++; return; }
-      // P0: make the local copy editable — get the latest first if ours is
-      // missing/stale (so the user doesn't edit an outdated base and then check
-      // it in over a teammate's newer work), then clear the read-only bit.
-      // Mirrors single-file CheckOut, including rolling the lock back if the
-      // required download fails.
-      const file = filesById.get(id);
-      if (file && vaultRoot) {
-        const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
-        const ver = versionsByFileId.get(id)?.[0];
-        // Strict: never download/chmod through a collapsed root path. Roll the
-        // just-acquired lock back like the download-failure path below.
-        const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
-        if (!dest) { await releaseLock.run(id); fail++; return; }
-        const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
-        if (ver && stale) {
-          const got = await download.run(ver.sha256, dest, signal);
-          // Abort mid-download leaves the local copy stale AND the lock held —
-          // roll the lock back, same as the download-failure branch.
-          if (signal.aborted) { await releaseLock.run(id); return; }
-          if (!got) { await releaseLock.run(id); fail++; return; }
-          if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
-        }
-        await setReadonly(dest, false);
-        // Tell an open SOLIDWORKS doc too (fire-and-forget) BEFORE the abort
-        // check, so a kept checkout is editable there as well.
-        flipSwReadonly(dest, false);
-        // The bytes are correct and the copy is now writable — the checkout is
-        // effectively complete, so an abort here KEEPS the lock (releasing it
-        // would leave a writable unlocked copy, the one state the sync model
-        // treats as unsaved-edits-forever). Just stop the loop.
-        if (signal.aborted) return;
-      }
-      ok++;
-    }), signal);
-    if (signal.aborted) { endAborted(ok, "checked out"); return; }
-    const detail: string[] = [];
-    if (fail) detail.push(`${fail} failed`);
-    if (lockedByOther) detail.push(`${lockedByOther} checked out by someone else`);
-    if (alreadyMine) detail.push(`${alreadyMine} already yours`);
-    setStatus(
-      `Checked out ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""),
-    );
-    setBusy(false);
-    setProgress(null);
-    onDone();
-  }
-
-  async function bulkCancel() {
-    setConfirmCancel(false);
-    const signal = beginAbortScope();
-    setBusy(true);
-    setStatus(null);
-    setProgress({ verb: "Undoing checkout", done: 0, total: selectedIds.length, current: null });
-    let ok = 0, fail = 0, notMine = 0, discarded = 0, restoreFailed = 0;
-    await runPoolSafe(selectedIds, 1, tracked(async (id) => {
-      if (signal.aborted) return;
-      // Only rows the user owns can be released — releasing someone else's lock
-      // requires force-unlock, which is admin-only and out of the bulk path.
-      if (lockKindFor(id) !== "me") { notMine++; return; }
-      const file = filesById.get(id);
-      const ver = file ? versionsByFileId.get(id)?.[0] : undefined;
-      // Never-checked-in draft: there is no vaulted version to restore, so undo
-      // = discard the draft (soft-delete releases the lock; the reaper removes
-      // the local copy). Mirrors single-file undo-checkout on a draft.
-      if (file && !ver) {
-        const del = await deleteFile.run(id);
-        if (del) discarded++; else fail++;
-        return;
-      }
-      const rel = await releaseLock.run(id);
-      if (!rel) { fail++; return; }
-      // Released → this row is committed. Finish its local restore even if the
-      // run was aborted meanwhile (no signal on the download below): stopping
-      // here would leave the discarded edits writable with no lock.
-      // The checkout IS undone the moment the lock is released — count it as a
-      // success NOW. A later failure to materialize the restored bytes locally
-      // is a separate, non-authoritative concern (the vault row is already
-      // correct; the next sync self-heals the local copy), so it's tracked as
-      // `restoreFailed` rather than inflating the hard `fail` count and
-      // undercounting `ok`.
-      ok++;
-      // P0: undo check-out is destructive in the real-vault model — discard local
-      // edits by restoring the latest vaulted version, THEN re-protect read-only.
-      // Only freeze on a SUCCESSFUL restore: a failed download leaves the local
-      // edit on disk writable (held back), never a read-only-but-dirty copy that
-      // the next sync pass would treat as clean and clobber.
-      if (file && ver && vaultRoot) {
-        // Strict: a collapsed root path would "restore" over an unrelated root
-        // file. Lock is already released (counted ok); treat like a failed
-        // local restore — the next sync pass materializes it properly.
-        const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
-        if (!dest) { restoreFailed++; return; }
-        const restored = await download.run(ver.sha256, dest);
-        if (!restored) { restoreFailed++; return; }
-        await setReadonly(dest, true);
-        flipSwReadonly(dest, true);
-        if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
-      }
-    }), signal);
-    if (signal.aborted) { endAborted(ok, "undid"); return; }
-    const detail: string[] = [];
-    if (discarded) detail.push(`${discarded} draft${discarded === 1 ? "" : "s"} discarded`);
-    if (fail) detail.push(`${fail} failed`);
-    if (restoreFailed) detail.push(`${restoreFailed} released but local restore failed`);
-    if (notMine) detail.push(`${notMine} not yours`);
-    setStatus(
-      `Cancelled ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""),
-    );
-    setBusy(false);
-    setProgress(null);
-    onDone();
-  }
-
-  async function bulkDelete() {
-    setConfirmDelete(false);
-    const signal = beginAbortScope();
-    setBusy(true);
-    setStatus(null);
-    setProgress({ verb: "Deleting", done: 0, total: selectedIds.length, current: null });
-    const nameById = new Map(files.map((f) => [f.id, f.name]));
-    let ok = 0;
-    const failed: string[] = [];
-    await runPoolSafe(selectedIds, 1, tracked(async (id) => {
-      // Bail the moment the run is superseded (unmount / selection cleared) so
-      // we stop deleting files the user is no longer acting on. Surface partial
-      // progress the same way as a normal partial failure (failed list stays so
-      // the user can see which files were/weren't deleted).
-      if (signal.aborted) return;
-      // A throw counts as a named failure, so the status never reads as a
-      // clean "Deleted N/N" (which would also clear the selection and hide the
-      // file that wasn't deleted).
-      let r = false;
-      try {
-        r = !!(await deleteFile.run(id));
-      } catch (e) {
-        console.error("[vault] bulk delete threw", e);
-      }
-      if (signal.aborted) return;
-      if (r) ok++;
-      else failed.push(nameById.get(id) ?? String(id));
-    }), signal);
-    if (signal.aborted) {
-      // Surface whatever progress we made before the abort — same pattern as
-      // the other bulk ops (bulkCheckInChanges / bulkGetLatest use `return` so
-      // they surface nothing; bulkDelete keeps partial status because a delete
-      // is destructive and the user must know what was removed).
-      const wasStop = stoppingRef.current;
-      endAborted(ok, "deleted");
-      if ((ok > 0 || failed.length > 0) && mountedRef.current) {
-        setStatus(
-          `${wasStop ? "Stopped — deleted" : "Deleted"} ${ok}/${selectedIds.length}${wasStop ? "" : " (interrupted)"}` +
-            (failed.length ? ` — failed: ${failed.join(", ")}` : ""),
-        );
-      }
+    const ids = selectedIds;
+    const r = await batch.run(op, ids);
+    // null = unmounted mid-run; nothing left to update.
+    if (!r) return;
+    if (r.aborted && !r.stopped) {
+      // Superseded (selection changed). Delete still reports partial
+      // progress: it's destructive and the user must know what was removed.
+      if (op === "delete" && (r.ok > 0 || r.failedCount > 0)) setStatus(r.status);
+      onDone();
       return;
     }
-    if (failed.length > 0) {
-      // Name the failures (hover shows the full list via the status title) and
-      // keep the selection so the user can retry — clearing it would hide
-      // exactly which files still need attention.
-      setStatus(
-        `Deleted ${ok}/${selectedIds.length} — failed: ${failed.join(", ")}` +
-          (deleteFile.error ? ` (${deleteFile.error.message})` : ""),
-      );
-    } else {
-      setStatus(`Deleted ${ok}/${selectedIds.length}`);
-      onClear();
-    }
-    setBusy(false);
-    setProgress(null);
+    setStatus(r.status);
+    // A clean delete clears the selection; on partial failure keep it so the
+    // user can see (and retry) exactly which files still need attention.
+    if (op === "delete" && !r.aborted && r.failedCount === 0) onClear();
     onDone();
   }
 
@@ -579,7 +147,7 @@ export function BulkActionBar({
       <span className="text-helios-dim">{selectedIds.length} selected</span>
       <button
         type="button"
-        onClick={bulkCheckOut}
+        onClick={() => { void start("checkout"); }}
         // Disabled when no row in the selection is actually checkout-able
         // (every one is locked or already yours). Saves the user from a
         // "Checked out 0/N (N skipped)" surprise.
@@ -615,7 +183,7 @@ export function BulkActionBar({
       {hasModifiedLocal && (
         <button
           type="button"
-          onClick={bulkCheckInChanges}
+          onClick={() => { void start("checkin"); }}
           disabled={busy}
           className="rounded bg-[#66BB6A] px-2 py-1 text-white hover:brightness-110 disabled:opacity-50"
         >
@@ -625,7 +193,7 @@ export function BulkActionBar({
       {hasGetLatest && (
         <button
           type="button"
-          onClick={bulkGetLatest}
+          onClick={() => { void start("getLatest"); }}
           disabled={busy}
           className="rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line disabled:opacity-50"
         >
@@ -659,7 +227,7 @@ export function BulkActionBar({
           {status}
         </span>
       )}
-      {/* Live progress for the running bulk action — a determinate bar, the
+      {/* Live progress for the running bulk action: a determinate bar, the
           count, and the file in flight, so a 40-file check-in no longer looks
           like a frozen bar of disabled buttons. */}
       {progress && (
@@ -673,7 +241,7 @@ export function BulkActionBar({
         >
           <span className="shrink-0 font-medium text-helios-text">
             {stopping
-              ? "Stopping — letting the files in progress finish…"
+              ? "Stopping, letting the files in progress finish..."
               : `${progress.verb} ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`}
           </span>
           <div className="h-1.5 min-w-[6rem] flex-1 overflow-hidden rounded-full bg-helios-line">
@@ -689,7 +257,7 @@ export function BulkActionBar({
           )}
           <button
             type="button"
-            onClick={stopRun}
+            onClick={batch.stop}
             disabled={stopping}
             className="shrink-0 rounded border border-helios-line px-2 py-0.5 text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold disabled:opacity-50"
           >
@@ -702,11 +270,11 @@ export function BulkActionBar({
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${selectedIds.length} file${selectedIds.length === 1 ? "" : "s"}?`}
-          body="The selected files move to this vault's Deleted tab — versions and history are kept, and you (or an admin) can restore them from there. Local working copies on teammates' machines are removed unless they hold unsaved changes."
+          body="The selected files move to this vault's Deleted tab. Versions and history are kept, and you (or an admin) can restore them from there. Local working copies on teammates' machines are removed unless they hold unsaved changes."
           confirmLabel="Delete"
           confirmTone="danger"
           cancelLabel="Cancel"
-          onConfirm={() => { void bulkDelete(); }}
+          onConfirm={() => { setConfirmDelete(false); void start("delete"); }}
           onClose={() => setConfirmDelete(false)}
         />
       )}
@@ -717,7 +285,7 @@ export function BulkActionBar({
           confirmLabel="Undo check-out"
           confirmTone="danger"
           cancelLabel="Keep editing"
-          onConfirm={() => { void bulkCancel(); }}
+          onConfirm={() => { setConfirmCancel(false); void start("cancel"); }}
           onClose={() => setConfirmCancel(false)}
         />
       )}

@@ -43,6 +43,7 @@ import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
+import { FolderBatchDialog, type FolderBatchOp } from "../components/FolderBatchDialog";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { AutoAddBanner } from "../components/AutoAddBanner";
 import { VaultWarningBanner } from "../components/VaultWarningBanner";
@@ -510,6 +511,12 @@ export function BrowseScreen() {
   }, [treeSelection, allFiles, folders]);
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
+  // Folder-level check-out / check-in dialog (toolbar button or right-click).
+  const [folderBatch, setFolderBatch] = useState<{
+    op: FolderBatchOp;
+    scope: React.ComponentProps<typeof FolderBatchDialog>["scope"];
+    files: VaultFile[];
+  } | null>(null);
   const bulk = useBulkDownload({
     heliosRoot,
     vaultName: vault?.name ?? null,
@@ -999,6 +1006,36 @@ export function BrowseScreen() {
                   )}
                 </>
               )}
+              {canEdit && filesToDownloadAll.length > 0 && (() => {
+                const folderRow = selectedFolder !== null ? (folders ?? []).find((f) => f.id === selectedFolder) : undefined;
+                const scope: React.ComponentProps<typeof FolderBatchDialog>["scope"] = folderRow
+                  ? { kind: "folder", name: folderRow.name, folderId: folderRow.id }
+                  : { kind: "vault", name: vault?.name ?? "Vault" };
+                const what = folderRow ? "folder" : "all";
+                const tip = folderRow
+                  ? `every file in ${folderRow.name} and its subfolders (${filesToDownloadAll.length})`
+                  : `every file in ${vault?.name ?? "this vault"} (${filesToDownloadAll.length})`;
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setFolderBatch({ op: "checkout", scope, files: filesToDownloadAll })}
+                      title={`Check out ${tip}. Shows what's already checked out first.`}
+                      className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+                    >
+                      Check out {what}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFolderBatch({ op: "checkin", scope, files: filesToDownloadAll })}
+                      title={`Check in ${tip}. Shows what will be checked in first.`}
+                      className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+                    >
+                      Check in {what}
+                    </button>
+                  </>
+                );
+              })()}
               {canEdit && (
                 <button
                   onClick={() => openPrompt("file")}
@@ -1059,6 +1096,7 @@ export function BrowseScreen() {
                   vaultId={vaultId ?? null}
                   locks={locks ?? []}
                   currentUserId={user?.id ?? null}
+                  holderLabelById={holderEmailById}
                 />
                 <FileTable
                   files={files ?? []}
@@ -1209,6 +1247,17 @@ export function BrowseScreen() {
             disabledReason: n === 0 ? "Folder has no files" : undefined,
             onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
           });
+          const editReason = canEdit ? undefined : "You don't have edit access";
+          actions.push({
+            label: "Check out folder…",
+            disabledReason: n === 0 ? "Folder has no files" : editReason,
+            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "folder", name: folder.name, folderId: folder.id }, files: targetFiles }),
+          });
+          actions.push({
+            label: "Check in folder…",
+            disabledReason: n === 0 ? "Folder has no files" : editReason,
+            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "folder", name: folder.name, folderId: folder.id }, files: targetFiles }),
+          });
           actions.push({
             label: "New folder…",
             disabledReason: canEdit ? undefined : "You don't have edit access",
@@ -1292,6 +1341,17 @@ export function BrowseScreen() {
             label: `Download ${n} selected file${n === 1 ? "" : "s"}`,
             disabledReason: n === 0 ? "Nothing selected" : undefined,
             onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
+          });
+          const editReasonFiles = n === 0 ? "Nothing selected" : canEdit ? undefined : "You don't have edit access";
+          actions.push({
+            label: `Check out ${n} file${n === 1 ? "" : "s"}…`,
+            disabledReason: editReasonFiles,
+            onClick: () => setFolderBatch({ op: "checkout", scope: { kind: "selection" }, files: targetFiles }),
+          });
+          actions.push({
+            label: `Check in ${n} file${n === 1 ? "" : "s"}…`,
+            disabledReason: editReasonFiles,
+            onClick: () => setFolderBatch({ op: "checkin", scope: { kind: "selection" }, files: targetFiles }),
           });
           // Delete gating mirrors BulkActionBar: a file is deletable when the
           // current user holds its lock, or is an admin. Enabled only when EVERY
@@ -1415,6 +1475,30 @@ export function BrowseScreen() {
           />
         );
       })()}
+      {folderBatch && (
+        <FolderBatchDialog
+          op={folderBatch.op}
+          scope={folderBatch.scope}
+          scopeFiles={folderBatch.files}
+          ctx={{
+            files: allFiles ?? [],
+            localFiles,
+            versionsByFileId,
+            vaultRoot: vaultFolderPath,
+            folders: folders ?? [],
+            vaultId: vaultId ?? null,
+            locks: locks ?? [],
+            currentUserId: user?.id ?? null,
+            holderLabelById: holderEmailById,
+          }}
+          onClose={() => setFolderBatch(null)}
+          onDone={(ids) => {
+            refreshIds(ids);
+            refetchLocks();
+            rescan();
+          }}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           title={confirm.title}

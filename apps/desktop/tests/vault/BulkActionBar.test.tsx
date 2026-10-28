@@ -4,8 +4,16 @@ import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider, useAuthLoading } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BulkActionBar } from "../../src/modules/vault/components/BulkActionBar";
+import { TRANSFER_CONCURRENCY } from "../../src/modules/vault/data/useVaultBatchOps";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
+
+/** Minimal catalog rows for the ids a test selects (the batch hook fails rows
+ *  it can't resolve in the catalog). */
+function filesFor(ids: string[]): any[] {
+  return ids.map((id) => ({ id, vault_id: "v", folder_id: null, name: `${id}.sldprt`, latest_version_id: null, created_at: "x" }));
+}
+
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
@@ -107,7 +115,7 @@ describe("<BulkActionBar>", () => {
   it("renders nothing when no files are selected", () => {
     const { container } = render(
       <SupabaseAuthProvider client={mockClient()}>
-        <BulkActionBar selectedIds={[]} onClear={() => {}} onDone={() => {}} />
+        <BulkActionBar selectedIds={[]} files={filesFor([])} onClear={() => {}} onDone={() => {}} />
       </SupabaseAuthProvider>,
     );
     expect(container.firstChild).toBeNull();
@@ -118,7 +126,7 @@ describe("<BulkActionBar>", () => {
     // (useIsVaultAdmin), matching what pdm_delete_file actually authorizes.
     const Comp = ({ isAdmin }: { isAdmin: boolean }) => (
       <SupabaseAuthProvider client={mockClient(isAdmin)}>
-        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
+        <BulkActionBar selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
       </SupabaseAuthProvider>
     );
 
@@ -136,7 +144,7 @@ describe("<BulkActionBar>", () => {
   it("bulk delete shows confirmation modal before running", async () => {
     render(
       <SupabaseAuthProvider client={mockClient(true)}>
-        <BulkActionBar selectedIds={["f1"]} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
+        <BulkActionBar selectedIds={["f1"]} files={filesFor(["f1"])} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
       </SupabaseAuthProvider>,
     );
     // Wait for admin status to resolve
@@ -227,7 +235,7 @@ describe("<BulkActionBar>", () => {
 
     render(
       <SupabaseAuthProvider client={c}>
-        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={onDone} />
+        <BulkActionBar selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])} onClear={() => {}} onDone={onDone} />
       </SupabaseAuthProvider>,
     );
     const checkOutBtn = await screen.findByRole("button", { name: /check out/i });
@@ -253,7 +261,7 @@ describe("<BulkActionBar>", () => {
     render(
       <SupabaseAuthProvider client={c}>
         <BulkActionBar
-          selectedIds={["f1", "f2"]}
+          selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])}
           onClear={() => {}}
           onDone={() => {}}
           locks={locks as any}
@@ -277,7 +285,7 @@ describe("<BulkActionBar>", () => {
     render(
       <SupabaseAuthProvider client={c}>
         <BulkActionBar
-          selectedIds={["f1"]}
+          selectedIds={["f1"]} files={filesFor(["f1"])}
           onClear={() => {}}
           onDone={() => {}}
           locks={locks as any}
@@ -304,7 +312,7 @@ describe("<BulkActionBar>", () => {
     render(
       <SupabaseAuthProvider client={c}>
         <BulkActionBar
-          selectedIds={["f1", "f2", "f3"]}
+          selectedIds={["f1", "f2", "f3"]} files={filesFor(["f1", "f2", "f3"])}
           onClear={() => {}}
           onDone={() => {}}
           locks={locks as any}
@@ -326,7 +334,7 @@ describe("<BulkActionBar>", () => {
     await waitFor(() => expect(authResult.current).toBe(false));
     render(
       <SupabaseAuthProvider client={c}>
-        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} />
+        <BulkActionBar selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])} onClear={() => {}} onDone={() => {}} />
       </SupabaseAuthProvider>,
     );
     const checkOutBtn = await screen.findByRole("button", { name: /check out/i });
@@ -345,23 +353,19 @@ describe("<BulkActionBar>", () => {
     const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(client) });
     await waitFor(() => expect(authResult.current).toBe(false));
 
-    const files = [
-      { id: "f1", vault_id: "v", folder_id: null, name: "a.sldprt", latest_version_id: "v1", created_at: "x" },
-      { id: "f2", vault_id: "v", folder_id: null, name: "b.sldprt", latest_version_id: "v2", created_at: "x" },
-      { id: "f3", vault_id: "v", folder_id: null, name: "c.sldprt", latest_version_id: "v3", created_at: "x" },
-      { id: "f4", vault_id: "v", folder_id: null, name: "d.sldprt", latest_version_id: "v4", created_at: "x" },
-    ];
-    const versions = new Map([
-      ["f1", [{ id: "v1", file_id: "f1", version_num: 1, sha256: "aa", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
-      ["f2", [{ id: "v2", file_id: "f2", version_num: 1, sha256: "bb", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
-      ["f3", [{ id: "v3", file_id: "f3", version_num: 1, sha256: "cc", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
-      ["f4", [{ id: "v4", file_id: "f4", version_num: 1, sha256: "dd", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
-    ]);
+    // One more file than the pool has lanes, so exactly one is left queued.
+    const n = TRANSFER_CONCURRENCY + 1;
+    const files = Array.from({ length: n }, (_, k) => ({
+      id: `f${k + 1}`, vault_id: "v", folder_id: null, name: `p${k + 1}.sldprt`, latest_version_id: `v${k + 1}`, created_at: "x",
+    }));
+    const versions = new Map(files.map((f, k) => [f.id, [{
+      id: `v${k + 1}`, file_id: f.id, version_num: 1, sha256: `s${k + 1}`, size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x",
+    }]]));
 
     const { unmount } = render(
       <SupabaseAuthProvider client={client}>
         <BulkActionBar
-          selectedIds={["f1", "f2", "f3", "f4"]}
+          selectedIds={files.map((f) => f.id)}
           onClear={() => {}}
           onDone={() => {}}
           files={files as any}
@@ -375,9 +379,9 @@ describe("<BulkActionBar>", () => {
 
     const getLatest = await screen.findByRole("button", { name: /get latest/i });
     await act(async () => { fireEvent.click(getLatest); });
-    // The first BULK_CONCURRENCY (3) downloads are in flight (blocked on the
-    // gate); the 4th waits for a free lane.
-    await waitFor(() => expect(download).toHaveBeenCalledTimes(3));
+    // The first TRANSFER_CONCURRENCY downloads are in flight (blocked on the
+    // gate); the last waits for a free lane.
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY));
 
     // Unmount mid-flight, then release the in-flight download and let every
     // queued microtask + macrotask settle. With the abort guard the loop
@@ -393,7 +397,7 @@ describe("<BulkActionBar>", () => {
     });
 
     // The pool saw the abort once the in-flight downloads resolved and never
-    // started the 4th file's download.
-    expect(download).toHaveBeenCalledTimes(3);
+    // started the last file's download.
+    expect(download).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY);
   });
 });

@@ -39,6 +39,8 @@ vi.mock("../../data/useDeleteFile", () => ({
 vi.mock("../../data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({ run: vi.fn().mockResolvedValue(true), loading: false, error: null }),
 }));
+vi.mock("../../data/useRecordRefs", () => ({ useRecordRefs: () => ({ run: vi.fn().mockResolvedValue(undefined) }) }));
+vi.mock("../../data/useRecordProperties", () => ({ useRecordProperties: () => ({ run: vi.fn().mockResolvedValue(null) }) }));
 vi.mock("../../data/useCheckIn", () => ({
   useCheckIn: () => ({ run: checkInRun, loading: false, error: null, result: null }),
 }));

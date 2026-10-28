@@ -35,6 +35,8 @@ vi.mock("../../data/useDeleteFile", () => ({
 vi.mock("../../data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({ run: downloadRun, loading: false, error: null }),
 }));
+vi.mock("../../data/useRecordRefs", () => ({ useRecordRefs: () => ({ run: vi.fn().mockResolvedValue(undefined) }) }));
+vi.mock("../../data/useRecordProperties", () => ({ useRecordProperties: () => ({ run: vi.fn().mockResolvedValue(null) }) }));
 vi.mock("../../data/useCheckIn", () => ({
   useCheckIn: () => ({ run: checkInRun, loading: false, error: null, result: null }),
 }));
@@ -58,10 +60,18 @@ vi.mock("../../data/folder-paths", () => ({
 }));
 
 
+import { TRANSFER_CONCURRENCY } from "../../data/useVaultBatchOps";
 import { BulkActionBar } from "../BulkActionBar";
 import { matchLocal } from "../../data/local-match";
 import { setReadonly } from "../../data/fs-readonly";
 import { ledgerRecord } from "../../data/sync-ledger";
+
+/** Minimal catalog rows for the ids a test selects (the batch hook fails rows
+ *  it can't resolve in the catalog). */
+function filesFor(ids: string[]): any[] {
+  return ids.map((id) => ({ id, vault_id: "v", folder_id: null, name: `${id}.sldprt`, latest_version_id: null, created_at: "x" }));
+}
+
 
 function deferred<T = void>() {
   let resolve!: (v: T) => void;
@@ -84,7 +94,7 @@ describe("BulkActionBar — progress", () => {
   it("shows a progress bar while a bulk check-out runs, then clears it", async () => {
     const gate = deferred();
     acquireLockRun.mockImplementation(async () => { await gate.promise; return LOCK; });
-    render(<BulkActionBar selectedIds={["f1", "f2", "f3", "f4"]} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
+    render(<BulkActionBar selectedIds={["f1", "f2", "f3", "f4"]} files={filesFor(["f1", "f2", "f3", "f4"])} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
     const bar = await screen.findByRole("progressbar", { name: /checking out/i });
     expect(bar).toHaveAttribute("aria-valuemax", "4");
@@ -98,20 +108,20 @@ describe("BulkActionBar — progress", () => {
   it("Stop drains in-flight rows before re-enabling the bar, releasing their locks", async () => {
     const gate = deferred();
     acquireLockRun.mockImplementation(async () => { await gate.promise; return LOCK; });
-    render(<BulkActionBar selectedIds={["f1", "f2", "f3", "f4"]} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
+    render(<BulkActionBar selectedIds={["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]} files={filesFor(["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"])} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
     await screen.findByRole("progressbar");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^stop$/i })); });
-    // Still busy while the 3 in-flight acquires finish — no new run can start.
+    // Still busy while the in-flight acquires finish — no new run can start.
     expect(screen.getByText(/stopping/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /check out/i })).toBeDisabled();
     await act(async () => { gate.resolve(); });
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
-    expect(screen.getByRole("status")).toHaveTextContent("Stopped — checked out 0 of 4");
-    // The in-flight acquires saw the abort and gave their locks back; the 4th
-    // file was never started.
-    expect(releaseLockRun).toHaveBeenCalledTimes(3);
-    expect(acquireLockRun).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped: checked out 0 of 8");
+    // The in-flight acquires saw the abort and gave their locks back; files past
+    // the lane count were never started.
+    expect(releaseLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY);
+    expect(acquireLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY);
   });
 
   it("a check-in that lands after Stop is still finalized (read-only + ledger)", async () => {
@@ -137,7 +147,7 @@ describe("BulkActionBar — progress", () => {
 describe("BulkActionBar — a throwing worker", () => {
   it("never leaves the bar stuck busy", async () => {
     acquireLockRun.mockRejectedValue(new Error("boom"));
-    render(<BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
+    render(<BulkActionBar selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])} onClear={() => {}} onDone={() => {}} currentUserId="u1" locks={[]} />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out/i })); });
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
     expect(screen.getByRole("button", { name: /check out/i })).not.toBeDisabled();
@@ -156,7 +166,7 @@ describe("BulkActionBar — bulk Get Latest keeps local edits", () => {
     const versions = new Map(files.map((f) => [f.id, [{ id: "v-" + f.id, file_id: f.id, version_num: 2, sha256: "sha-" + f.id }]]));
     render(<BulkActionBar selectedIds={["edited", "stale"]} onClear={() => {}} onDone={() => {}} files={files as any} localFiles={[]} versionsByFileId={versions as any} vaultRoot="/v" folders={[]} currentUserId="u1" locks={[]} />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /get latest/i })); });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Downloaded 1/2 (1 kept — local changes)"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Downloaded 1/2 (1 kept, local changes)"));
     expect(downloadRun).toHaveBeenCalledTimes(1);
     expect(downloadRun.mock.calls[0]?.[0]).toBe("sha-stale");
     vi.mocked(matchLocal).mockReset();

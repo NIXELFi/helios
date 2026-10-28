@@ -43,6 +43,8 @@ vi.mock("../../data/useDeleteFile", () => ({
 vi.mock("../../data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({ run: downloadRun, loading: false, error: null }),
 }));
+vi.mock("../../data/useRecordRefs", () => ({ useRecordRefs: () => ({ run: vi.fn().mockResolvedValue(undefined) }) }));
+vi.mock("../../data/useRecordProperties", () => ({ useRecordProperties: () => ({ run: vi.fn().mockResolvedValue(null) }) }));
 vi.mock("../../data/useCheckIn", () => ({
   useCheckIn: () => ({ run: checkInRun, loading: false, error: null, result: null }),
 }));
@@ -64,7 +66,15 @@ vi.mock("../../data/folder-paths", () => ({
   localDestPath: vi.fn().mockReturnValue("/vault/file.sldprt"),
 }));
 
+import { TRANSFER_CONCURRENCY } from "../../data/useVaultBatchOps";
 import { BulkActionBar } from "../BulkActionBar";
+
+/** Minimal catalog rows for the ids a test selects (the batch hook fails rows
+ *  it can't resolve in the catalog). */
+function filesFor(ids: string[]): any[] {
+  return ids.map((id) => ({ id, vault_id: "v", folder_id: null, name: `${id}.sldprt`, latest_version_id: null, created_at: "x" }));
+}
+
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,12 +108,14 @@ beforeEach(() => {
 
 // ── H9: bulkCheckOut abort ───────────────────────────────────────────────────
 
+const EIGHT = ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"];
+
 describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
   it("stops acquiring locks after selection is cleared mid-loop", async () => {
     const gate = deferred();
     // First acquireLock call blocks until the gate releases; second should never fire.
-    // Every acquire blocks on the gate, so the 3 pool lanes all stall and
-    // the 4th file is only reachable if the pool ignores the abort.
+    // Every acquire blocks on the gate, so the pool lanes all stall and
+    // the files past the lane count are is only reachable if the pool ignores the abort.
     acquireLockRun.mockImplementation(async () => {
       await gate.promise;
       return { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null };
@@ -111,7 +123,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     const { rerender } = render(
       <BulkActionBar
-        selectedIds={["f1", "f2", "f3", "f4"]}
+        selectedIds={EIGHT} files={filesFor(EIGHT)}
         onClear={() => {}}
         onDone={() => {}}
         currentUserId="u1"
@@ -123,12 +135,12 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
     await act(async () => { fireEvent.click(checkOutBtn); });
 
     // First lock acquire is in flight (blocked on gate); second hasn't started.
-    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY));
 
     // Clear selection → triggers the useEffect cleanup → aborts the in-flight scope.
     rerender(
       <BulkActionBar
-        selectedIds={[]}
+        selectedIds={[]} files={filesFor([])}
         onClear={() => {}}
         onDone={() => {}}
         currentUserId="u1"
@@ -144,7 +156,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     // The loop must have seen signal.aborted after the first acquire resolved
     // and returned without starting the second file's lock acquisition.
-    expect(acquireLockRun).toHaveBeenCalledTimes(3);
+    expect(acquireLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY);
   });
 
   it("does not call setState (setBusy/setStatus) after abort", async () => {
@@ -159,7 +171,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     const { unmount } = render(
       <BulkActionBar
-        selectedIds={["f1", "f2", "f3", "f4"]}
+        selectedIds={EIGHT} files={filesFor(EIGHT)}
         onClear={() => {}}
         onDone={() => {}}
         currentUserId="u1"
@@ -169,7 +181,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
 
     const checkOutBtn = screen.getByRole("button", { name: /check out/i });
     await act(async () => { fireEvent.click(checkOutBtn); });
-    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(acquireLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY));
 
     // Unmount mid-flight to trigger abort
     unmount();
@@ -181,7 +193,7 @@ describe("BulkActionBar — H9: bulkCheckOut respects abort signal", () => {
       await flushAsync();
     });
 
-    expect(acquireLockRun).toHaveBeenCalledTimes(3);
+    expect(acquireLockRun).toHaveBeenCalledTimes(TRANSFER_CONCURRENCY);
   });
 });
 
@@ -202,7 +214,7 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
 
     const { rerender } = render(
       <BulkActionBar
-        selectedIds={["f1", "f2"]}
+        selectedIds={["f1", "f2"]} files={filesFor(["f1", "f2"])}
         onClear={() => {}}
         onDone={onDone}
         vaultId="v1"
@@ -226,7 +238,7 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
     // Clear selection → triggers abort
     rerender(
       <BulkActionBar
-        selectedIds={[]}
+        selectedIds={[]} files={filesFor([])}
         onClear={() => {}}
         onDone={onDone}
         vaultId="v1"
