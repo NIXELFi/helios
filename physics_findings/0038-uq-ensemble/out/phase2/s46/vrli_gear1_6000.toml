@@ -1,0 +1,51 @@
+[vrli]
+config = "../../../../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json"
+cycles = 30
+threads = 15
+tune = "neutral"
+trumpet_od_mm = 44.0
+displacement_ref_mm = 0.0
+rpm = { min = 6000, max = 12500, step = 500 }
+extension_mm = { min = -140, max = 120, step = 20 }
+cache = "cache_46.ndjson"
+avg_cycles = 5
+conv_window = 6
+max_spread = 0.02
+
+[vrli.overrides]
+collector_wall_t = 705.1597562351739
+exhaust_cd_multiplier = 0.8769249269301407
+exhaust_port_length_delta = 0.0030854875469136
+exhaust_valve_close_angle = 367.6814444919367
+exhaust_valve_max_lift = 0.0067997418079025
+exhaust_valve_open_angle = 145.1135763206889
+intake_cd_multiplier = 1.070734933988413
+intake_port_length_delta = -0.0022306548328729
+intake_valve_close_angle = 580.0473993176626
+intake_valve_max_lift = 0.0092530147283747
+p_ambient = 97277.7531416797
+primary_wall_t = 955.159756235174
+restrictor_diffuser_efficiency = 0.5623680659162466
+secondary_wall_t = 805.1597562351739
+
+[design]
+band_rpm = [6000, 12000]
+driver_band_rpm = [7000, 10500]
+baseline_extension_mm = 0.0
+strokes_mm = [0, 25, 50, 75, 100, 125, 150, 175]
+placement_step_mm = 5.0
+position_step_mm = 1.0
+f3_resolution_mm = 2.0
+sweep_rate_rpm_s = 6000.0
+full_stroke_time_s = 0.5
+metric = "torque"
+knee_fraction = 0.9
+max_protrusion_mm = 200.0
+min_plenum_fraction = 0.5
+
+[design.mass]
+fixed_kg = 0.30
+per_100mm_kg = 0.42
+actuator_kg_at_100mm = 0.30
+actuator_exponent = 0.7
+limit_kg = 1.5

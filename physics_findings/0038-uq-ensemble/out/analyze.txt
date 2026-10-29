@@ -1,0 +1,66 @@
+{
+ "n_samples": 65,
+ "temperature": 10.311220714415603,
+ "ess_tempered": 10.0,
+ "ess_untempered": 1.1605068647752117,
+ "best_sample": 30,
+ "best_weight": 0.21520920456893233,
+ "nominal_weight": 0.16860791484866253,
+ "slope_prior": [
+  0.11890981251701288,
+  0.5476030935328066,
+  0.9756480861979876
+ ],
+ "slope_post": [
+  0.3590234666499991,
+  0.6525250226505619,
+  1.0180181206292378
+ ],
+ "slope_nominal": 0.615362556712046,
+ "sigmas": {
+  "ve": 0.03605551275463989,
+  "dp": 0.5,
+  "power": 2.0
+ }
+}
+                         param  mode  prior_min  prior_max  prior_mean  prior_sd  post_mean  post_sd  post_q10  post_q50  post_q90  sd_ratio
+      exhaust_valve_open_angle delta     -8.000      8.000     -0.0083    4.5810     0.3955   3.4854   -4.8413    0.1335    5.0330    0.7608
+     exhaust_valve_close_angle delta     -5.000      5.000     -0.0032    2.8625    -0.4506   2.4591   -3.4721   -0.6168    3.6125    0.8591
+        exhaust_valve_max_lift scale      0.900      1.100      0.9998    0.0573     1.0248   0.0582    0.9426    1.0248    1.0969    1.0155
+         exhaust_cd_multiplier scale      0.850      1.200      1.0247    0.1001     1.0185   0.0884    0.8777    1.0147    1.1602    0.8833
+     exhaust_port_length_delta delta     -0.025      0.025      0.0000    0.0143     0.0006   0.0092   -0.0125    0.0000    0.0099    0.6379
+      intake_valve_close_angle delta     -5.000      5.000     -0.0052    2.8585     0.4397   3.0610   -3.8866    0.0331    4.2979    1.0709
+         intake_valve_max_lift scale      0.900      1.100      0.9999    0.0573     1.0019   0.0450    0.9549    0.9927    1.0827    0.7840
+          intake_cd_multiplier scale      0.900      1.100      1.0000    0.0573     0.9999   0.0480    0.9422    1.0005    1.0740    0.8383
+      intake_port_length_delta delta     -0.030      0.030      0.0000    0.0171     0.0065   0.0090   -0.0031    0.0084    0.0163    0.5261
+                primary_wall_t delta   -150.000    150.000      0.0821   86.2449    12.3614  82.3044 -100.2431    0.0050  135.5799    0.9543
+restrictor_diffuser_efficiency delta     -0.120      0.130      0.0050    0.0717    -0.0155   0.0395   -0.0644   -0.0168    0.0435    0.5501
+                     p_ambient delta   -500.000    500.000     -0.0113  285.8705   -47.4993 158.8792 -204.4739  -24.9295  127.3920    0.5558
+        loglik  weight  eta_dt  rmse_ve  rmse_dp  rmse_P  slope   r_ve
+sample                                                                
+30     -35.235   0.215   0.935    0.036    0.510   1.949  0.734  0.909
+0      -37.752   0.169   0.938    0.040    0.491   2.007  0.615  0.819
+5      -46.912   0.069   0.947    0.049    0.527   1.825  0.548  0.724
+42     -47.772   0.064   0.917    0.036    0.690   2.002  0.636  0.877
+40     -47.833   0.063   0.934    0.040    0.633   2.150  1.027  0.844
+46     -48.590   0.059   0.957    0.050    0.526   1.840  0.234  0.681
+58     -51.950   0.043   0.925    0.044    0.639   2.120  0.672  0.856
+15     -52.150   0.042   0.955    0.039    0.703   2.118  0.996  0.858
+ok
+C:\Users\nick5\helios-uq\physics_findings\0038-uq-ensemble\out\best_sample_config.json sample 30 weight 0.215
+{
+ "collector_wall_t": 785.2170651059278,
+ "exhaust_cd_multiplier": 1.017168288112344,
+ "exhaust_port_length_delta": 0.0089589757532148,
+ "exhaust_valve_close_angle": 363.1831923711174,
+ "exhaust_valve_max_lift": 0.0080610932521888,
+ "exhaust_valve_open_angle": 141.7201279689128,
+ "intake_cd_multiplier": 0.9447060823453644,
+ "intake_port_length_delta": 0.0096245541275319,
+ "intake_valve_close_angle": 587.5216353370132,
+ "intake_valve_max_lift": 0.0084531545153875,
+ "p_ambient": 97116.4532676976,
+ "primary_wall_t": 1035.2170651059278,
+ "restrictor_diffuser_efficiency": 0.5982906865851985,
+ "secondary_wall_t": 885.2170651059278
+}
