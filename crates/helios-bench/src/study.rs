@@ -57,6 +57,46 @@ pub struct Sweep {
     pub sampler: String,
     pub n_trials: u32,
     pub parameters: Vec<SweepParam>,
+    /// Optional full-factorial grid axes (finding 0032). Every sampled
+    /// trial is run at every grid point, e.g. one RPM sweep per runner
+    /// length for a variable-length-intake envelope study:
+    ///
+    /// ```toml
+    /// [[sweep.grid]]
+    /// name = "runner_length"
+    /// values = [0.18, 0.21, 0.245, 0.28, 0.32]
+    /// ```
+    #[serde(default)]
+    pub grid: Vec<GridAxis>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GridAxis {
+    /// `apply_override` path (e.g. `runner_length`, `plenum_volume`).
+    pub name: String,
+    pub values: Vec<f64>,
+}
+
+impl Sweep {
+    /// Cartesian product of the grid axes as (name, value) override lists,
+    /// axes in name order (stable NDJSON). One empty point when no grid.
+    pub fn grid_points(&self) -> Vec<Vec<(String, f64)>> {
+        let mut axes = self.grid.clone();
+        axes.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut pts: Vec<Vec<(String, f64)>> = vec![vec![]];
+        for ax in &axes {
+            let mut next = Vec::with_capacity(pts.len() * ax.values.len());
+            for p in &pts {
+                for &v in &ax.values {
+                    let mut q = p.clone();
+                    q.push((ax.name.clone(), v));
+                    next.push(q);
+                }
+            }
+            pts = next;
+        }
+        pts
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,6 +129,13 @@ impl Study {
                     "recorded=true requires rayon_threads=1, got {}",
                     self.environment.rayon_threads
                 ));
+            }
+        }
+        if let Some(sw) = &self.sweep {
+            for ax in &sw.grid {
+                if ax.values.is_empty() {
+                    return Err(format!("sweep.grid axis {:?} has no values", ax.name));
+                }
             }
         }
         for a in &self.acceptance {

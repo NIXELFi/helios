@@ -1,0 +1,21 @@
+case,rpm,mdot_g_s,map_drop,car
+junction at merge point (as modelled),7000,35.564,2.981,3.24
+junction at merge point (as modelled),8000,41.653,4.297,4.6
+junction at merge point (as modelled),9000,48.164,6.281,6.51
+junction at merge point (as modelled),9500,49.982,6.809,7.38
+junction at merge point (as modelled),10000,51.496,7.137,7.85
+junction at crotch,7000,36.738,3.194,3.24
+junction at crotch,8000,42.838,4.567,4.6
+junction at crotch,9000,49.814,6.824,6.51
+junction at crotch,9500,50.434,6.965,7.38
+junction at crotch,10000,51.736,7.224,7.85
+"junction at crotch, walls 1000/900/800",7000,36.798,3.205,3.24
+"junction at crotch, walls 1000/900/800",8000,42.877,4.576,4.6
+"junction at crotch, walls 1000/900/800",9000,50.532,7.073,6.51
+"junction at crotch, walls 1000/900/800",9500,50.552,7.006,7.38
+"junction at crotch, walls 1000/900/800",10000,51.808,7.251,7.85
+"junction at crotch, walls 1100/1050/1000",7000,36.713,3.19,3.24
+"junction at crotch, walls 1100/1050/1000",8000,42.758,4.549,4.6
+"junction at crotch, walls 1100/1050/1000",9000,50.888,7.202,6.51
+"junction at crotch, walls 1100/1050/1000",9500,51.181,7.234,7.38
+"junction at crotch, walls 1100/1050/1000",10000,51.926,7.294,7.85

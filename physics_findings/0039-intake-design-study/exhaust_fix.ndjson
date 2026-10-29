@@ -1,0 +1,140 @@
+{"rpm": 4000, "ve": 0.8963, "bt": 46.0107, "imep": 10.7375, "spread": 6e-05, "p_plenum_end": 95478, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 4250, "ve": 0.89312, "bt": 46.5746, "imep": 10.8942, "spread": 0.0003, "p_plenum_end": 96058, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 4500, "ve": 0.80113, "bt": 44.3274, "imep": 10.4618, "spread": 6e-05, "p_plenum_end": 97614, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 4750, "ve": 0.77493, "bt": 42.2089, "imep": 10.0565, "spread": 0.00025, "p_plenum_end": 93729, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 5000, "ve": 0.78905, "bt": 42.413, "imep": 10.1384, "spread": 0.00022, "p_plenum_end": 95832, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 5250, "ve": 0.90705, "bt": 47.3776, "imep": 11.2186, "spread": 0.00021, "p_plenum_end": 96194, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 5500, "ve": 0.90761, "bt": 45.5395, "imep": 10.8726, "spread": 5e-05, "p_plenum_end": 95833, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 5750, "ve": 0.90059, "bt": 44.6359, "imep": 10.7228, "spread": 0.0001, "p_plenum_end": 95277, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 6000, "ve": 0.97199, "bt": 47.3437, "imep": 11.3304, "spread": 0.00803, "p_plenum_end": 93852, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 6250, "ve": 0.98724, "bt": 49.0963, "imep": 11.7379, "spread": 6e-05, "p_plenum_end": 94152, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 6500, "ve": 0.9611, "bt": 47.9526, "imep": 11.5383, "spread": 0.0001, "p_plenum_end": 94756, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 6750, "ve": 0.94335, "bt": 47.106, "imep": 11.4012, "spread": 3e-05, "p_plenum_end": 94196, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 7000, "ve": 0.91528, "bt": 46.4566, "imep": 11.3057, "spread": 0.0001, "p_plenum_end": 94210, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 7250, "ve": 0.90128, "bt": 47.215, "imep": 11.5054, "spread": 4e-05, "p_plenum_end": 93719, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 7500, "ve": 0.89158, "bt": 46.5811, "imep": 11.4135, "spread": 6e-05, "p_plenum_end": 92660, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 7750, "ve": 0.93493, "bt": 47.5959, "imep": 11.6674, "spread": 2e-05, "p_plenum_end": 91617, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 8000, "ve": 0.93809, "bt": 48.3491, "imep": 11.8667, "spread": 5e-05, "p_plenum_end": 90799, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 8250, "ve": 0.93604, "bt": 48.6948, "imep": 11.9807, "spread": 5e-05, "p_plenum_end": 89472, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 8500, "ve": 0.95859, "bt": 49.5606, "imep": 12.2039, "spread": 0.00014, "p_plenum_end": 87230, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 8750, "ve": 0.96195, "bt": 49.5528, "imep": 12.2442, "spread": 0.00016, "p_plenum_end": 85148, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 9000, "ve": 0.96545, "bt": 49.5949, "imep": 12.2951, "spread": 7e-05, "p_plenum_end": 85586, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 9250, "ve": 0.94987, "bt": 48.7633, "imep": 12.1631, "spread": 0.00013, "p_plenum_end": 89379, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 9500, "ve": 0.94919, "bt": 48.6384, "imep": 12.1793, "spread": 9e-05, "p_plenum_end": 92412, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 9750, "ve": 0.95363, "bt": 48.5492, "imep": 12.2033, "spread": 0.0001, "p_plenum_end": 93677, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 10000, "ve": 0.92878, "bt": 46.4492, "imep": 11.8059, "spread": 0.00011, "p_plenum_end": 94251, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 10250, "ve": 0.88798, "bt": 43.4621, "imep": 11.2226, "spread": 0.00011, "p_plenum_end": 93661, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 10500, "ve": 0.84576, "bt": 40.8549, "imep": 10.7192, "spread": 0.00014, "p_plenum_end": 92526, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 10750, "ve": 0.82057, "bt": 39.4648, "imep": 10.4712, "spread": 0.0001, "p_plenum_end": 91447, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 11000, "ve": 0.81517, "bt": 39.3366, "imep": 10.4879, "spread": 0.00015, "p_plenum_end": 90248, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 11250, "ve": 0.81821, "bt": 39.7639, "imep": 10.6213, "spread": 0.00012, "p_plenum_end": 89621, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 11500, "ve": 0.82558, "bt": 40.4944, "imep": 10.8184, "spread": 0.00013, "p_plenum_end": 88827, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 11750, "ve": 0.83077, "bt": 40.855, "imep": 10.9382, "spread": 9e-05, "p_plenum_end": 88390, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 12000, "ve": 0.83442, "bt": 40.945, "imep": 11.0014, "spread": 9e-05, "p_plenum_end": 88036, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 12250, "ve": 0.87406, "bt": 41.6876, "imep": 11.2016, "spread": 0.00026, "p_plenum_end": 86721, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 12500, "ve": 0.89028, "bt": 41.274, "imep": 11.1596, "spread": 0.00023, "p_plenum_end": 85493, "cycles": 20, "case": "junction at merge point (as modelled)"}
+{"rpm": 4000, "ve": 0.89777, "bt": 46.2131, "imep": 10.7799, "spread": 0.0001, "p_plenum_end": 95648, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 4250, "ve": 0.91729, "bt": 46.1736, "imep": 10.8102, "spread": 0.00012, "p_plenum_end": 95802, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 4500, "ve": 0.87094, "bt": 44.9499, "imep": 10.5923, "spread": 0.00026, "p_plenum_end": 96199, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 4750, "ve": 0.7901, "bt": 42.9182, "imep": 10.2052, "spread": 0.00015, "p_plenum_end": 94396, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 5000, "ve": 0.75893, "bt": 41.4832, "imep": 9.9434, "spread": 4e-05, "p_plenum_end": 95569, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 5250, "ve": 0.78782, "bt": 43.0356, "imep": 10.3082, "spread": 0.0001, "p_plenum_end": 96081, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 5500, "ve": 0.84066, "bt": 44.797, "imep": 10.717, "spread": 8e-05, "p_plenum_end": 95485, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 5750, "ve": 0.86288, "bt": 44.2705, "imep": 10.6462, "spread": 0.00014, "p_plenum_end": 95591, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 6000, "ve": 0.953, "bt": 47.2913, "imep": 11.3194, "spread": 8e-05, "p_plenum_end": 93875, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 6250, "ve": 0.98638, "bt": 49.8388, "imep": 11.8935, "spread": 0.00014, "p_plenum_end": 94160, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 6500, "ve": 0.96615, "bt": 48.9476, "imep": 11.7469, "spread": 0.00016, "p_plenum_end": 94759, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 6750, "ve": 0.95779, "bt": 47.9751, "imep": 11.5834, "spread": 0.00012, "p_plenum_end": 94110, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 7000, "ve": 0.9453, "bt": 47.4891, "imep": 11.5221, "spread": 8e-05, "p_plenum_end": 94049, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 7250, "ve": 0.93135, "bt": 47.3858, "imep": 11.5412, "spread": 0.00015, "p_plenum_end": 93381, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 7500, "ve": 0.93872, "bt": 46.7361, "imep": 11.446, "spread": 4e-05, "p_plenum_end": 92542, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 7750, "ve": 0.95181, "bt": 47.6851, "imep": 11.6861, "spread": 6e-05, "p_plenum_end": 91536, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 8000, "ve": 0.96511, "bt": 48.4617, "imep": 11.8903, "spread": 0.00014, "p_plenum_end": 90604, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 8250, "ve": 0.97747, "bt": 49.4381, "imep": 12.1365, "spread": 0.00014, "p_plenum_end": 89138, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 8500, "ve": 0.9949, "bt": 50.361, "imep": 12.3717, "spread": 0.00023, "p_plenum_end": 87050, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 8750, "ve": 0.99514, "bt": 50.5719, "imep": 12.4579, "spread": 0.0001, "p_plenum_end": 84846, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 9000, "ve": 0.99846, "bt": 49.6757, "imep": 12.3121, "spread": 0.00013, "p_plenum_end": 85148, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 9250, "ve": 0.97075, "bt": 48.5635, "imep": 12.1212, "spread": 0.00011, "p_plenum_end": 89033, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 9500, "ve": 0.95779, "bt": 48.0351, "imep": 12.0528, "spread": 0.00014, "p_plenum_end": 92220, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 9750, "ve": 0.94934, "bt": 47.443, "imep": 11.9714, "spread": 9e-05, "p_plenum_end": 93773, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 10000, "ve": 0.93309, "bt": 45.9686, "imep": 11.7051, "spread": 0.00012, "p_plenum_end": 94172, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 10250, "ve": 0.88911, "bt": 42.9245, "imep": 11.1099, "spread": 0.00012, "p_plenum_end": 93640, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 10500, "ve": 0.84543, "bt": 40.2895, "imep": 10.6007, "spread": 0.0005, "p_plenum_end": 92526, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 10750, "ve": 0.81886, "bt": 38.4447, "imep": 10.2573, "spread": 0.00011, "p_plenum_end": 91477, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 11000, "ve": 0.80345, "bt": 37.9992, "imep": 10.2075, "spread": 6e-05, "p_plenum_end": 90397, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 11250, "ve": 0.80083, "bt": 38.7577, "imep": 10.4103, "spread": 0.00013, "p_plenum_end": 89850, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 11500, "ve": 0.80711, "bt": 39.5128, "imep": 10.6126, "spread": 3e-05, "p_plenum_end": 89086, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 11750, "ve": 0.81262, "bt": 39.8555, "imep": 10.7286, "spread": 0.0001, "p_plenum_end": 88678, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 12000, "ve": 0.82149, "bt": 40.0931, "imep": 10.8228, "spread": 0.00016, "p_plenum_end": 88281, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 12250, "ve": 0.81489, "bt": 39.5173, "imep": 10.7466, "spread": 6e-05, "p_plenum_end": 88278, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 12500, "ve": 0.82652, "bt": 39.5799, "imep": 10.8044, "spread": 0.00032, "p_plenum_end": 87817, "cycles": 20, "case": "junction at crotch"}
+{"rpm": 4000, "ve": 0.86854, "bt": 46.811, "imep": 10.9053, "spread": 6e-05, "p_plenum_end": 95464, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 4250, "ve": 0.91834, "bt": 46.0268, "imep": 10.7794, "spread": 0.0001, "p_plenum_end": 95789, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 4500, "ve": 0.88014, "bt": 44.8201, "imep": 10.5651, "spread": 0.00015, "p_plenum_end": 95972, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 4750, "ve": 0.82332, "bt": 43.7701, "imep": 10.3838, "spread": 5e-05, "p_plenum_end": 95288, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 5000, "ve": 0.75605, "bt": 41.3572, "imep": 9.917, "spread": 7e-05, "p_plenum_end": 95597, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 5250, "ve": 0.78229, "bt": 42.7788, "imep": 10.2544, "spread": 0.00033, "p_plenum_end": 96065, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 5500, "ve": 0.83987, "bt": 44.8193, "imep": 10.7216, "spread": 0.00013, "p_plenum_end": 95493, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 5750, "ve": 0.84986, "bt": 43.9533, "imep": 10.5797, "spread": 9e-05, "p_plenum_end": 95673, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 6000, "ve": 0.95153, "bt": 47.26, "imep": 11.3129, "spread": 5e-05, "p_plenum_end": 93875, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 6250, "ve": 0.98639, "bt": 49.8509, "imep": 11.8961, "spread": 0.0001, "p_plenum_end": 94169, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 6500, "ve": 0.96697, "bt": 48.9813, "imep": 11.754, "spread": 4e-05, "p_plenum_end": 94748, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 6750, "ve": 0.95471, "bt": 48.3348, "imep": 11.6589, "spread": 6e-05, "p_plenum_end": 94134, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 7000, "ve": 0.94682, "bt": 47.7603, "imep": 11.579, "spread": 8e-05, "p_plenum_end": 94031, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 7250, "ve": 0.93919, "bt": 47.5228, "imep": 11.57, "spread": 8e-05, "p_plenum_end": 93292, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 7500, "ve": 0.92848, "bt": 46.8858, "imep": 11.4774, "spread": 0.00107, "p_plenum_end": 92614, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 7750, "ve": 0.9494, "bt": 48.3285, "imep": 11.821, "spread": 0.00014, "p_plenum_end": 91547, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 8000, "ve": 0.96584, "bt": 48.9493, "imep": 11.9925, "spread": 0.00025, "p_plenum_end": 90611, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 8250, "ve": 0.97882, "bt": 49.7878, "imep": 12.2099, "spread": 7e-05, "p_plenum_end": 89120, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 8500, "ve": 1.00814, "bt": 50.9321, "imep": 12.4915, "spread": 0.00023, "p_plenum_end": 86908, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 8750, "ve": 1.01688, "bt": 51.2812, "imep": 12.6066, "spread": 0.00019, "p_plenum_end": 84606, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 9000, "ve": 1.0128, "bt": 50.1947, "imep": 12.4209, "spread": 0.00174, "p_plenum_end": 84964, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 9250, "ve": 0.98431, "bt": 48.8528, "imep": 12.1818, "spread": 0.00014, "p_plenum_end": 88795, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 9500, "ve": 0.96003, "bt": 48.062, "imep": 12.0585, "spread": 6e-05, "p_plenum_end": 92170, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 9750, "ve": 0.95418, "bt": 47.4823, "imep": 11.9796, "spread": 8e-05, "p_plenum_end": 93657, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 10000, "ve": 0.93443, "bt": 45.6588, "imep": 11.6401, "spread": 0.00014, "p_plenum_end": 94152, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 10250, "ve": 0.8963, "bt": 43.0605, "imep": 11.1384, "spread": 3e-05, "p_plenum_end": 93509, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 10500, "ve": 0.84426, "bt": 40.1742, "imep": 10.5765, "spread": 0.00012, "p_plenum_end": 92542, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 10750, "ve": 0.82168, "bt": 38.8604, "imep": 10.3444, "spread": 0.00011, "p_plenum_end": 91432, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 11000, "ve": 0.80325, "bt": 37.8791, "imep": 10.1823, "spread": 6e-05, "p_plenum_end": 90400, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 11250, "ve": 0.80569, "bt": 38.4248, "imep": 10.3405, "spread": 0.00026, "p_plenum_end": 89792, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 11500, "ve": 0.81204, "bt": 39.6025, "imep": 10.6314, "spread": 5e-05, "p_plenum_end": 89018, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 11750, "ve": 0.81633, "bt": 39.9657, "imep": 10.7517, "spread": 5e-05, "p_plenum_end": 88613, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 12000, "ve": 0.81882, "bt": 39.947, "imep": 10.7921, "spread": 2e-05, "p_plenum_end": 88339, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 12250, "ve": 0.82038, "bt": 39.7007, "imep": 10.785, "spread": 4e-05, "p_plenum_end": 88131, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 12500, "ve": 0.80818, "bt": 38.8522, "imep": 10.6519, "spread": 9e-05, "p_plenum_end": 88341, "cycles": 20, "case": "junction at crotch, walls 1000/900/800"}
+{"rpm": 4000, "ve": 0.85916, "bt": 46.6476, "imep": 10.871, "spread": 0.00012, "p_plenum_end": 95407, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 4250, "ve": 0.91017, "bt": 45.8035, "imep": 10.7326, "spread": 0.00024, "p_plenum_end": 95853, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 4500, "ve": 0.88327, "bt": 44.6925, "imep": 10.5383, "spread": 0.00012, "p_plenum_end": 95883, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 4750, "ve": 0.84461, "bt": 44.1308, "imep": 10.4595, "spread": 8e-05, "p_plenum_end": 95902, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 5000, "ve": 0.76535, "bt": 41.7708, "imep": 10.0037, "spread": 0.00012, "p_plenum_end": 95613, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 5250, "ve": 0.77789, "bt": 42.5657, "imep": 10.2097, "spread": 5e-05, "p_plenum_end": 96054, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 5500, "ve": 0.82381, "bt": 44.3095, "imep": 10.6148, "spread": 0.0002, "p_plenum_end": 95465, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 5750, "ve": 0.8582, "bt": 44.0663, "imep": 10.6034, "spread": 8e-05, "p_plenum_end": 95606, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 6000, "ve": 0.94881, "bt": 47.2009, "imep": 11.3005, "spread": 0.00021, "p_plenum_end": 93878, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 6250, "ve": 0.98542, "bt": 49.834, "imep": 11.8925, "spread": 5e-05, "p_plenum_end": 94177, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 6500, "ve": 0.96725, "bt": 48.9807, "imep": 11.7539, "spread": 0.00013, "p_plenum_end": 94750, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 6750, "ve": 0.95418, "bt": 48.3098, "imep": 11.6536, "spread": 9e-05, "p_plenum_end": 94136, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 7000, "ve": 0.94466, "bt": 47.9669, "imep": 11.6223, "spread": 6e-05, "p_plenum_end": 94044, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 7250, "ve": 0.94283, "bt": 47.3783, "imep": 11.5397, "spread": 5e-05, "p_plenum_end": 93250, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 7500, "ve": 0.9309, "bt": 46.9858, "imep": 11.4983, "spread": 0.00024, "p_plenum_end": 92624, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 7750, "ve": 0.94473, "bt": 48.6561, "imep": 11.8897, "spread": 0.00013, "p_plenum_end": 91556, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 8000, "ve": 0.96332, "bt": 49.3361, "imep": 12.0736, "spread": 6e-05, "p_plenum_end": 90622, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 8250, "ve": 0.98124, "bt": 50.1929, "imep": 12.2948, "spread": 2e-05, "p_plenum_end": 89071, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 8500, "ve": 1.01782, "bt": 51.1375, "imep": 12.5345, "spread": 6e-05, "p_plenum_end": 86799, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 8750, "ve": 1.03091, "bt": 51.6827, "imep": 12.6908, "spread": 8e-05, "p_plenum_end": 84462, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 9000, "ve": 1.01992, "bt": 50.6751, "imep": 12.5216, "spread": 0.0002, "p_plenum_end": 84838, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 9250, "ve": 0.99777, "bt": 49.157, "imep": 12.2456, "spread": 0.0001, "p_plenum_end": 88554, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 9500, "ve": 0.97192, "bt": 48.4102, "imep": 12.1315, "spread": 9e-05, "p_plenum_end": 91880, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 9750, "ve": 0.95592, "bt": 47.518, "imep": 11.9871, "spread": 8e-05, "p_plenum_end": 93616, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 10000, "ve": 0.93656, "bt": 45.6093, "imep": 11.6298, "spread": 0.0001, "p_plenum_end": 94109, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 10250, "ve": 0.89951, "bt": 42.8282, "imep": 11.0897, "spread": 4e-05, "p_plenum_end": 93449, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 10500, "ve": 0.8506, "bt": 40.2602, "imep": 10.5945, "spread": 0.0002, "p_plenum_end": 92434, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 10750, "ve": 0.81679, "bt": 38.6119, "imep": 10.2923, "spread": 6e-05, "p_plenum_end": 91507, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 11000, "ve": 0.80866, "bt": 38.2874, "imep": 10.2679, "spread": 0.00014, "p_plenum_end": 90335, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 11250, "ve": 0.80344, "bt": 38.2316, "imep": 10.3, "spread": 9e-05, "p_plenum_end": 89816, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 11500, "ve": 0.81907, "bt": 39.7416, "imep": 10.6606, "spread": 0.00013, "p_plenum_end": 88923, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 11750, "ve": 0.81996, "bt": 40.0424, "imep": 10.7678, "spread": 9e-05, "p_plenum_end": 88555, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 12000, "ve": 0.8197, "bt": 39.9512, "imep": 10.793, "spread": 0.0001, "p_plenum_end": 88316, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 12250, "ve": 0.82009, "bt": 39.663, "imep": 10.7772, "spread": 3e-05, "p_plenum_end": 88146, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}
+{"rpm": 12500, "ve": 0.81412, "bt": 39.0619, "imep": 10.6959, "spread": 9e-05, "p_plenum_end": 88168, "cycles": 20, "case": "junction at crotch, walls 1100/1050/1000"}

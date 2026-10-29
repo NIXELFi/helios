@@ -24,6 +24,11 @@ pub struct LoadedConfig {
     /// examples can't be overwritten in place. Defense-in-depth check
     /// also runs Rust-side in `cfd_save_config`.
     pub is_example: bool,
+    /// Load warnings from the engine config loader (unknown / misspelled
+    /// keys, wrong-typed physics flags, defaulted fields). Empty for a clean
+    /// config. Finding 0032: typos used to be dropped silently.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,6 +214,11 @@ pub struct OptimizationParams {
     /// known in/out diameter pairs is accepted (see `params::is_locked_pair`).
     #[serde(default)]
     pub locked_pairs: Vec<LockedPair>,
+    /// Physics-preset overrides applied to the base config before any
+    /// trial's tunables (finding 0032: optimizations previously ignored the
+    /// preset that sweeps / single-RPM runs apply, so the two disagreed).
+    #[serde(default)]
+    pub overrides: Vec<ParameterOverride>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -524,9 +534,11 @@ mod tests {
                 plenum_volume_l: 0.0,
             },
             is_example: true,
+            warnings: vec!["unknown key physics.x ignored".into()],
         };
         let s = serde_json::to_string(&lc).unwrap();
         assert!(s.contains("\"isExample\":true"), "{s}");
+        assert!(s.contains("\"warnings\":[\"unknown key physics.x ignored\"]"), "{s}");
     }
 
     #[test]

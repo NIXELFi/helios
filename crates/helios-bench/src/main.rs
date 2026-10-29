@@ -24,6 +24,9 @@ enum Cmd {
     Fingerprint(helios_bench::cmd::fingerprint::Args),
     /// Read-only helpers over the .physics_locks/ ledger
     Locks(helios_bench::cmd::locks::Args),
+    /// Variable runner length intake (VRLI) design study: stroke/placement
+    /// optimisation over an (extension x rpm) engine surface (finding 0037)
+    Vrli(helios_bench::cmd::vrli::Args),
 }
 
 fn main() -> Result<()> {
@@ -36,5 +39,6 @@ fn main() -> Result<()> {
         Cmd::Plot(a) => helios_bench::cmd::plot::execute(a),
         Cmd::Fingerprint(a) => helios_bench::cmd::fingerprint::execute(a),
         Cmd::Locks(a) => helios_bench::cmd::locks::execute(a),
+        Cmd::Vrli(a) => helios_bench::cmd::vrli::execute(a),
     }
 }

@@ -1,0 +1,4 @@
+variant,rms_pri1_start,rms_pri1_mid,rms_pri1_end,rms_sec1_start,rms_sec1_mid,rms_sec1_end,rms_final_start,rms_final_mid,rms_pri4_start,rms_pri4_mid,rms_all,overlap_mean,at_322,at_365,blowdown,blowdown_deg,step_deg,pe_peak,pe_deg,partner_peak,partner_deg,hump_valve,hump_deg,T_sec,ve,bt
+"crotch geometry, hot walls, port 29.75 mm",12.751,9.274,8.252,7.588,8.714,5.973,7.239,5.335,13.136,9.296,9.087,117.298,149.678,78.686,257.494,191,138,175.199,212,246.593,239,156.414,311,1062.385,1.018,50.553
+"crotch geometry, hot walls, merge angle 28 deg",14.763,10.804,8.806,8.548,9.394,5.68,6.367,5.548,15.046,10.713,10.091,115.369,150.938,76.842,252.91,189,136,174.791,211,249.724,237,160.012,311,1063.79,1.019,50.623
+"crotch geometry, walls 1000/900/800",16.472,13.589,13.171,13.765,13.088,11.51,13.044,10.439,17.447,14.921,13.888,127.501,157.396,90.938,232.695,196,144,172.252,221,230.187,245,164.698,312,1004.955,1.013,50.195

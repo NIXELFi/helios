@@ -1,0 +1,10 @@
+knob,low,high,span
+"Taller plenum for the travel (120->140 mm, est.)",-0.2,0.0,0.2
+ECU table: one table vs tuned per duty cycle,-0.23,0.0,0.23
+Plenum box 1.44-3.5 L (best design each),-0.72,0.14,0.85
+Throat Cd 0.90-0.99 (converging-side quality),-0.85,0.41,1.26
+Restrictor length 60-228 mm (best diffuser each),-1.61,0.26,1.88
+Long-end reach 248-300 mm (stroke <= 100),-1.89,0.0,1.89
+Where the 100 mm sits (148->248 ... 198->298),-2.08,0.0,2.08
+Actuator speed 50 mm/s - instant,-1.73,0.49,2.23
+VRLI stroke 0-100 mm (best placement each),-3.11,0.0,3.11

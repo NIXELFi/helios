@@ -1,0 +1,14 @@
+vrli: 1 unconverged points (VE spread > 0.02); design range limited to extension -80..160 mm
+vrli: stroke 200 mm does not fit the extension grid; skipped
+vrli: stroke 250 mm does not fit the extension grid; skipped
+vrli: stroke 300 mm does not fit the extension grid; skipped
+stroke  Lmin  Lmax   P1 table (follow)  (DP bound)  driver   P2     failsafe(gain)   req/avail mm/s  mass  ok
+    0    105   105   +2.59% ( +2.59%)  ( +2.59%)   +1.65%  1.000    105 (+2.59%)       0/0      0.00  yes
+   25     90   115   +4.57% ( +3.50%)  ( +4.07%)   +3.44%  0.969    104 (+2.59%)     300/50     0.52  yes
+   50     65   115   +5.66% ( +4.33%)  ( +4.75%)   +4.68%  0.920    104 (+2.59%)     600/100    0.69  yes
+   75     40   115   +6.12% ( +4.55%)  ( +5.10%)   +5.39%  0.909    104 (+2.59%)     900/150    0.86  yes
+  100     15   115   +6.39% ( +4.21%)  ( +5.31%)   +5.61%  0.908    104 (+2.59%)    1200/200    1.02  yes
+  125    -10   115   +6.65% ( +4.12%)  ( +5.38%)   +5.84%  0.880    104 (+2.59%)    1452/250    1.18  yes
+  150    -35   115   +6.74% ( +4.38%)  ( +5.63%)   +6.00%  0.880    104 (+2.59%)    1800/300    1.33  yes
+  175    -60   115   +6.77% ( +4.78%)  ( +6.24%)   +6.02%  0.873    104 (+2.59%)    1860/350    1.48  yes
+recommended: stroke 100 mm, extension 15..115 mm (runner 343..443 mm), P1 +6.39%

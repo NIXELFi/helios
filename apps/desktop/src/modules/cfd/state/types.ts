@@ -64,6 +64,9 @@ export interface LoadedConfig {
   raw: Record<string, unknown>;
   summary: ConfigSummary;
   isExample: boolean;
+  /** Engine-config loader warnings (unknown / misspelled keys, wrong-typed
+   *  physics flags). Empty for a clean config. Finding 0032. */
+  warnings?: string[];
 }
 
 export interface ExampleConfig {
@@ -185,6 +188,10 @@ export interface OptimizationParams {
    *  follower path is NOT sent in `tunables`; the runner copies the
    *  leader's per-trial value into it. */
   lockedPairs: LockedPair[];
+  /** Physics-preset overrides applied to the base config before every
+   *  trial — the same preset mechanism as sweeps / single-RPM runs, so an
+   *  optimization and a sweep of the same config run the same physics. */
+  overrides?: ParameterOverride[];
   /** Frontend-only: the FSAE event metric key to rank/display the results by
    *  ("objective" or null = the backend objective). Stripped before the backend
    *  (which can't compute event metrics) and stored on the study for the

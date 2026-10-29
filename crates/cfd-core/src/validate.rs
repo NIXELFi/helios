@@ -296,6 +296,7 @@ mod tests {
             convergence_tol_imep: 5e-3,
             convergence_min_cycles: 3,
             locked_pairs: vec![],
+            overrides: vec![],
         }
     }
 
@@ -397,6 +398,12 @@ mod tests {
             "../engine-sim/python_ref/configs/sdm25.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26-physics-v2.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25-physics-v2.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_exhaust.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_realtune.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json",
         ] {
             let p = fixture(rel);
             if !p.exists() {

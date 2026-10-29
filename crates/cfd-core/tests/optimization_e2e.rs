@@ -96,6 +96,7 @@ fn small_params(
         convergence_tol_imep: 0.01,
         convergence_min_cycles: 2,
         locked_pairs: vec![],
+        overrides: vec![],
     }
 }
 
