@@ -93,7 +93,9 @@ head(fig, "Scores: direct simulation vs what the design grid predicted", "Gain v
 fig.subplots_adjust(left=0.01, right=0.99, top=TOP(fig) - 0.06, bottom=0.12); save(fig, "R3_scores.png")
 
 # ---------------- fsae-sim torque files ----------------
-base_curve = json.load(open(r"C:\Users\nick5\fsae-sim\sim\data\sdm26-torque.json"))
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]  # helios repo root
+_FSAE_SIM = __import__("pathlib").Path(__import__("os").environ.get("FSAE_SIM_DIR", _REPO.parent / "fsae-sim"))  # fsae-sim checkout, not in this repo
+base_curve = json.load(open(str(_FSAE_SIM / "sim/data/sdm26-torque.json")))
 def write_curve(name, ratio_fn, note):
     c = json.loads(json.dumps(base_curve)); c["name"] = f"SDM26 dyno x {name}"; c["note"] = note
     for p in c["points"]:

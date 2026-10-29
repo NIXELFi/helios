@@ -13,7 +13,8 @@ Gain is scored only on throttle (TPS >= 60 %) inside the model's rpm range.
 import math, numpy as np, pandas as pd
 
 import os as _os
-SURF = _os.environ.get("VRLI_SURF", "C:/Users/nick5/helios-vrli/physics_findings/0037-vrli-stroke-optimization/out/A_neutral_disp/surface.csv")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+SURF = _os.environ.get("VRLI_SURF", str(_REPO / "physics_findings/0037-vrli-stroke-optimization/out/A_neutral_disp/surface.csv"))
 BASE = 328.1
 EXT_MIN = float(_os.environ.get("VRLI_EXT_MIN", "-80"))
 

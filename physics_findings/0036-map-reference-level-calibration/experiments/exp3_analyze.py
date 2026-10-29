@@ -1,7 +1,9 @@
 import os, sys
-S = "C:/Users/nick5/AppData/Local/Temp/claude/C--Users-nick5/86aaf203-f5d9-4d19-95a0-d6f4a6685368/scratchpad"
+_SCRATCH = __import__("pathlib").Path(__import__("os").environ.get("EXP_SCRATCH", __import__("pathlib").Path(__file__).resolve().parent / "_scratch"))  # experiment outputs
+S = str(_SCRATCH)
 os.environ["RUNS_0035"] = S + "/exp3runs"
-sys.path.insert(0, "C:/Users/nick5/helios/physics_findings/0035-collector-merge-lambda-lag/scripts")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+sys.path.insert(0, str(_REPO / "physics_findings/0035-collector-merge-lambda-lag/scripts"))
 from lib import *
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 

@@ -15,7 +15,9 @@ import vrli_control_new as vc
 
 OUT = vrli_common.OUT = os.path.join(H, "charts", "real_ecu"); os.makedirs(OUT, exist_ok=True)
 GEARS = [2.75, 2.0, 1.667, 1.444, 1.304, 1.208]; PRIMARY, FINAL, RW, ETA, MEFF = 2.111, 3.0, 0.2, 0.85, 300.0
-CURVE = json.load(open(r"C:\Users\nick5\fsae-sim\sim\data\sdm26-torque.json"))["points"]
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]  # helios repo root
+_FSAE_SIM = __import__("pathlib").Path(__import__("os").environ.get("FSAE_SIM_DIR", _REPO.parent / "fsae-sim"))  # fsae-sim checkout, not in this repo
+CURVE = json.load(open(str(_FSAE_SIM / "sim/data/sdm26-torque.json")))["points"]
 CR, CT = np.array([p["rpm"] for p in CURVE], float), np.array([p["torqueNm"] for p in CURVE], float)   # crank torque, car's dyno
 D = vc.Design(lo=198.1, hi=298.1)
 # throttle response (tip-in runs, tipin_c160.ndjson): extra full-torque time lost per throttle snap with the 2.75 L box at the

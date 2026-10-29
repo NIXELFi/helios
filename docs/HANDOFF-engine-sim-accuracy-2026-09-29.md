@@ -3,6 +3,15 @@
 **Branch:** `fix/engine-sim-accuracy-0929` (from `main` @ `3d6073d0`)
 **Goal:** get the 1D engine model (`crates/engine-sim`) as close to the real SDM26 as possible before designing an **active / variable runner-length intake** this season.
 
+## Read first (2026-10-28, released with the 1D CFD work)
+
+This handoff is a historical record. Later findings superseded parts of it:
+
+- **Plenum mesh:** the default 20-cell plenum is not grid-converged for the as-built bell plenum. Use `plenum.n_cells` 160 (finding 0039). Everything below, plus 0036-0038 and the shipped as-built example configs, ran at 20 cells.
+- **λ lag:** 270 ms is the closed-throttle lag. At WOT it is about 90 ms (finding 0035/0036), so "Use 270 ms" below is wrong for WOT work.
+- **Restrictor:** the 0036 pressure-drop match came partly from two model errors cancelling (quasi-steady venturi plus a plenum dome that recovers too much). `physics.restrictor_inertance` fixes the first (finding 0039).
+- **Current state of the intake design** is in `physics_findings/0039-intake-design-study/finding.md`.
+
 ## Update (evening 2026-09-29): finding 0036, which supersedes parts of 0035
 
 See `physics_findings/0036-map-reference-level-calibration/finding.md`.

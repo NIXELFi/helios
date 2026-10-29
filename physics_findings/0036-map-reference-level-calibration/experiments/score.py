@@ -1,6 +1,7 @@
 import os, sys
 os.environ["RUNS_0035"] = os.path.abspath("runs")
-sys.path.insert(0, "C:/Users/nick5/helios-exp-damping/physics_findings/0035-collector-merge-lambda-lag/scripts")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+sys.path.insert(0, str(_REPO / "physics_findings/0035-collector-merge-lambda-lag/scripts"))
 from lib import *
 MV = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "exp1", "ve_map_reference.csv")).set_index("bin").ve_map.reindex(GRID)
 def nm(s): s = s.reindex(GRID); return s / s.mean()

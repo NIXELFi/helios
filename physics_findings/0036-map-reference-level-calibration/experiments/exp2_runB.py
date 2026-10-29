@@ -1,7 +1,8 @@
 import os, sys
 os.environ["HUNTEXP"] = os.path.abspath("huntexpB/target/release/huntexp.exe")
 os.environ["RUNS_0035"] = os.path.abspath("runs")
-sys.path.insert(0, "C:/Users/nick5/helios-exp-damping/physics_findings/0035-collector-merge-lambda-lag/scripts")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+sys.path.insert(0, str(_REPO / "physics_findings/0035-collector-merge-lambda-lag/scripts"))
 from lib import *
 AB = CFG + "/sdm26_asbuilt_exhaust.json"
 G28 = list(range(4000, 10751, 250)); M = ["exhaust_junction_momentum=1"]

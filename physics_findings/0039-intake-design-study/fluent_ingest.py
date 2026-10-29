@@ -13,7 +13,9 @@ import numpy as np, pandas as pd
 from scipy.optimize import least_squares
 
 H = os.path.dirname(os.path.abspath(__file__))
-MAPS = sys.argv[sys.argv.index("--maps") + 1] if "--maps" in sys.argv else r"C:\Users\nick5\restrictor_opt\data\restrictor_maps"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]  # helios repo root
+_RESTRICTOR_OPT = __import__("pathlib").Path(__import__("os").environ.get("RESTRICTOR_OPT_DIR", _REPO.parent / "restrictor_opt"))  # Fluent study data, not in this repo
+MAPS = sys.argv[sys.argv.index("--maps") + 1] if "--maps" in sys.argv else str(_RESTRICTOR_OPT / "data/restrictor_maps")
 P0, T0, G, RGAS, DT = 97300.0, 305.0, 1.4, 287.0, 0.020
 AT = math.pi / 4 * DT ** 2
 PRS = (2 / (G + 1)) ** (G / (G - 1))

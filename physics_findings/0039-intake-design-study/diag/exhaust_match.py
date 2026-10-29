@@ -9,7 +9,9 @@ H = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert
 import study
 from nothrottle import unthrottle
 REL = os.path.join(H, "driver", "target", "release"); B = ["plenum_n_cells=160", "restrictor_inertance=400"]
-F3D = sys.argv[sys.argv.index("--ref") + 1] if "--ref" in sys.argv else r"C:\Users\nick5\restrictor_opt\data\exhaust\stations_3d_cyl_p125_cycle4_9000rpm.csv"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+_RESTRICTOR_OPT = __import__("pathlib").Path(__import__("os").environ.get("RESTRICTOR_OPT_DIR", _REPO.parent / "restrictor_opt"))  # Fluent study data, not in this repo
+F3D = sys.argv[sys.argv.index("--ref") + 1] if "--ref" in sys.argv else str(_RESTRICTOR_OPT / "data/exhaust/stations_3d_cyl_p125_cycle4_9000rpm.csv")
 ref = pd.read_csv(F3D, comment="#"); ref["th"] = ref.theta_deg.round().astype(int) % 720; ref = ref.drop_duplicates("th").set_index("th").sort_index()
 ST = ["pri1_start", "pri1_mid", "pri1_end", "sec1_mid", "sec1_end", "final_start", "final_mid"]; base = json.load(open(os.path.join(H, "cfg", "PRIMARY_p125.json")))
 HOT = ["primary_wall_t=1100", "secondary_wall_t=1050", "collector_wall_t=1000"]

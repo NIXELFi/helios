@@ -12,7 +12,9 @@ H = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert
 import study
 from nothrottle import unthrottle
 REL = os.path.join(H, "driver", "target", "release"); B = ["plenum_n_cells=160", "restrictor_inertance=400"]; RPM = 9000
-ref = pd.read_csv(r"C:\Users\nick5\restrictor_opt\data\exhaust\stations_3d_cyl_p125_9000rpm.csv", comment="#"); ref["th"] = ref.theta_deg.round().astype(int) % 720; ref = ref.drop_duplicates("th").set_index("th").sort_index()
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+_RESTRICTOR_OPT = __import__("pathlib").Path(__import__("os").environ.get("RESTRICTOR_OPT_DIR", _REPO.parent / "restrictor_opt"))  # Fluent study data, not in this repo
+ref = pd.read_csv(str(_RESTRICTOR_OPT / "data/exhaust/stations_3d_cyl_p125_9000rpm.csv"), comment="#"); ref["th"] = ref.theta_deg.round().astype(int) % 720; ref = ref.drop_duplicates("th").set_index("th").sort_index()
 MAP = {"pri1_start": "c1_5", "pri1_mid": "c1_242", "pri1_end": "c1_464", "sec1_start": "c1_504", "sec1_mid": "c1_770", "sec1_end": "c1_1037", "final_start": "c1_1077", "final_mid": "c1_1389", "pri4_start": "c4_5", "pri4_mid": "c4_242"}
 DIST = "5,242,464,504,770,1037,1077,1389,1701"; base = json.load(open(os.path.join(H, "cfg", "PRIMARY_p125.json"))); D1 = 0.0361
 AR = [(75.6, 2.06), (70, 2.06), (60, 2.05), (50, 1.79), (40, 1.51), (30, 1.29), (20, 1.13), (10, 1.03), (0, 1.00)]          # mm before the merge point, area / pipe area

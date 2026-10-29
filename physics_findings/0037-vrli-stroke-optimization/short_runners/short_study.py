@@ -1,6 +1,7 @@
 """Shorter-runner experiment on the extended 0037 surface (E_short: extension -200..+160 mm)."""
 import os, glob, numpy as np, pandas as pd
-os.environ["VRLI_SURF"] = r"C:\Users\nick5\helios-vrli\physics_findings\0037-vrli-stroke-optimization\out\E_short\surface.csv"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+os.environ["VRLI_SURF"] = str(_REPO / "physics_findings/0037-vrli-stroke-optimization/out/E_short/surface.csv")
 s = pd.read_csv(os.environ["VRLI_SURF"]); conv = s.groupby("ext_mm").converged.all()
 ok_ext = conv[conv].index.values; os.environ["VRLI_EXT_MIN"] = str(float(min(ok_ext)))
 print("converged extensions:", ok_ext.min(), "..", ok_ext.max(), " unconverged:", conv[~conv].index.tolist())

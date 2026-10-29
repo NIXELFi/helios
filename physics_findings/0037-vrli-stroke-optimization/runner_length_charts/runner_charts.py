@@ -9,7 +9,8 @@ import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
 HERE = os.path.dirname(os.path.abspath(__file__)); OUT = os.path.join(HERE, "charts"); os.makedirs(OUT, exist_ok=True)
-SURF = r"C:/Users/nick5/helios-vrli/physics_findings/0037-vrli-stroke-optimization/out/E_short/surface.csv"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]  # helios repo root
+SURF = str(_REPO / "physics_findings/0037-vrli-stroke-optimization/out/E_short/surface.csv")
 BASE = 328.1
 # ---- data ----
 s = pd.read_csv(SURF)
@@ -18,7 +19,7 @@ P = s.pivot(index="ext_mm", columns="rpm", values="brake_torque_Nm").dropna()
 EXT = P.index.values.astype(float); RPM = P.columns.values.astype(float); TQ = P.values
 cal = pd.DataFrame([json.loads(open(f).read()) for f in glob.glob(os.path.join(HERE, "..", "cal", "runs", "A_e94", "[0-9]*.json"))]).set_index("rpm").sort_index()
 TODAY = np.interp(RPM, cal.index.values, cal.bt.values) * 0.94                 # calibrated wheel torque today
-dy = pd.read_csv(r"C:/Users/nick5/helios/physics_findings/references/dyno/sdm26-team-dyno.csv")
+dy = pd.read_csv(str(_REPO / "physics_findings/references/dyno/sdm26-team-dyno.csv"))
 dy = dy[(dy.rpm >= 4000) & (dy.rpm <= 12500)]
 i0 = int(np.where(EXT == 0)[0][0])
 RATIO = TQ / TQ[i0][None, :]
