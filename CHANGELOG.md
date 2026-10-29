@@ -59,6 +59,9 @@ follow [semver](https://semver.org/).
 - CFD: a misspelled or unknown key in an engine config (for example a physics flag typo) is now shown as a warning on the Studies screen and in the log. Before, it was silently ignored and the run used the old physics.
 - CFD: new configs started from the SDM25/SDM26 templates now carry the full calibrated physics block, so they match the shipped examples.
 - CFD: a config without `drivetrain_efficiency` now defaults to 0.85, the same as the built-in default, and shows a warning. It was 0.91, which read wheel power about 7 % high; old hand-written configs that relied on the 0.91 fallback will now read about 7 % lower.
+- CFD: on configs that give a pipe a `diameter_profile` (the as-built examples), the optimizer no longer offers plenum volume/length or that pipe's diameters, and a study that overrides them stops with a message. The profile defines that geometry, so those knobs used to change nothing and gave flat results.
+- CFD: `plenum.n_cells` written as a decimal (`160.0`) now loads. Before, it was silently ignored and the plenum kept the 20-cell default; a fractional value is now an error.
+- CFD: the "SDM26 — as-built, dyno-calibrated" example is now included in installed builds (it only showed in development builds), and CI fails if a committed example config is missing from the installer.
 
 ## [6.4.1] - 2026-10-28
 

@@ -48,6 +48,8 @@ pub enum ParameterError {
         idx: usize,
         len: usize,
     },
+    #[error("{path} has no effect: this config sets {profile}, which defines that geometry")]
+    ShadowedByProfile { path: String, profile: &'static str },
 }
 
 /// Build the full list of optimizable parameter metadata from a loaded
@@ -80,7 +82,7 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         }
     }
 
-    vec![
+    let mut out = vec![
         // --- Geometry ---
         m("bore", Scalar, 1, "m", cfg.bore, 0.05, 0.12, "Geometry"),
         m("stroke", Scalar, 1, "m", cfg.stroke, 0.04, 0.10, "Geometry"),
@@ -298,7 +300,44 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
 
         // --- Drivetrain ---
         m("drivetrain_efficiency", Scalar, 1, "-", cfg.drivetrain_efficiency, 0.80, 0.95, "Drivetrain"),
-    ]
+    ];
+    // Knobs a diameter_profile overrides would sweep to flat curves.
+    out.retain(|p| shadowing_profile(cfg, &p.path, None).is_none());
+    out
+}
+
+/// The `diameter_profile` (finding 0033/0034) that overrides `base`, if
+/// any. With a profile the pipe geometry comes from the profile alone, so
+/// the plain volume / length / diameter fields are ignored by the model.
+/// `index` targets one cylinder; `None` means any profiled cylinder.
+fn shadowing_profile(cfg: &SDM26Config, base: &str, index: Option<usize>) -> Option<&'static str> {
+    let any = |v: &Option<Vec<Option<Vec<(f64, f64)>>>>| match (v, index) {
+        (Some(arr), Some(i)) => arr.get(i).is_some_and(|p| p.is_some()),
+        (Some(arr), None) => arr.iter().any(|p| p.is_some()),
+        (None, _) => false,
+    };
+    match base {
+        "plenum_volume" | "plenum_length" if cfg.plenum_diameter_profile.is_some() => {
+            Some("plenum.diameter_profile")
+        }
+        "runner_diameter_in" | "runner_diameter_out" if any(&cfg.runner_diameter_profiles) => {
+            Some("intake_pipes[].diameter_profile")
+        }
+        "primary_diameter_in" | "primary_diameter_out" if any(&cfg.primary_diameter_profiles) => {
+            Some("exhaust_primaries[].diameter_profile")
+        }
+        "secondary_diameter_in" | "secondary_diameter_out"
+            if any(&cfg.secondary_diameter_profiles) =>
+        {
+            Some("exhaust_secondaries[].diameter_profile")
+        }
+        "collector_diameter_in" | "collector_diameter_out"
+            if cfg.collector_diameter_profile.is_some() =>
+        {
+            Some("exhaust_collector.diameter_profile")
+        }
+        _ => None,
+    }
 }
 
 // ---------------- apply_override ----------------
@@ -414,6 +453,9 @@ pub fn apply_override(
 ) -> Result<(), ParameterError> {
     let (base, index) = parse_array_index(path);
     let n_cyl = cfg.n_cylinders.max(1);
+    if let Some(profile) = shadowing_profile(cfg, base, index) {
+        return Err(ParameterError::ShadowedByProfile { path: path.to_string(), profile });
+    }
 
     // u32-typed cell counts: round f64 -> usize.
     let to_usize = |v: f64| -> usize { v.round().max(0.0) as usize };
@@ -812,6 +854,33 @@ mod tests {
         // when the example file moves; this is honest because all paths
         // we exercise are present on Default.
         SDM26Config::default()
+    }
+
+    #[test]
+    fn profiled_geometry_is_not_offered_and_overrides_are_refused() {
+        let mut c = SDM26Config::default();
+        c.plenum_diameter_profile = Some(vec![(0.0, 0.038), (0.12, 0.167)]);
+        c.runner_diameter_profiles = Some(vec![Some(vec![(0.0, 0.04), (0.3, 0.033)]), None, None, None]);
+        let paths: Vec<String> = enumerate_schema(&c).into_iter().map(|p| p.path).collect();
+        for gone in ["plenum_volume", "plenum_length", "runner_diameter_in", "runner_diameter_out"] {
+            assert!(!paths.iter().any(|p| p == gone), "{gone} still offered");
+        }
+        assert!(paths.iter().any(|p| p == "primary_diameter_in"));
+        assert!(paths.iter().any(|p| p == "runner_length"));
+        assert!(matches!(
+            apply_override(&mut c, "plenum_volume", 0.003),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        assert!(matches!(
+            apply_override(&mut c, "runner_diameter_in", 0.035),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        assert!(matches!(
+            apply_override(&mut c, "runner_diameter_in[0]", 0.035),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        // Cylinder 2 has no profile, so its diameter still applies.
+        apply_override(&mut c, "runner_diameter_in[1]", 0.035).unwrap();
     }
 
     #[test]

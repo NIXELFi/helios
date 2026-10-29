@@ -740,6 +740,6 @@
    ]
   ]
  },
- "description": "Finding 0034: sdm26_asbuilt_exhaust + the car's REAL WOT tune from the decoded ECU log (per-250-rpm median ignition angle and lambda, 4-10.75k, held flat above; lambda lag 270 ms). For dyno torque comparison only: the team tune is imperfect (lambda 0.70-1.00). Judge VE shape on sdm26_asbuilt_exhaust.",
- "_tune_note": "physics.spark_advance_map = WOT median 'Ignition Angle' (deg BTDC); physics.afr_map = WOT median 'Lambda 1' x 14.7, lambda shifted 270 ms (sensor transport lag, audit hunt/proxy.py filter: APS >= 85 %, no cuts, fuel pressure > 300). Logged pulls end at 10.75k; the maps hold the last value above. Heat release is O2-limited (0032), so rich lambda costs fuel, not the stoichiometric heat."
+ "description": "Finding 0034: sdm26_asbuilt_exhaust + the car's REAL WOT tune from the decoded ECU log (per-250-rpm median ignition angle and lambda, 4-10.75k, held flat above; lambda lag 270 ms). The 270 ms is the closed-throttle lag; at WOT the lag is ~90 ms (finding 0036), which moves this lambda map ~250 rpm. For dyno comparison use 'SDM26 - as-built, dyno-calibrated' instead. Dyno torque comparison only: the team tune is imperfect (lambda 0.70-1.00). Judge VE shape on sdm26_asbuilt_exhaust.",
+ "_tune_note": "physics.spark_advance_map = WOT median 'Ignition Angle' (deg BTDC); physics.afr_map = WOT median 'Lambda 1' x 14.7, lambda shifted 270 ms (closed-throttle sensor lag; superseded by the ~90 ms WOT lag in sdm26_asbuilt_cal, audit hunt/proxy.py filter: APS >= 85 %, no cuts, fuel pressure > 300). Logged pulls end at 10.75k; the maps hold the last value above. Heat release is O2-limited (0032), so rich lambda costs fuel, not the stoichiometric heat."
 }

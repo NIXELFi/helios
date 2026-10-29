@@ -464,7 +464,12 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         }
         cfg.plenum_length = l;
     }
-    if let Some(n) = plen.get("n_cells").or_else(|| plen.get("n_points")).and_then(|x| x.as_u64()) {
+    if let Some(raw) = plen.get("n_cells").or_else(|| plen.get("n_points")) {
+        // Accept 160.0 as well as 160 (Python and spreadsheets write floats);
+        // anything else used to be dropped silently, leaving the 20-cell default.
+        let n = raw.as_u64()
+            .or_else(|| raw.as_f64().filter(|f| *f >= 0.0 && f.fract() == 0.0).map(|f| f as u64))
+            .ok_or_else(|| ConfigLoadError::Schema(format!("plenum.n_cells must be a whole number, got {raw}")))?;
         if n < 4 {
             return Err(ConfigLoadError::Schema("plenum.n_cells must be >= 4".into()));
         }
@@ -1119,6 +1124,16 @@ mod tests {
         assert!(ks[2].is_nan() && ks[3].is_nan());
         assert_eq!(cfg.runner_end_correction(2), 0.02);
         assert!((cfg.runner_end_correction(0) - 0.85 * 0.019).abs() < 1e-12);
+    }
+
+    #[test]
+    fn plenum_n_cells_accepts_whole_floats_and_rejects_fractions() {
+        let mut data = base();
+        data["plenum"]["n_cells"] = serde_json::json!(160.0);
+        let (cfg, _) = load_with(&data);
+        assert_eq!(cfg.plenum_n_cells, 160);
+        data["plenum"]["n_cells"] = serde_json::json!(20.5);
+        assert!(load_v1_value(&data).is_err());
     }
 
     #[test]
