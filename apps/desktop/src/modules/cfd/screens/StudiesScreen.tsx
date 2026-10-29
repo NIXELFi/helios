@@ -235,6 +235,17 @@ export function StudiesScreen() {
               ? <>Using <span className="text-helios-text">{basename(state.loadedConfig.path)}</span></>
               : <>Open a config first.</>}
           </p>
+          {state.loadedConfig?.warnings && state.loadedConfig.warnings.length > 0 && (
+            <p
+              className="text-[10px] text-amber-300"
+              role="status"
+              title={state.loadedConfig.warnings.join("\n")}
+            >
+              {state.loadedConfig.warnings.length} config warning
+              {state.loadedConfig.warnings.length === 1 ? "" : "s"}: {state.loadedConfig.warnings[0]}
+              {state.loadedConfig.warnings.length > 1 ? " (hover for all)" : ""}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -612,7 +623,7 @@ function SingleRpmParamsModal({
             <label htmlFor="cfd-junc" className="uppercase tracking-wider text-helios-muted">Junction kind</label>
             <select id="cfd-junc" className={INPUT_CLS}
               value={junction} onChange={(e) => setJunction(e.target.value as JunctionKind)}>
-              <option value="stagnation">Stagnation</option>
+              <option value="stagnation" title="0-D stagnation volume at every junction. Absorbs ~98% of pressure-wave reflections, so runner/header tuning effects disappear. Kept for parity studies only.">Stagnation (not for wave tuning)</option>
               <option value="characteristic">Characteristic</option>
             </select>
             <label htmlFor="cfd-tol" className="uppercase tracking-wider text-helios-muted">Convergence tol (IMEP)</label>

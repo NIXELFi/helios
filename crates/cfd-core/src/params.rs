@@ -48,6 +48,8 @@ pub enum ParameterError {
         idx: usize,
         len: usize,
     },
+    #[error("{path} has no effect: this config sets {profile}, which defines that geometry")]
+    ShadowedByProfile { path: String, profile: &'static str },
 }
 
 /// Build the full list of optimizable parameter metadata from a loaded
@@ -80,7 +82,7 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         }
     }
 
-    vec![
+    let mut out = vec![
         // --- Geometry ---
         m("bore", Scalar, 1, "m", cfg.bore, 0.05, 0.12, "Geometry"),
         m("stroke", Scalar, 1, "m", cfg.stroke, 0.04, 0.10, "Geometry"),
@@ -112,6 +114,20 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_junction_borda_carnot", Scalar, 1, "bool", if cfg.intake_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
         m("exhaust_junction_loss_coef", Scalar, 1, "-", cfg.exhaust_junction_loss_coef, 0.0, 1.0, "Exhaust"),
         m("exhaust_junction_borda_carnot", Scalar, 1, "bool", if cfg.exhaust_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("exhaust_junction_momentum", Scalar, 1, "bool", if cfg.exhaust_junction_momentum { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("exhaust_merge_angle_deg", Scalar, 1, "deg", cfg.exhaust_merge_angle_deg, 0.0, 45.0, "Exhaust"),
+        m("exhaust_gas_gamma", Scalar, 1, "-", cfg.exhaust_gas_gamma, 1.25, 1.4, "Exhaust"),
+        m("exhaust_gas_r", Scalar, 1, "J/kg/K", cfg.exhaust_gas_r, 280.0, 300.0, "Exhaust"),
+        m("intake_cd_multiplier", Scalar, 1, "-", cfg.intake_cd_multiplier, 0.7, 1.3, "Valves"),
+        m("exhaust_cd_multiplier", Scalar, 1, "-", cfg.exhaust_cd_multiplier, 0.7, 1.3, "Valves"),
+        m("intake_port_length_delta", Scalar, 1, "m", cfg.intake_port_length_delta, -0.05, 0.05, "Intake"),
+        m("exhaust_port_length_delta", Scalar, 1, "m", cfg.exhaust_port_length_delta, -0.05, 0.05, "Exhaust"),
+        m("runner_mouth_extension", Scalar, 1, "m", cfg.runner_mouth_extension, -0.10, 0.20, "Intake"),
+        m("vrli_trumpet_od", Scalar, 1, "m", cfg.vrli_trumpet_od, 0.0, 0.06, "Intake"),
+        m("vrli_displacement_ref", Scalar, 1, "m", cfg.vrli_displacement_ref, -0.10, 0.20, "Intake"),
+        m("pipe_friction_multiplier", Scalar, 1, "-", cfg.pipe_friction_multiplier, 0.0, 3.0, "Numerics"),
+        m("pipe_heat_transfer_multiplier", Scalar, 1, "-", cfg.pipe_heat_transfer_multiplier, 0.0, 3.0, "Numerics"),
+        m("exhaust_heat_transfer_multiplier", Scalar, 1, "-", cfg.exhaust_heat_transfer_multiplier, 0.0, 3.0, "Numerics"),
         m("spark_advance_rpm_slope_deg_per_krpm", Scalar, 1, "deg/krpm", cfg.spark_advance_rpm_slope_deg_per_krpm, 0.0, 3.0, "Combustion"),
         m("spark_advance_rpm_ref", Scalar, 1, "RPM", cfg.spark_advance_rpm_ref, 4000.0, 13000.0, "Combustion"),
         m("duration_rpm_exp", Scalar, 1, "-", cfg.duration_rpm_exp, 0.0, 0.8, "Combustion"),
@@ -155,6 +171,28 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("knock_retard_step_deg", Scalar, 1, "deg", cfg.knock_retard_step_deg, 0.25, 3.0, "Combustion"),
         m("knock_max_retard_deg", Scalar, 1, "deg", cfg.knock_max_retard_deg, 0.0, 15.0, "Combustion"),
         m("knock_tau_scale", Scalar, 1, "-", cfg.knock_tau_scale, 0.5, 5.0, "Combustion"),
+        // 0032 — audit 0929 physics fixes (all opt-in; see finding 0032)
+        m("intake_junction_directional_loss", Scalar, 1, "bool",
+          if cfg.intake_junction_directional_loss { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
+        m("intake_runner_entry_k", Scalar, 1, "-", cfg.intake_runner_entry_k, 0.0, 0.6, "Intake"),
+        m("intake_runner_end_correction", Scalar, 1, "bool",
+          if cfg.intake_runner_end_correction { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
+        m("restrictor_venturi_model", Scalar, 1, "bool",
+          if cfg.restrictor_venturi_model { 1.0 } else { 0.0 }, 0.0, 1.0, "Restrictor"),
+        m("restrictor_diffuser_efficiency", Scalar, 1, "-",
+          cfg.restrictor_diffuser_efficiency.unwrap_or(0.0), 0.0, 1.0, "Restrictor"),
+        m("exhaust_collector_end_correction", Scalar, 1, "bool",
+          if cfg.exhaust_collector_end_correction { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("exhaust_collector_open_end_physical", Scalar, 1, "bool",
+          if cfg.exhaust_collector_open_end_physical { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("fuel_mass_from_trapped_air", Scalar, 1, "bool",
+          if cfg.fuel_mass_from_trapped_air { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("heat_release_o2_limited", Scalar, 1, "bool",
+          if cfg.heat_release_o2_limited { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("valve_events_at_reference_lift", Scalar, 1, "bool",
+          if cfg.valve_events_at_reference_lift { 1.0 } else { 0.0 }, 0.0, 1.0, "Valves"),
+        m("valve_event_reference_lift", Scalar, 1, "m", cfg.valve_event_reference_lift, 0.0001, 0.002, "Valves"),
+        m("valve_lift_shape_exponent", Scalar, 1, "-", cfg.valve_lift_shape_exponent, 1.05, 3.0, "Valves"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -262,7 +300,44 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
 
         // --- Drivetrain ---
         m("drivetrain_efficiency", Scalar, 1, "-", cfg.drivetrain_efficiency, 0.80, 0.95, "Drivetrain"),
-    ]
+    ];
+    // Knobs a diameter_profile overrides would sweep to flat curves.
+    out.retain(|p| shadowing_profile(cfg, &p.path, None).is_none());
+    out
+}
+
+/// The `diameter_profile` (finding 0033/0034) that overrides `base`, if
+/// any. With a profile the pipe geometry comes from the profile alone, so
+/// the plain volume / length / diameter fields are ignored by the model.
+/// `index` targets one cylinder; `None` means any profiled cylinder.
+fn shadowing_profile(cfg: &SDM26Config, base: &str, index: Option<usize>) -> Option<&'static str> {
+    let any = |v: &Option<Vec<Option<Vec<(f64, f64)>>>>| match (v, index) {
+        (Some(arr), Some(i)) => arr.get(i).is_some_and(|p| p.is_some()),
+        (Some(arr), None) => arr.iter().any(|p| p.is_some()),
+        (None, _) => false,
+    };
+    match base {
+        "plenum_volume" | "plenum_length" if cfg.plenum_diameter_profile.is_some() => {
+            Some("plenum.diameter_profile")
+        }
+        "runner_diameter_in" | "runner_diameter_out" if any(&cfg.runner_diameter_profiles) => {
+            Some("intake_pipes[].diameter_profile")
+        }
+        "primary_diameter_in" | "primary_diameter_out" if any(&cfg.primary_diameter_profiles) => {
+            Some("exhaust_primaries[].diameter_profile")
+        }
+        "secondary_diameter_in" | "secondary_diameter_out"
+            if any(&cfg.secondary_diameter_profiles) =>
+        {
+            Some("exhaust_secondaries[].diameter_profile")
+        }
+        "collector_diameter_in" | "collector_diameter_out"
+            if cfg.collector_diameter_profile.is_some() =>
+        {
+            Some("exhaust_collector.diameter_profile")
+        }
+        _ => None,
+    }
 }
 
 // ---------------- apply_override ----------------
@@ -378,6 +453,9 @@ pub fn apply_override(
 ) -> Result<(), ParameterError> {
     let (base, index) = parse_array_index(path);
     let n_cyl = cfg.n_cylinders.max(1);
+    if let Some(profile) = shadowing_profile(cfg, base, index) {
+        return Err(ParameterError::ShadowedByProfile { path: path.to_string(), profile });
+    }
 
     // u32-typed cell counts: round f64 -> usize.
     let to_usize = |v: f64| -> usize { v.round().max(0.0) as usize };
@@ -462,6 +540,20 @@ pub fn apply_override(
         "intake_junction_borda_carnot" => cfg.intake_junction_borda_carnot = value != 0.0,
         "exhaust_junction_loss_coef" => cfg.exhaust_junction_loss_coef = value,
         "exhaust_junction_borda_carnot" => cfg.exhaust_junction_borda_carnot = value != 0.0,
+        "exhaust_junction_momentum" => cfg.exhaust_junction_momentum = value != 0.0,
+        "exhaust_merge_angle_deg" => cfg.exhaust_merge_angle_deg = value,
+        "exhaust_gas_gamma" => cfg.exhaust_gas_gamma = value,
+        "exhaust_gas_r" => cfg.exhaust_gas_r = value,
+        "intake_cd_multiplier" => cfg.intake_cd_multiplier = value,
+        "exhaust_cd_multiplier" => cfg.exhaust_cd_multiplier = value,
+        "intake_port_length_delta" => cfg.intake_port_length_delta = value,
+        "exhaust_port_length_delta" => cfg.exhaust_port_length_delta = value,
+        "runner_mouth_extension" => cfg.runner_mouth_extension = value,
+        "vrli_trumpet_od" => cfg.vrli_trumpet_od = value,
+        "vrli_displacement_ref" => cfg.vrli_displacement_ref = value,
+        "pipe_friction_multiplier" => cfg.pipe_friction_multiplier = value,
+        "pipe_heat_transfer_multiplier" => cfg.pipe_heat_transfer_multiplier = value,
+        "exhaust_heat_transfer_multiplier" => cfg.exhaust_heat_transfer_multiplier = value,
         "spark_advance_rpm_slope_deg_per_krpm" => cfg.spark_advance_rpm_slope_deg_per_krpm = value,
         "spark_advance_rpm_ref" => cfg.spark_advance_rpm_ref = value,
         "duration_rpm_exp" => cfg.duration_rpm_exp = value,
@@ -488,6 +580,22 @@ pub fn apply_override(
         "knock_retard_step_deg" => cfg.knock_retard_step_deg = value,
         "knock_max_retard_deg" => cfg.knock_max_retard_deg = value,
         "knock_tau_scale" => cfg.knock_tau_scale = value,
+        // 0032 — audit 0929 physics fixes
+        "intake_junction_directional_loss" => cfg.intake_junction_directional_loss = value != 0.0,
+        "intake_runner_entry_k" => cfg.intake_runner_entry_k = value,
+        "intake_runner_end_correction" => cfg.intake_runner_end_correction = value != 0.0,
+        "restrictor_venturi_model" => cfg.restrictor_venturi_model = value != 0.0,
+        // <= 0 clears the explicit efficiency (derive from Idelchik instead).
+        "restrictor_diffuser_efficiency" => {
+            cfg.restrictor_diffuser_efficiency = if value > 0.0 { Some(value) } else { None }
+        }
+        "exhaust_collector_end_correction" => cfg.exhaust_collector_end_correction = value != 0.0,
+        "exhaust_collector_open_end_physical" => cfg.exhaust_collector_open_end_physical = value != 0.0,
+        "fuel_mass_from_trapped_air" => cfg.fuel_mass_from_trapped_air = value != 0.0,
+        "heat_release_o2_limited" => cfg.heat_release_o2_limited = value != 0.0,
+        "valve_events_at_reference_lift" => cfg.valve_events_at_reference_lift = value != 0.0,
+        "valve_event_reference_lift" => cfg.valve_event_reference_lift = value,
+        "valve_lift_shape_exponent" => cfg.valve_lift_shape_exponent = value,
         // 0015 — low-Re intake Cd correction
         "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = value != 0.0,
         "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = value,
@@ -496,6 +604,7 @@ pub fn apply_override(
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,
         "restrictor_cd" => cfg.restrictor_cd = value,
+        "restrictor_inertance" => cfg.restrictor_inertance = value.max(0.0),
         "restrictor_loss_coef" => cfg.restrictor_loss_coef = value,
 
         // Exhaust primaries
@@ -745,6 +854,66 @@ mod tests {
         // when the example file moves; this is honest because all paths
         // we exercise are present on Default.
         SDM26Config::default()
+    }
+
+    #[test]
+    fn profiled_geometry_is_not_offered_and_overrides_are_refused() {
+        let mut c = SDM26Config::default();
+        c.plenum_diameter_profile = Some(vec![(0.0, 0.038), (0.12, 0.167)]);
+        c.runner_diameter_profiles = Some(vec![Some(vec![(0.0, 0.04), (0.3, 0.033)]), None, None, None]);
+        let paths: Vec<String> = enumerate_schema(&c).into_iter().map(|p| p.path).collect();
+        for gone in ["plenum_volume", "plenum_length", "runner_diameter_in", "runner_diameter_out"] {
+            assert!(!paths.iter().any(|p| p == gone), "{gone} still offered");
+        }
+        assert!(paths.iter().any(|p| p == "primary_diameter_in"));
+        assert!(paths.iter().any(|p| p == "runner_length"));
+        assert!(matches!(
+            apply_override(&mut c, "plenum_volume", 0.003),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        assert!(matches!(
+            apply_override(&mut c, "runner_diameter_in", 0.035),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        assert!(matches!(
+            apply_override(&mut c, "runner_diameter_in[0]", 0.035),
+            Err(ParameterError::ShadowedByProfile { .. })
+        ));
+        // Cylinder 2 has no profile, so its diameter still applies.
+        apply_override(&mut c, "runner_diameter_in[1]", 0.035).unwrap();
+    }
+
+    #[test]
+    fn every_schema_path_is_accepted_by_apply_override() {
+        // A schema entry without an apply_override arm is a knob the UI can
+        // show but a sweep silently cannot move (the B6-B12 bug class).
+        let cfg = load_cfg();
+        for meta in enumerate_schema(&cfg) {
+            let mut c = cfg.clone();
+            apply_override(&mut c, &meta.path, meta.default)
+                .unwrap_or_else(|e| panic!("{}: {e}", meta.path));
+        }
+    }
+
+    #[test]
+    fn finding_0032_flags_round_trip_through_apply_override() {
+        let mut c = SDM26Config::default();
+        for p in [
+            "intake_junction_directional_loss", "intake_runner_end_correction",
+            "restrictor_venturi_model", "exhaust_collector_end_correction",
+            "exhaust_collector_open_end_physical", "fuel_mass_from_trapped_air",
+            "heat_release_o2_limited", "valve_events_at_reference_lift",
+        ] {
+            apply_override(&mut c, p, 1.0).unwrap();
+        }
+        assert!(c.intake_junction_directional_loss && c.intake_runner_end_correction);
+        assert!(c.restrictor_venturi_model && c.exhaust_collector_end_correction);
+        assert!(c.exhaust_collector_open_end_physical && c.fuel_mass_from_trapped_air);
+        assert!(c.heat_release_o2_limited && c.valve_events_at_reference_lift);
+        apply_override(&mut c, "restrictor_diffuser_efficiency", 0.85).unwrap();
+        assert_eq!(c.restrictor_diffuser_efficiency, Some(0.85));
+        apply_override(&mut c, "restrictor_diffuser_efficiency", 0.0).unwrap();
+        assert_eq!(c.restrictor_diffuser_efficiency, None);
     }
 
     #[test]

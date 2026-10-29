@@ -13,7 +13,19 @@ use std::time::Instant;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::ThreadPoolBuilder;
 
-use engine_sim::config::loader::load_v1_json;
+use engine_sim::config::loader::{load_v1_json_with_warnings, ConfigLoadError};
+use engine_sim::model::sdm26::SDM26Config as LoadedEngineConfig;
+
+/// Load the engine config and log any loader warnings (unknown / misspelled
+/// keys, wrong-typed physics flags) to stderr, which the desktop app routes
+/// to its log. The same warnings reach the UI through `LoadedConfig`.
+fn load_v1_json_logged(path: &std::path::Path) -> Result<LoadedEngineConfig, ConfigLoadError> {
+    let (cfg, warnings) = load_v1_json_with_warnings(path)?;
+    for w in &warnings {
+        eprintln!("[cfd] config warning ({}): {w}", path.display());
+    }
+    Ok(cfg)
+}
 use engine_sim::model::sdm26::{
     CycleLoopState, CycleObserver, CycleOutcome, CycleStats, SDM26Engine,
 };
@@ -338,7 +350,7 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
         started_at,
     });
 
-    let mut cfg = match load_v1_json(&config_path) {
+    let mut cfg = match load_v1_json_logged(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -517,7 +529,7 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
         kind: StudyKind::Sweep,
         started_at,
     });
-    let mut cfg = match load_v1_json(&config_path) {
+    let mut cfg = match load_v1_json_logged(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -925,7 +937,7 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     });
 
     // 1. Load base config.
-    let base_cfg = match load_v1_json(&config_path) {
+    let mut base_cfg = match load_v1_json_logged(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -939,6 +951,21 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
             return RunOutcome::Errored;
         }
     };
+
+    // 1b. Physics-preset overrides (same mechanism as sweep / single-RPM).
+    for ov in &params.overrides {
+        if let Err(e) = crate::params::apply_override(&mut base_cfg, &ov.path, ov.value) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::ConfigLoad,
+                message: format!("apply_override({}): {}", ov.path, e),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    }
 
     // 2. Validate inputs.
     if params.tunables.is_empty() {
@@ -1316,6 +1343,7 @@ pub fn drive_runner_no_emit(
 
 #[cfg(test)]
 mod tests {
+    use engine_sim::config::loader::load_v1_json;
     use super::*;
     use crate::dto::JunctionKindDto;
     use std::sync::Mutex;

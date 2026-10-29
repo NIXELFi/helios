@@ -21,7 +21,7 @@
 // present" on its own — that's a process step: rebuild + commit before tagging.
 // Each C# DLL also stamps the source git short-hash into its ProductVersion, so
 // you can eyeball which source state a shipped DLL was built from.)
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -67,6 +67,27 @@ for (const src of sources) {
   } else {
     console.log(`✓ ${src}: ${size} bytes`);
   }
+}
+
+// The reverse direction for CFD example configs: every config committed under
+// resources/cfd/configs/ must be declared, or cfd_list_examples (which skips
+// files that don't exist) silently drops it from installed builds while dev
+// builds still show it.
+const CFD_DIR = "resources/cfd/configs";
+const declared = new Set(sources.map((s) => s.replace(/\\/g, "/")));
+const undeclared = readdirSync(resolve(TAURI_DIR, CFD_DIR))
+  .filter((f) => f.endsWith(".json"))
+  .map((f) => `${CFD_DIR}/${f}`)
+  .filter((f) => !declared.has(f));
+for (const f of undeclared) {
+  console.log(`✗ ${f}: committed but not declared in bundle.resources`);
+}
+if (undeclared.length > 0) {
+  console.error(
+    `\n${undeclared.length} CFD example config(s) not bundled: ${undeclared.join(", ")}\n` +
+      `Add each one to bundle.resources in apps/desktop/src-tauri/tauri.conf.json.`,
+  );
+  process.exit(1);
 }
 
 if (!ok) {

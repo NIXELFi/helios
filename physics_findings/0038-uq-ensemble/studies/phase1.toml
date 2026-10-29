@@ -1,0 +1,80 @@
+# Finding 0038 phase 1: calibration ensemble over the inputs the car data
+# cannot pin down directly. Run from the repo root:
+#   helios-bench ensemble physics_findings/0038-uq-ensemble/studies/phase1.toml \
+#       --out physics_findings/0038-uq-ensemble/out/phase1.ndjson
+# Priors are justified in ../finding.md section 2. Every prior is a delta or
+# scale about the 0036 values, so sample 0 is the unperturbed sdm26_asbuilt_cal.
+[ensemble]
+config = "../../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json"
+n_samples = 64
+seed = 38
+sampler = "lhs"
+include_nominal = true
+rpm_ranges = [[4000, 10750, 250], [11000, 12500, 500]]
+cycles = 30
+threads = 15
+
+# --- exhaust valve events + flow (the ripple levers, 0036 exp 3) ---
+[[param]]
+name = "exhaust_valve_open_angle"     # 1 mm-lift service-manual value; lash / cam wear
+mode = "delta"
+min = -8.0
+max = 8.0
+[[param]]
+name = "exhaust_valve_close_angle"
+mode = "delta"
+min = -5.0
+max = 5.0
+[[param]]
+name = "exhaust_valve_max_lift"       # unverified in the config
+mode = "scale"
+min = 0.9
+max = 1.1
+[[param]]
+name = "exhaust_cd_multiplier"        # generic steady-bench Cd; pulsating Cd can run higher
+mode = "scale"
+min = 0.85
+max = 1.2
+[[param]]
+name = "exhaust_port_length_delta"    # exhaust head port 40-90 mm (65 mm assumed, 0034)
+mode = "delta"
+min = -0.025
+max = 0.025
+# --- intake valve + port ---
+[[param]]
+name = "intake_valve_close_angle"
+mode = "delta"
+min = -5.0
+max = 5.0
+[[param]]
+name = "intake_valve_max_lift"
+mode = "scale"
+min = 0.9
+max = 1.1
+[[param]]
+name = "intake_cd_multiplier"
+mode = "scale"
+min = 0.9
+max = 1.1
+[[param]]
+name = "intake_port_length_delta"     # intake head port 50-110 mm (80 mm assumed, 0033)
+mode = "delta"
+min = -0.03
+max = 0.03
+# --- heat loss + boundary conditions ---
+[[param]]
+name = "primary_wall_t"               # 750-1050 K primaries; tails keep their -150/-250 K offsets
+mode = "delta"
+min = -150.0
+max = 150.0
+also = ["secondary_wall_t", "collector_wall_t"]
+[[param]]
+name = "restrictor_diffuser_efficiency"   # 0.50-0.75 around the 0036 match (0.62)
+mode = "delta"
+min = -0.12
+max = 0.13
+[[param]]
+name = "p_ambient"                    # baro 96.8-97.8 kPa (not logged); also moves the MAP-VE reference
+mode = "delta"
+min = -500.0
+max = 500.0

@@ -1,0 +1,10 @@
+[package]
+name = "intakepoint"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+engine-sim = { path = "../../../crates/engine-sim" }
+cfd-core = { path = "../../../crates/cfd-core" }
+[profile.release]
+debug = false
+[workspace]

@@ -1,0 +1,442 @@
+<title>VRLI Lap Replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F2F4F6; --panel:#FFFFFF; --panel-2:#E8ECF0; --ink:#14202B; --muted:#5A6A77; --hair:#D3DAE0;
+  --accent:#1F6FD1; --accent-soft:rgba(31,111,209,.14); --cmd:#C97A12; --gain:#1C8F63; --loss:#C2413A;
+  --metal:#AEB9C3; --metal-2:#8C99A5; --air:rgba(31,111,209,.06); --warn-bg:rgba(201,122,18,.12);
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0D1319; --panel:#141C24; --panel-2:#1B2530; --ink:#E4EBF1; --muted:#8B9BA8; --hair:#26323E;
+    --accent:#4C95F0; --accent-soft:rgba(76,149,240,.18); --cmd:#EBA23E; --gain:#39B884; --loss:#E0645C;
+    --metal:#4A5866; --metal-2:#667585; --air:rgba(76,149,240,.07); --warn-bg:rgba(235,162,62,.14);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0D1319; --panel:#141C24; --panel-2:#1B2530; --ink:#E4EBF1; --muted:#8B9BA8; --hair:#26323E;
+  --accent:#4C95F0; --accent-soft:rgba(76,149,240,.18); --cmd:#EBA23E; --gain:#39B884; --loss:#E0645C;
+  --metal:#4A5866; --metal-2:#667585; --air:rgba(76,149,240,.07); --warn-bg:rgba(235,162,62,.14);
+}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:20px 40px;display:flex;flex-direction:column;gap:18px}
+header h1{font-family:var(--f-display);font-weight:700;font-size:34px;letter-spacing:.01em;margin:0;line-height:1.05;text-wrap:balance}
+header p{margin:6px 0 0;color:var(--muted);max-width:75ch}
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stage{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--hair);border-radius:10px;padding:14px}
+.section-svg{width:100%;height:auto;display:block}
+.readouts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ro{background:var(--panel-2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.ro .lab{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.ro .val{font-family:var(--f-display);font-weight:600;font-size:30px;line-height:1.05;font-variant-numeric:tabular-nums}
+.ro .sub{font-family:var(--f-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ro.wide{grid-column:1/-1}
+.val.cmd{color:var(--cmd)} .val.act{color:var(--accent)} .val.pos{color:var(--gain)} .val.neg{color:var(--loss)}
+.state{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11px;padding:2px 8px;border-radius:99px;background:var(--panel-2);color:var(--muted)}
+.state.on{background:var(--accent-soft);color:var(--accent)} .state.warn{background:var(--warn-bg);color:var(--cmd)}
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+button{font:500 13px var(--f-body);color:var(--ink);background:var(--panel-2);border:1px solid var(--hair);border-radius:7px;padding:7px 14px;cursor:pointer}
+button.primary{background:var(--accent);color:#fff;border-color:transparent;min-width:84px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input[type=range]{accent-color:var(--accent)}
+#scrub{flex:1 1 260px;min-width:0}
+.tclock{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+select{font:13px var(--f-body);color:var(--ink);background:var(--panel-2);border:1px solid var(--hair);border-radius:7px;padding:6px 8px}
+canvas{width:100%;display:block}
+.controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.ctl{display:flex;flex-direction:column;gap:4px}
+.ctl label{font-weight:500;font-size:13px}
+.ctl .hint{font-size:11.5px;color:var(--muted)}
+.ctl output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);font-variant-numeric:tabular-nums}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:4px}
+.stat .n{font-family:var(--f-display);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .l{font-size:12px;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:600;font-size:20px;margin:0 0 6px;letter-spacing:.01em}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-bottom:6px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.notes{color:var(--muted);font-size:12.5px;max-width:95ch}
+.notes li{margin:3px 0}
+@media (max-width:900px){.stage,.duo{grid-template-columns:1fr}.controls,.stats{grid-template-columns:1fr 1fr}}
+@media (max-width:460px){.controls,.stats{grid-template-columns:1fr}header h1{font-size:28px}}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">SDM · VRLI concept A · 1D model replay</div>
+    <h1>Telescoping bellmouths over an autocross lap</h1>
+    <p>The fsae-sim lap below drives the ECU runner-length table; the carrier plate chases it at a finite actuator speed. Torque gain is the 1D model's brake torque at the plate's actual position versus the as-built runner, at the same rpm.</p>
+  </header>
+
+  <div class="stage">
+    <div class="panel">
+      <svg class="section-svg" id="section" viewBox="0 0 600 440" role="img" aria-label="Cross-section of the plenum with four telescoping bellmouth trumpets on a carrier plate"></svg>
+    </div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="eyebrow" id="runLabel">lap</span>
+        <span class="state" id="stateChip">holding</span>
+      </div>
+      <div class="readouts">
+        <div class="ro"><span class="lab">Engine speed</span><span class="val" id="roRpm">–</span><span class="sub" id="roGear">–</span></div>
+        <div class="ro"><span class="lab">Throttle (TPS)</span><span class="val" id="roTps">–</span><span class="sub" id="roKph">–</span></div>
+        <div class="ro"><span class="lab">Runner, commanded</span><span class="val cmd" id="roCmd">–</span><span class="sub" id="roCmdExt">–</span></div>
+        <div class="ro"><span class="lab">Runner, actual</span><span class="val act" id="roAct">–</span><span class="sub" id="roErr">–</span></div>
+        <div class="ro wide"><span class="lab">Torque vs as-built runner, right now</span><span class="val" id="roGain">–</span><span class="sub" id="roGainSub">–</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="display:flex;flex-direction:column;gap:10px">
+    <div class="transport">
+      <button class="primary" id="play" type="button">Play</button>
+      <select id="speed" aria-label="Playback speed">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+      </select>
+      <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Lap position">
+      <span class="tclock" id="clock">0.00 s</span>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--ink)"></i>engine rpm</span>
+      <span><i style="background:var(--metal-2)"></i>TPS</span>
+      <span><i style="background:var(--cmd)"></i>runner commanded</span>
+      <span><i style="background:var(--accent)"></i>runner actual</span>
+      <span><i style="background:var(--gain)"></i>torque gain</span>
+    </div>
+    <canvas id="timeline" height="360" aria-label="Lap timeline: rpm, throttle, runner length and torque gain"></canvas>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Design</h2>
+    <div class="controls">
+      <div class="ctl"><label for="cLong">Long end</label><input type="range" id="cLong" min="0" max="160" step="5" value="115"><output id="oLong"></output><span class="hint">How much longer than as-built the trumpets can reach (packaging).</span></div>
+      <div class="ctl"><label for="cStroke">Stroke</label><input type="range" id="cStroke" min="0" max="200" step="5" value="100"><output id="oStroke"></output><span class="hint">How far the plate retracts from the long end.</span></div>
+      <div class="ctl"><label for="cSpeed">Actuator speed</label><input type="range" id="cSpeed" min="50" max="1000" step="10" value="200"><output id="oSpeed"></output><span class="hint">F2 asks full stroke in 0.5 s; 100 mm → 200 mm/s.</span></div>
+      <div class="ctl"><label for="cTps">Move above TPS</label><input type="range" id="cTps" min="0" max="100" step="5" value="60"><output id="oTps"></output><span class="hint">Below this throttle the plate holds position.</span></div>
+    </div>
+  </div>
+
+  <div class="duo">
+    <div class="panel">
+      <h2>ECU table</h2>
+      <div class="legend"><span><i style="background:var(--cmd)"></i>best runner length at each rpm, inside the stroke</span><span><i style="background:var(--accent-soft);height:8px"></i>travel range</span></div>
+      <canvas id="mapChart" height="260" aria-label="Runner length table versus rpm"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Torque envelope</h2>
+      <div class="legend"><span><i style="background:var(--metal-2)"></i>as-built runner</span><span><i style="background:var(--accent)"></i>VRLI, table followed exactly</span></div>
+      <canvas id="tqChart" height="260" aria-label="Brake torque versus rpm, as-built and VRLI"></canvas>
+    </div>
+  </div>
+
+  <ul class="notes">
+    <li>Model: helios engine-sim <code>sdm26_asbuilt_cal</code> (finding 0036), neutral tune, trumpets displace plenum volume (44 mm OD), finding 0037 surface. Its tuning peaks sit about 250 rpm late versus the car and it carries about 0.6 of the car's airflow ripple, so gains likely read low.</li>
+    <li>Telemetry: fsae-sim lap, used as realistic rpm/TPS input only. The sim car revs to 14.5k; above 12.5k the model has no data and the gain is not scored (hatched).</li>
+    <li>Control strategy shown is a placeholder: follow the table above the TPS threshold, otherwise hold. Runner length = as-built 328 mm + extension.</li>
+  </ul>
+</div>
+
+<script>
+const D = __DATA__;
+const EXT_MIN = -80, EXT_MAX = 160, RPM_LO = D.rpm[0], RPM_HI = D.rpm[D.rpm.length - 1];
+const BASE = D.base_runner_mm;
+const T = D.tel, N = T.t.length, DT = T.t[1] - T.t[0];
+
+// ---------- model surface ----------
+function bracket(arr, x){ // returns [i, f] with arr[i] <= x <= arr[i+1]
+  if (x <= arr[0]) return [0, 0];
+  if (x >= arr[arr.length - 1]) return [arr.length - 2, 1];
+  let i = 0; while (arr[i + 1] < x) i++;
+  return [i, (x - arr[i]) / (arr[i + 1] - arr[i])];
+}
+function torqueAt(ext, rpm){
+  const [i, fi] = bracket(D.ext, ext), [j, fj] = bracket(D.rpm, Math.min(Math.max(rpm, RPM_LO), RPM_HI));
+  const q = D.torque;
+  const a = q[i][j] * (1 - fj) + q[i][j + 1] * fj, b = q[i + 1][j] * (1 - fj) + q[i + 1][j + 1] * fj;
+  return a * (1 - fi) + b * fi;
+}
+
+// ---------- design + simulation state ----------
+const S = {long: 115, stroke: 100, speed: 200, tps: 60, i: 0, playing: false, rate: 1};
+let table = null, sim = null;
+const TABLE_STEP = 50;
+function buildTable(){
+  const hi = Math.min(S.long, EXT_MAX), lo = Math.max(hi - S.stroke, EXT_MIN);
+  const rows = [];
+  for (let r = RPM_LO; r <= RPM_HI + 1e-6; r += TABLE_STEP){
+    let best = hi, bt = -1e9;
+    for (let p = lo; p <= hi + 1e-9; p += 1){ const v = torqueAt(p, r); if (v > bt){ bt = v; best = p; } }
+    best = Math.round(best / 2) * 2; // F3: 2 mm resolution
+    rows.push({rpm: r, ext: best, tq: torqueAt(best, r), base: torqueAt(0, r)});
+  }
+  return {lo, hi, rows, failsafe: bestFixed(lo, hi)};
+}
+function bestFixed(lo, hi){ // best single position over the P1 band, the fail-safe spring length
+  let best = hi, bs = -1e9;
+  for (let p = lo; p <= hi; p += 1){ let s = 0; for (let r = 6000; r <= 12000; r += 250) s += torqueAt(p, r); if (s > bs){ bs = s; best = p; } }
+  return best;
+}
+function tableAt(rpm){
+  const r = Math.min(Math.max(rpm, RPM_LO), RPM_HI), k = Math.round((r - RPM_LO) / TABLE_STEP);
+  return table.rows[Math.min(k, table.rows.length - 1)].ext;
+}
+function simulate(){
+  const cmd = new Float32Array(N), act = new Float32Array(N), gain = new Float32Array(N), ideal = new Float32Array(N), live = new Uint8Array(N);
+  let pos = table.failsafe, c = table.failsafe;
+  const vmax = S.speed * DT;
+  let gSum = 0, iSum = 0, n = 0, lagSum = 0, lagN = 0, over = 0, wot = 0, moving = 0;
+  for (let k = 0; k < N; k++){
+    const rpm = T.rpm[k], on = T.tps[k] >= S.tps;
+    if (on) c = tableAt(rpm);
+    const d = c - pos; pos += Math.abs(d) <= vmax ? d : Math.sign(d) * vmax;
+    if (Math.abs(d) > 0.5) moving++;
+    cmd[k] = c; act[k] = pos; live[k] = on ? 1 : 0;
+    const inModel = rpm >= RPM_LO && rpm <= RPM_HI;
+    if (on && inModel){
+      const b = torqueAt(0, rpm);
+      gain[k] = torqueAt(pos, rpm) / b - 1; ideal[k] = torqueAt(c, rpm) / b - 1;
+      gSum += gain[k]; iSum += ideal[k]; n++; lagSum += Math.abs(c - pos); lagN++;
+    } else { gain[k] = NaN; ideal[k] = NaN; }
+    if (on) wot++;
+    if (on && rpm > RPM_HI) over++;
+  }
+  return {cmd, act, gain, ideal, live, meanGain: n ? gSum / n : 0, meanIdeal: n ? iSum / n : 0, meanLag: lagN ? lagSum / lagN : 0,
+          wotFrac: wot / N, overFrac: wot ? over / wot : 0, movingFrac: moving / N};
+}
+
+// ---------- theme-aware canvas helpers ----------
+const css = () => { const s = getComputedStyle(document.documentElement); const g = n => s.getPropertyValue(n).trim(); return {
+  ink: g('--ink'), muted: g('--muted'), hair: g('--hair'), accent: g('--accent'), soft: g('--accent-soft'), cmd: g('--cmd'),
+  gain: g('--gain'), loss: g('--loss'), metal: g('--metal'), metal2: g('--metal-2'), panel: g('--panel'), panel2: g('--panel-2'), air: g('--air'), mono: g('--f-mono')}; };
+let C = css();
+function fitCanvas(cv){
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, h = +cv.getAttribute('height');
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return [ctx, r.width, h];
+}
+function font(sz){ return `${sz}px ${C.mono || 'monospace'}`; }
+
+// ---------- section drawing (SVG) ----------
+const SVGNS = 'http://www.w3.org/2000/svg';
+const sv = document.getElementById('section');
+const PX = 1.25;               // px per mm (vertical)
+const FLOOR = 318, ROOF = 70;  // plenum floor / roof (y)
+const XS = [150, 245, 340, 435]; // trumpet centres
+function el(tag, attrs, parent){ const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); (parent || sv).appendChild(e); return e; }
+let gAct, gCmd, travelBand, travelLo, travelHi, fsLine, screwLine, labelAct;
+function bellPath(cx, top, sleeveLen){
+  const ri = 17, ro = 20, flare = 15, fh = 16;
+  return `M ${cx - ro} ${top + sleeveLen} L ${cx - ro} ${top + fh} C ${cx - ro} ${top + 4} ${cx - ro - flare} ${top + 2} ${cx - ro - flare} ${top}
+          L ${cx - ri - flare + 3} ${top} C ${cx - ri - flare + 3} ${top + 6} ${cx - ri} ${top + 8} ${cx - ri} ${top + fh + 2} L ${cx - ri} ${top + sleeveLen} Z
+          M ${cx + ro} ${top + sleeveLen} L ${cx + ro} ${top + fh} C ${cx + ro} ${top + 4} ${cx + ro + flare} ${top + 2} ${cx + ro + flare} ${top}
+          L ${cx + ri + flare - 3} ${top} C ${cx + ri + flare - 3} ${top + 6} ${cx + ri} ${top + 8} ${cx + ri} ${top + fh + 2} L ${cx + ri} ${top + sleeveLen} Z`;
+}
+function drawSection(){
+  sv.innerHTML = '';
+  const defs = el('defs', {});
+  const pat = el('pattern', {id: 'hatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)'}, defs);
+  el('line', {x1: 0, y1: 0, x2: 0, y2: 6, stroke: C.hair, 'stroke-width': 2}, pat);
+  const clip = el('clipPath', {id: 'below'}, defs); el('rect', {x: 0, y: 0, width: 600, height: 440}, clip);
+  // plenum shell
+  el('rect', {x: 60, y: ROOF, width: 470, height: FLOOR - ROOF, rx: 18, fill: C.air, stroke: C.metal2, 'stroke-width': 3});
+  el('text', {x: 76, y: ROOF + 22, fill: C.muted, 'font-family': C.mono, 'font-size': 11}).textContent = 'PLENUM';
+  // restrictor + throttle inlet (left wall)
+  el('path', {d: `M 8 150 L 40 158 L 60 164 M 8 206 L 40 198 L 60 192`, fill: 'none', stroke: C.metal2, 'stroke-width': 3});
+  el('text', {x: 70, y: 182, fill: C.muted, 'font-family': C.mono, 'font-size': 10}).textContent = '← 20 mm restrictor';
+  // head flange + fixed stubs below the floor
+  el('rect', {x: 60, y: FLOOR, width: 470, height: 8, fill: C.metal2});
+  el('rect', {x: 60, y: 426, width: 470, height: 10, fill: C.metal2});
+  el('text', {x: 540, y: 434, fill: C.muted, 'font-family': C.mono, 'font-size': 10}).textContent = 'head';
+  XS.forEach(cx => { el('rect', {x: cx - 17, y: FLOOR + 8, width: 34, height: 118, fill: 'url(#hatch)', stroke: C.metal, 'stroke-width': 2}); });
+  el('text', {x: 540, y: FLOOR + 40, fill: C.muted, 'font-family': C.mono, 'font-size': 10}).textContent = 'fixed stubs';
+  // travel band (right side scale)
+  travelBand = el('rect', {x: 488, y: 0, width: 10, height: 0, fill: C.soft, rx: 3});
+  travelLo = el('text', {x: 504, y: 0, fill: C.muted, 'font-family': C.mono, 'font-size': 10});
+  travelHi = el('text', {x: 504, y: 0, fill: C.muted, 'font-family': C.mono, 'font-size': 10});
+  el('line', {x1: 480, x2: 500, y1: FLOOR, y2: FLOOR, stroke: C.muted, 'stroke-dasharray': '3 3'});
+  // actuator + lead screw
+  el('rect', {x: 262, y: 22, width: 66, height: 40, rx: 6, fill: C.panel2, stroke: C.metal2, 'stroke-width': 2});
+  el('text', {x: 272, y: 46, fill: C.muted, 'font-family': C.mono, 'font-size': 10}).textContent = 'servo';
+  screwLine = el('line', {x1: 295, x2: 295, y1: 62, y2: 200, stroke: C.metal2, 'stroke-width': 4, 'stroke-dasharray': '2 3'});
+  // fail-safe marker
+  fsLine = el('line', {x1: 110, x2: 480, y1: 0, y2: 0, stroke: C.muted, 'stroke-dasharray': '1 5', 'stroke-width': 1.5});
+  // commanded ghost
+  gCmd = el('g', {}); XS.forEach(cx => el('path', {d: bellPath(cx, 0, 30), fill: 'none', stroke: C.cmd, 'stroke-width': 1.5, 'stroke-dasharray': '4 3'}, gCmd));
+  // actual trumpets + plate
+  gAct = el('g', {'clip-path': 'url(#below)'});
+  XS.forEach(cx => el('path', {d: bellPath(cx, 0, 150), fill: C.accent, 'fill-opacity': 0.9, stroke: C.accent, 'stroke-width': 1}, gAct));
+  el('rect', {x: 118, y: 40, width: 350, height: 9, rx: 3, fill: C.ink, 'fill-opacity': 0.85}, gAct);
+  labelAct = el('text', {x: 72, y: 0, fill: C.accent, 'font-family': C.mono, 'font-size': 11}, sv);
+  updateSection(0, 0);
+}
+const yOf = ext => FLOOR - 26 - ext * PX; // mouth y for an extension (0 = as-built mouth just above the floor)
+function updateSection(act, cmd){
+  gAct.setAttribute('transform', `translate(0 ${yOf(act)})`);
+  gCmd.setAttribute('transform', `translate(0 ${yOf(cmd)})`);
+  screwLine.setAttribute('y2', yOf(act) + 40);
+  labelAct.setAttribute('y', yOf(act) - 6); labelAct.textContent = `${Math.round(BASE + act)} mm`;
+  const yh = yOf(table.hi), yl = yOf(table.lo);
+  travelBand.setAttribute('y', yh); travelBand.setAttribute('height', Math.max(2, yl - yh));
+  travelHi.setAttribute('y', yh + 4); travelHi.textContent = `${Math.round(BASE + table.hi)}`;
+  travelLo.setAttribute('y', yl + 4); travelLo.textContent = `${Math.round(BASE + table.lo)}`;
+  fsLine.setAttribute('y1', yOf(table.failsafe)); fsLine.setAttribute('y2', yOf(table.failsafe));
+}
+
+// ---------- charts ----------
+const tl = document.getElementById('timeline'), mc = document.getElementById('mapChart'), tc = document.getElementById('tqChart');
+function axisLabel(ctx, txt, x, y, align){ ctx.fillStyle = C.muted; ctx.font = font(10.5); ctx.textAlign = align || 'left'; ctx.fillText(txt, x, y); }
+function drawTimeline(){
+  const [ctx, W, H] = fitCanvas(tl); ctx.clearRect(0, 0, W, H);
+  const L = 44, R = W - 8, x = k => L + (R - L) * k / (N - 1);
+  const bands = [{y0: 6, y1: 120}, {y0: 136, y1: 150}, {y0: 164, y1: 262}, {y0: 278, y1: 350}];
+  // over-model hatch (rpm > 12.5k while on throttle)
+  ctx.fillStyle = C.panel2;
+  for (let k = 0; k < N; k++) if (T.rpm[k] > RPM_HI && sim.live[k]) ctx.fillRect(x(k), bands[3].y0, Math.max(1, (R - L) / N + .5), bands[3].y1 - bands[3].y0);
+  // rpm
+  const b0 = bands[0], yr = v => b0.y1 - (v / 15000) * (b0.y1 - b0.y0);
+  ctx.strokeStyle = C.hair; ctx.lineWidth = 1;
+  [5000, 10000, 15000].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yr(v)); ctx.lineTo(R, yr(v)); ctx.stroke(); axisLabel(ctx, (v / 1000) + 'k', L - 6, yr(v) + 4, 'right'); });
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5; ctx.beginPath(); for (let k = 0; k < N; k++){ const X = x(k), Y = yr(T.rpm[k]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); } ctx.stroke();
+  axisLabel(ctx, 'rpm', L + 4, b0.y0 + 10);
+  // TPS strip
+  const b1 = bands[1]; ctx.fillStyle = C.metal2;
+  for (let k = 0; k < N; k += 2){ const h = (b1.y1 - b1.y0) * T.tps[k] / 100; ctx.fillRect(x(k), b1.y1 - h, (R - L) / N * 2 + .5, h); }
+  const yt = b1.y1 - (b1.y1 - b1.y0) * S.tps / 100; ctx.strokeStyle = C.cmd; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(L, yt); ctx.lineTo(R, yt); ctx.stroke(); ctx.setLineDash([]);
+  axisLabel(ctx, 'TPS', L - 6, b1.y1, 'right');
+  // runner length
+  const b2 = bands[2], lo = Math.min(table.lo, EXT_MIN), hi = Math.max(table.hi, 0);
+  const ye = e => b2.y1 - (e - (table.lo - 10)) / ((table.hi + 10) - (table.lo - 10)) * (b2.y1 - b2.y0);
+  ctx.fillStyle = C.soft; ctx.fillRect(L, ye(table.hi), R - L, ye(table.lo) - ye(table.hi));
+  axisLabel(ctx, Math.round(BASE + table.hi) + '', L - 6, ye(table.hi) + 4, 'right'); axisLabel(ctx, Math.round(BASE + table.lo) + '', L - 6, ye(table.lo) + 4, 'right');
+  axisLabel(ctx, 'runner mm', L + 4, b2.y0 + 10);
+  const line = (arr, col, w, dash) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash || []); ctx.beginPath(); for (let k = 0; k < N; k++){ const X = x(k), Y = ye(arr[k]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); } ctx.stroke(); ctx.setLineDash([]); };
+  line(sim.cmd, C.cmd, 1.3, [4, 3]); line(sim.act, C.accent, 2);
+  // gain
+  const b3 = bands[3], gmax = 0.2, yg = g => (b3.y0 + b3.y1) / 2 - (g / gmax) * (b3.y1 - b3.y0) / 2;
+  ctx.strokeStyle = C.hair; ctx.beginPath(); ctx.moveTo(L, yg(0)); ctx.lineTo(R, yg(0)); ctx.stroke();
+  axisLabel(ctx, '+20%', L - 6, yg(0.2) + 8, 'right'); axisLabel(ctx, '0', L - 6, yg(0) + 4, 'right'); axisLabel(ctx, '−20%', L - 6, yg(-0.2), 'right');
+  for (let k = 0; k < N; k++){ const g = sim.gain[k]; if (!isFinite(g)) continue; const gg = Math.max(-gmax, Math.min(gmax, g));
+    ctx.fillStyle = g >= 0 ? C.gain : C.loss; const y0 = yg(0), y1 = yg(gg); ctx.fillRect(x(k), Math.min(y0, y1), Math.max(1, (R - L) / N + .5), Math.abs(y1 - y0)); }
+  axisLabel(ctx, 'torque vs as-built', L + 4, b3.y0 + 10);
+  // playhead
+  const X = x(S.i); ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X, 2); ctx.lineTo(X, H - 2); ctx.stroke();
+  // time axis
+  ctx.fillStyle = C.muted; ctx.font = font(10); ctx.textAlign = 'center';
+  for (let s = 0; s <= T.t[N - 1]; s += 10) ctx.fillText(s + ' s', x(s / DT), H - 1);
+}
+function chartFrame(ctx, W, H, xr, yr, xt, yt, yfmt){
+  const L = 46, R = W - 10, Tp = 10, B = H - 24;
+  const X = v => L + (v - xr[0]) / (xr[1] - xr[0]) * (R - L), Y = v => B - (v - yr[0]) / (yr[1] - yr[0]) * (B - Tp);
+  ctx.strokeStyle = C.hair; ctx.lineWidth = 1; ctx.font = font(10.5); ctx.fillStyle = C.muted;
+  yt.forEach(v => { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(R, Y(v)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(yfmt(v), L - 6, Y(v) + 4); });
+  xt.forEach(v => { ctx.textAlign = 'center'; ctx.fillText((v / 1000) + 'k', X(v), H - 6); });
+  return {X, Y, L, R, Tp, B};
+}
+function drawMap(){
+  const [ctx, W, H] = fitCanvas(mc); ctx.clearRect(0, 0, W, H);
+  const y0 = Math.floor((BASE + Math.min(table.lo, 0) - 20) / 50) * 50, y1 = Math.ceil((BASE + Math.max(table.hi, 0) + 20) / 50) * 50;
+  const yt = []; for (let v = y0; v <= y1; v += 50) yt.push(v);
+  const f = chartFrame(ctx, W, H, [RPM_LO, RPM_HI], [y0, y1], [4000, 6000, 8000, 10000, 12000], yt, v => v);
+  ctx.fillStyle = C.soft; ctx.fillRect(f.L, f.Y(BASE + table.hi), f.R - f.L, f.Y(BASE + table.lo) - f.Y(BASE + table.hi));
+  ctx.strokeStyle = C.muted; ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.moveTo(f.L, f.Y(BASE)); ctx.lineTo(f.R, f.Y(BASE)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.fillText('as-built 328', f.L + 4, f.Y(BASE) - 4);
+  ctx.strokeStyle = C.cmd; ctx.lineWidth = 2; ctx.beginPath(); table.rows.forEach((r, k) => { const X = f.X(r.rpm), Y = f.Y(BASE + r.ext); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
+  const rpm = T.rpm[S.i]; if (rpm >= RPM_LO){ const rr = Math.min(rpm, RPM_HI); ctx.fillStyle = C.accent; ctx.strokeStyle = C.panel; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(f.X(rr), f.Y(BASE + sim.act[S.i]), 5.5, 0, 7); ctx.fill(); ctx.stroke(); }
+}
+function drawTq(){
+  const [ctx, W, H] = fitCanvas(tc); ctx.clearRect(0, 0, W, H);
+  let lo = 1e9, hi = -1e9; table.rows.forEach(r => { lo = Math.min(lo, r.base, r.tq); hi = Math.max(hi, r.base, r.tq); });
+  lo = Math.floor(lo / 5) * 5; hi = Math.ceil(hi / 5) * 5; const yt = []; for (let v = lo; v <= hi; v += 5) yt.push(v);
+  const f = chartFrame(ctx, W, H, [RPM_LO, RPM_HI], [lo, hi], [4000, 6000, 8000, 10000, 12000], yt, v => v + '');
+  ctx.fillStyle = C.soft; ctx.fillRect(f.X(6000), f.Tp, f.X(12000) - f.X(6000), f.B - f.Tp);
+  const line = (key, col, w) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); table.rows.forEach((r, k) => { const X = f.X(r.rpm), Y = f.Y(r[key]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke(); };
+  line('base', C.metal2, 2); line('tq', C.accent, 2.2);
+  ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.font = font(10.5); ctx.fillText('N·m brake · shaded = P1 band 6-12k', f.L + 4, f.Tp + 10);
+  const rpm = T.rpm[S.i]; if (rpm >= RPM_LO && rpm <= RPM_HI){ ctx.fillStyle = C.accent; ctx.strokeStyle = C.panel; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(f.X(rpm), f.Y(torqueAt(sim.act[S.i], rpm)), 5.5, 0, 7); ctx.fill(); ctx.stroke(); }
+}
+
+// ---------- readouts ----------
+const $ = id => document.getElementById(id);
+const pct = g => (g >= 0 ? '+' : '−') + Math.abs(g * 100).toFixed(1) + '%';
+function p1(){ let s = 0, b = 0; table.rows.forEach(r => { if (r.rpm >= 6000 && r.rpm <= 12000){ s += r.tq; b += r.base; } }); return s / b - 1; }
+function renderStats(){
+  const items = [
+    [pct(p1()), 'P1: avg torque 6-12k, table followed exactly (dyno sweep)'],
+    [pct(sim.meanIdeal), 'this lap, on throttle, instant actuator'],
+    [pct(sim.meanGain), `this lap, on throttle, at ${S.speed} mm/s`],
+    [Math.round(BASE + table.failsafe) + ' mm', 'fail-safe spring length (best fixed)']];
+  $('stats').innerHTML = items.map(([n, l]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+}
+function renderFrame(){
+  const k = S.i, rpm = T.rpm[k], tps = T.tps[k];
+  $('roRpm').textContent = rpm.toLocaleString('en-US');
+  $('roGear').textContent = `gear ${T.gear[k]}`;
+  $('roTps').textContent = tps.toFixed(0) + '%';
+  $('roKph').textContent = `${T.kph[k].toFixed(0)} km/h`;
+  $('roCmd').textContent = Math.round(BASE + sim.cmd[k]) + ' mm';
+  $('roCmdExt').textContent = `${sim.cmd[k] >= 0 ? '+' : '−'}${Math.abs(sim.cmd[k]).toFixed(0)} mm vs as-built`;
+  $('roAct').textContent = Math.round(BASE + sim.act[k]) + ' mm';
+  const err = sim.cmd[k] - sim.act[k];
+  $('roErr').textContent = Math.abs(err) < 1 ? 'on target' : `lagging ${Math.abs(err).toFixed(0)} mm`;
+  const g = sim.gain[k], gv = $('roGain');
+  if (isFinite(g)){ gv.textContent = pct(g); gv.className = 'val ' + (g >= 0 ? 'pos' : 'neg');
+    $('roGainSub').textContent = `${torqueAt(sim.act[k], rpm).toFixed(1)} vs ${torqueAt(0, rpm).toFixed(1)} N·m brake`; }
+  else { gv.textContent = '–'; gv.className = 'val'; $('roGainSub').textContent = rpm > RPM_HI ? 'above 12.5k: outside the model' : 'off throttle: not scored'; }
+  const chip = $('stateChip');
+  if (!sim.live[k]){ chip.textContent = 'off throttle · holding'; chip.className = 'state'; }
+  else if (Math.abs(err) >= 1){ chip.textContent = 'moving'; chip.className = 'state warn'; }
+  else { chip.textContent = 'tracking table'; chip.className = 'state on'; }
+  $('clock').textContent = T.t[k].toFixed(2) + ' s';
+  $('scrub').value = Math.round(1000 * k / (N - 1));
+  updateSection(sim.act[k], sim.cmd[k]);
+  drawTimeline(); drawMap(); drawTq();
+}
+function recompute(){
+  table = buildTable(); sim = simulate();
+  $('oLong').textContent = `+${S.long} mm (runner ${Math.round(BASE + S.long)})`;
+  $('oStroke').textContent = `${S.stroke} mm → ${Math.round(BASE + table.lo)}–${Math.round(BASE + table.hi)} mm`;
+  $('oSpeed').textContent = `${S.speed} mm/s (${S.stroke ? (S.stroke / S.speed).toFixed(2) : '–'} s full stroke)`;
+  $('oTps').textContent = `${S.tps}%`;
+  renderStats(); renderFrame();
+}
+
+// ---------- wiring ----------
+[['cLong', 'long'], ['cStroke', 'stroke'], ['cSpeed', 'speed'], ['cTps', 'tps']].forEach(([id, key]) => {
+  $(id).addEventListener('input', e => { S[key] = +e.target.value; recompute(); });
+});
+$('play').addEventListener('click', () => { S.playing = !S.playing; $('play').textContent = S.playing ? 'Pause' : 'Play'; if (S.playing){ if (S.i >= N - 1) S.i = 0; last = null; requestAnimationFrame(tick); } });
+$('speed').addEventListener('change', e => { S.rate = +e.target.value; });
+$('scrub').addEventListener('input', e => { S.i = Math.round(+e.target.value / 1000 * (N - 1)); renderFrame(); });
+let last = null, acc = 0;
+function tick(ts){
+  if (!S.playing) return;
+  if (last == null) last = ts;
+  acc += (ts - last) / 1000 * S.rate; last = ts;
+  const steps = Math.floor(acc / DT); acc -= steps * DT;
+  if (steps > 0){ S.i = Math.min(N - 1, S.i + steps); renderFrame(); }
+  if (S.i >= N - 1){ S.playing = false; $('play').textContent = 'Play'; return; }
+  requestAnimationFrame(tick);
+}
+const retheme = () => { C = css(); drawSection(); renderFrame(); };
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme);
+new MutationObserver(retheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+window.addEventListener('resize', () => renderFrame());
+$('runLabel').textContent = `${D.run.track} · ${D.run.sim} · lap ${D.run.lap_raw_s.toFixed(1)} s raw`;
+// open on a representative on-throttle moment
+table = buildTable(); sim = simulate(); drawSection();
+S.i = (() => { for (let k = Math.floor(N * 0.18); k < N; k++) if (sim.live[k] && T.rpm[k] > 8500 && T.rpm[k] < 10500) return k; return 0; })();
+recompute();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => renderFrame());
+</script>

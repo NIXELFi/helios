@@ -1,0 +1,5 @@
+stroke_mm,lmin_mm,lmax_mm,p1_gain,p1_gain_rate_limited,p1_gain_quantised,p1_gain_follow,driver_gain,p2_ratio,p2_rpm,failsafe_mm,failsafe_gain,required_speed_mm_s,available_speed_mm_s,max_map_jump_mm,mass_kg,protrusion_mm,feasible_mass,feasible_packaging
+0,-45,-45,0.003964,0.003964,0.003964,0.003964,-0.013457,1.00000,6000,-45,0.003964,0.0,0.0,0.0,0.000,0.0,true,true
+25,-45,-20,0.019778,0.012132,0.019747,0.005700,0.001408,0.91113,6750,-45,0.003964,600.0,50.0,25.0,0.519,0.0,true,true
+50,-50,0,0.031473,0.022197,0.031447,0.012858,0.012102,0.90825,6500,-45,0.003964,1200.0,100.0,50.0,0.695,0.0,true,true
+75,-75,0,0.034983,0.024798,0.034913,0.013973,0.014797,0.90982,6500,-45,0.003964,1680.0,150.0,70.0,0.860,0.0,true,true
