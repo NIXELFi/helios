@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-10-28
+
 ### Added
 - **Vault check-in refuses to overwrite a newer version.** When you check in, Helios now tells the server which version your copy started from. If someone checked in a newer version since then, the check-in stops (nothing is uploaded and you keep the checkout) instead of silently replacing their work. Checking in a single file offers "Check in anyway" for when your copy already includes their changes; folder check-in lists those files and points you there.
 - helios-bench: `helios-bench vrli <study.toml> --out DIR` designs a variable-length intake runner (VRLI; finding 0037). It simulates torque over a grid of runner lengths and engine speeds, then, for each stroke (how far the runners can move), finds the best range and scores it against the VRLI requirements: average-torque gain, the no-dip requirement, actuator speed, added mass and packaging. It writes a runner-position table for the ECU. Results are cached, so a study can be resumed or re-scored without re-running the engine.
