@@ -89,12 +89,12 @@ jobs:
           # per-arch produces a signed .app.tar.gz for each, which become the
           # darwin-aarch64 / darwin-x86_64 fragments (and platform keys).
           - platform: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             rust-target: aarch64-apple-darwin
             tauri-args: "--target aarch64-apple-darwin"
             updater-target: darwin-aarch64
           - platform: macos-x64
-            runner: macos-14
+            runner: macos-15
             rust-target: x86_64-apple-darwin
             tauri-args: "--target x86_64-apple-darwin"
             updater-target: darwin-x86_64
