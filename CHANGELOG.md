@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Slack alert when someone checks out a car's master assembly.** Vault admins can set this up per car in Vault Settings: turn it on, pick the assembly file, and paste a Slack webhook URL. When someone checks that file out, the channel gets "Name is ON the assembly!" If they undo the check-out within about 20 seconds, no message is sent.
+
 ## [6.5.0] - 2026-10-28
 
 ### Added

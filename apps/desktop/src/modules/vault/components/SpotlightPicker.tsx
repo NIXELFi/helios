@@ -9,6 +9,8 @@ import type { VaultFile } from "../data/types";
 const MAX_ROWS = 200;
 
 export function SpotlightPicker({
+  title = "Choose spotlight file",
+  allowClear = true,
   files,
   pathOf,
   currentId,
@@ -16,6 +18,8 @@ export function SpotlightPicker({
   onPick,
   onClose,
 }: {
+  title?: string;
+  allowClear?: boolean;
   files: VaultFile[];
   pathOf: (f: VaultFile) => string;
   currentId: string | null;
@@ -70,12 +74,12 @@ export function SpotlightPicker({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Choose spotlight file"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[70vh] w-[36rem] max-w-[92vw] flex-col border border-helios-line bg-helios-panel shadow-xl"
       >
         <div className="flex items-center justify-between border-b border-helios-line px-4 py-3">
-          <h3 className="text-sm font-semibold text-helios-text">Choose spotlight file</h3>
+          <h3 className="text-sm font-semibold text-helios-text">{title}</h3>
           <button type="button" onClick={onClose} className="p-1 text-helios-dim hover:bg-helios-line hover:text-helios-text">
             <IconX size={16} />
           </button>
@@ -128,14 +132,16 @@ export function SpotlightPicker({
           ) : null}
         </div>
         <div className="flex items-center justify-between border-t border-helios-line px-4 py-2.5">
-          <button
-            type="button"
-            disabled={saving || !currentId}
-            onClick={() => onPick(null)}
-            className="text-xs text-helios-dim hover:text-red-400 disabled:opacity-40"
-          >
-            Clear spotlight
-          </button>
+          {allowClear ? (
+            <button
+              type="button"
+              disabled={saving || !currentId}
+              onClick={() => onPick(null)}
+              className="text-xs text-helios-dim hover:text-red-400 disabled:opacity-40"
+            >
+              Clear spotlight
+            </button>
+          ) : <span />}
           {saving ? <span className="text-xs text-helios-dim">Saving…</span> : null}
         </div>
       </div>

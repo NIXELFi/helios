@@ -2,6 +2,8 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
+import { useIsVaultAdmin } from "../data/useVaultRole";
+import { AssemblyAlertSettings } from "../components/AssemblyAlertSettings";
 import { useMyDisplayRole } from "../../../auth/useMyDisplayRole";
 import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
@@ -21,6 +23,7 @@ export function SettingsScreen() {
   // returned as `path` for the auto-sync / download-target convenience.
   const { root, setRoot, clear } = useVaultFolder({ vaultName: activeVault?.name ?? null });
   const { mode, setMode } = useDownloadMode(activeVaultId);
+  const isVaultAdmin = useIsVaultAdmin(activeVaultId ?? null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -206,6 +209,8 @@ export function SettingsScreen() {
           {pickError && <p className="mt-2 text-xs text-[#EF5350]">{pickError}</p>}
         </div>
       </section>
+
+      {isVaultAdmin && activeVault && <AssemblyAlertSettings key={activeVault.id} vault={activeVault} />}
 
       <section className="max-w-xl space-y-3">
         <h2 className="text-sm uppercase tracking-wider text-helios-dim">
