@@ -24,6 +24,7 @@ import {
   saveConnection,
   type SupabaseConnection,
 } from "./connection";
+import { keepSessionFreshWhenHidden } from "./keep-session-fresh";
 
 interface ConnectionState {
   connection: SupabaseConnection | null;
@@ -56,6 +57,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
       return null;
     }
   }, [connection]);
+
+  // Desktop app: keep the token fresh while minimized (see keep-session-fresh).
+  useEffect(() => (client ? keepSessionFreshWhenHidden(client) : undefined), [client]);
 
   const setConnection = useCallback((c: SupabaseConnection) => {
     saveConnection(c);
