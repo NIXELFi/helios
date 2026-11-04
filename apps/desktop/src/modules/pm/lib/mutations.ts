@@ -138,8 +138,19 @@ function taskColumns(t: Partial<TaskRow>): Record<string, unknown> {
 
 // --- Tasks ------------------------------------------------------------------
 
+/** Tell shell-level listeners (the title bar's PM attention chip) that a
+ *  task write landed, so they can refresh without subscribing to the store. */
+export function notifyPmChanged(): void {
+  try {
+    window.dispatchEvent(new Event("pm:changed"));
+  } catch {
+    /* non-browser context */
+  }
+}
+
 export async function insertTask(client: SupabaseClient, task: TaskRow): Promise<void> {
   check(await pm(client).from("tasks").insert(taskColumns(task)), "create this task");
+  notifyPmChanged();
 }
 
 export async function patchTask(
@@ -151,6 +162,7 @@ export async function patchTask(
     await pm(client).from("tasks").update(taskColumns(patch)).eq("id", id).select("id"),
     "edit this task",
   );
+  notifyPmChanged();
 }
 
 export async function removeTask(client: SupabaseClient, id: string): Promise<void> {
@@ -158,6 +170,7 @@ export async function removeTask(client: SupabaseClient, id: string): Promise<vo
     await pm(client).from("tasks").delete().eq("id", id).select("id"),
     "delete this task",
   );
+  notifyPmChanged();
 }
 
 // Bulk edit: apply the SAME column patch to many tasks in ONE atomic statement

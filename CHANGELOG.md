@@ -27,6 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault sync status in the title bar.** On Windows, a "Vault - Syncing 3/12" chip shows next to the window controls while a sync runs, "N failed" (red) if files didn't come down, and a short "Pulled N" or "Up to date" when it finishes. Click it to jump to the Vault.
+- **What's due for you, in the title bar.** A "PM - 2 overdue - 1 due today" chip appears next to the window controls whenever you own an open task that is due today or late (red when anything is overdue). Works even if you haven't opened PM this session; click it to go there.
+- **Connection lost indicator.** If Helios loses its live connection to the server for more than a few seconds, a red "Reconnecting" (or "Offline") chip shows in the title bar so stale data is never a mystery.
+
 ## [6.6.2] - 2026-11-04
 
 ### Fixed
