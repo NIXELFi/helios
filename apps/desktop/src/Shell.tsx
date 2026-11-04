@@ -499,7 +499,6 @@ function HeliosShell() {
     name: userLabel ?? "Unknown",
     subteam: userSubteamLabel,
     module: active,
-    appVersion,
   });
   // Presence roster + bug-report triage: legacy owner/admin OR anyone with
   // role-granting capabilities (leads/execs). Server side mirrors this —

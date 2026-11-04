@@ -28,7 +28,7 @@ export function localDateKey(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Pure: fold the rows the query returned (everyone's tasks due ≤ today)
+/** Pure: fold the rows the query returned (everyone's tasks due <= today)
  *  into the caller's own due-today / overdue counts. Exported for tests. */
 export function summarizeAttention(
   rows: ReadonlyArray<AttentionTaskRow>,
@@ -48,7 +48,7 @@ export function summarizeAttention(
 }
 
 /**
- * "What's due for me" for the title bar, independent of the PM module —
+ * "What's due for me" for the title bar, independent of the PM module -
  * PM is mounted lazily, so its store may be empty for the whole session.
  * One bounded PostgREST read (open tasks due on or before today, then
  * filtered to yours client-side because ownership is split across
@@ -81,7 +81,7 @@ export function usePmAttention(client: unknown, userId: string | null): PmAttent
       if (seq.current !== mySeq) return; // a newer refresh landed first
       setValue(summarizeAttention(data as AttentionTaskRow[], userId, today));
     } catch {
-      /* transient — keep the last value */
+      /* transient, keep the last value */
     }
   }, [client, userId]);
 

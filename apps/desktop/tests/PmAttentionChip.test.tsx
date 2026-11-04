@@ -36,7 +36,7 @@ describe("<PmAttentionChip>", () => {
     ]);
     const onClick = vi.fn();
     render(<PmAttentionChip client={client} userId="me" onClick={onClick} />);
-    const btn = await screen.findByRole("button", { name: /PM: 1 overdue · 1 due today/ });
+    const btn = await screen.findByRole("button", { name: /PM: 1 overdue - 1 due today/ });
     expect(q.neq).toHaveBeenCalledWith("status", "done");
     expect(q.lte).toHaveBeenCalledWith("due_date", key);
     fireEvent.click(btn);

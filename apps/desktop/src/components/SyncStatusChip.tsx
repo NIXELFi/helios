@@ -11,9 +11,9 @@ export const RESULT_LINGER_MS = 6000;
  * (published by useAutoSync) and renders nothing when there's nothing to say:
  * no sync hook mounted, or idle with no recent result.
  *
- *   busy       → gold pulse, "Syncing 3/12", thin progress underline
- *   failed     → red "2 failed" (stays until the next pass)
- *   just done  → green "Pulled 5" / dim "Up to date" for RESULT_LINGER_MS
+ *   busy       -> gold pulse, "Syncing 3/12", thin progress underline
+ *   failed     -> red "2 failed" (stays until the next pass)
+ *   just done  -> green "Pulled 5" / dim "Up to date" for RESULT_LINGER_MS
  *
  * Clicking jumps to the Vault, where the full pill + popover live.
  */
@@ -43,7 +43,7 @@ export function SyncStatusChip({ onClick }: { onClick: () => void }) {
   let title: string;
   if (busy) {
     const { completedTasks, totalTasks, activeFiles, completedBytes, totalBytes } = status;
-    label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
+    label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing...";
     tone = "text-asu-gold";
     dot = "bg-asu-gold animate-pulse";
     const pct = totalBytes > 0 ? Math.floor((completedBytes / totalBytes) * 100) : 0;
@@ -84,7 +84,7 @@ export function SyncStatusChip({ onClick }: { onClick: () => void }) {
       }
     >
       <span className={"inline-block h-1.5 w-1.5 rounded-full " + dot} />
-      <span className="font-mono-num tabular-nums">Vault · {label}</span>
+      <span className="font-mono-num tabular-nums">Vault - {label}</span>
       {pct != null && (
         <span
           aria-hidden

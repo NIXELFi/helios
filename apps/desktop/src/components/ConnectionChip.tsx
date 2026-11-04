@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useConnectionState } from "../lib/connection-status";
 
-/** How long the link has to stay down before the chip appears — a single
+/** How long the link has to stay down before the chip appears, a single
  *  socket hiccup that reconnects inside this window never shows. */
 export const CONNECTION_GRACE_MS = 5000;
 
@@ -40,14 +40,14 @@ export function ConnectionChip() {
   }, [down]);
 
   if (!shown) return null;
-  const label = offline ? "Offline" : "Reconnecting…";
+  const label = offline ? "Offline" : "Reconnecting...";
   return (
     <span
       role="status"
       title={
         offline
           ? "No network connection. Helios will resume live updates when it's back."
-          : "Lost the live connection to the Helios server. Trying to reconnect — data may be stale until then."
+          : "Lost the live connection to the Helios server. Trying to reconnect, data may be stale until then."
       }
       aria-label={`Connection: ${label}`}
       className="mr-2 flex h-[22px] items-center gap-1.5 rounded px-2 text-[11px] text-[#EF5350]"

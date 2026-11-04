@@ -5,7 +5,7 @@ import type { AutoSyncStatus } from "../modules/vault/data/useAutoSync";
  * App-wide mirror of the Vault auto-sync status.
  *
  * useAutoSync lives inside the Vault's BrowseScreen, which stays mounted
- * (hidden) when the user switches modules — so a sync keeps running after
+ * (hidden) when the user switches modules, so a sync keeps running after
  * they click off the Vault, but its toolbar pill goes with it. The hook
  * publishes every status change here; the shell's SyncStatusChip subscribes
  * so the title bar can show progress from any module. `null` means no sync

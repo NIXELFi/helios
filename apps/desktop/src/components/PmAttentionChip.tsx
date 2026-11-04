@@ -21,7 +21,7 @@ export function PmAttentionChip({
   const parts: string[] = [];
   if (att.overdue > 0) parts.push(`${att.overdue} overdue`);
   if (att.dueToday > 0) parts.push(`${att.dueToday} due today`);
-  const label = parts.join(" · ");
+  const label = parts.join(" - ");
   const tone = att.overdue > 0 ? "text-[#EF5350]" : "text-asu-gold";
   const dot = att.overdue > 0 ? "bg-[#EF5350]" : "bg-asu-gold";
 
@@ -37,7 +37,7 @@ export function PmAttentionChip({
       }
     >
       <span className={"inline-block h-1.5 w-1.5 rounded-full " + dot} />
-      <span className="font-mono-num tabular-nums">PM · {label}</span>
+      <span className="font-mono-num tabular-nums">PM - {label}</span>
     </button>
   );
 }
