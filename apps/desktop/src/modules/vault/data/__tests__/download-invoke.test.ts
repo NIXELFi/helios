@@ -137,6 +137,21 @@ describe("downloadVersionOnce native path", () => {
     expect(storageDownload).not.toHaveBeenCalled();
   });
 
+  it("backs off and retries when storage rate-limits a big pull (429)", async () => {
+    vi.useFakeTimers();
+    try {
+      invoke
+        .mockRejectedValueOnce(new Error("HTTP 429: Too Many Requests"))
+        .mockResolvedValueOnce({ tempPath: TEMP, bytes: 5, wasGzip: true });
+      const pending = downloadVersionOnce(client, SHA, DEST);
+      await vi.runAllTimersAsync();
+      expect(await pending).toEqual({ ok: true });
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to the webview implementation without a Tauri host", async () => {
     invoke.mockResolvedValue(null);
     storageDownload.mockResolvedValue({

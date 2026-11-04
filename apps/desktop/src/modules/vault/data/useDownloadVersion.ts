@@ -84,12 +84,12 @@ export async function downloadVersionOnceInWebview(
         const msg = dlErr?.message ?? "download failed";
         // Retry only on transient signals — 5xx, network/abort, generic
         // "fetch failed". Anything that looks like 4xx is permanent.
-        const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+        const transient = isTransientDownloadError(msg);
         if (!transient || attempt === 2) {
           return { ok: false, error: msg };
         }
         lastError = msg;
-        await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+        await new Promise((r) => setTimeout(r, retryDelayMs(lastError, attempt)));
         continue;
       }
       const raw = new Uint8Array(await data.arrayBuffer());
@@ -186,15 +186,28 @@ export async function downloadVersionOnceInWebview(
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+      const transient = isTransientDownloadError(msg);
       if (!transient || attempt === 2) {
         return { ok: false, error: msg };
       }
       lastError = msg;
-      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+      await new Promise((r) => setTimeout(r, retryDelayMs(lastError, attempt)));
     }
   }
   return { ok: false, error: lastError };
+}
+
+/** Retry only on transient signals: 5xx, network/abort, a generic "fetch
+ *  failed", and 429 (storage rate-limits a large pull, as it did to a
+ *  1,500-object sync on 2026-11-03). Anything else 4xx is permanent. */
+function isTransientDownloadError(msg: string): boolean {
+  return /504|502|503|429|too many requests|timeout|gateway|network|fetch failed|abort/i.test(msg);
+}
+
+/** Exponential backoff; a rate limit waits longer before trying again. */
+function retryDelayMs(msg: string, attempt: number): number {
+  const base = /429|too many requests/i.test(msg) ? 2000 : 500;
+  return base * Math.pow(2, attempt);
 }
 
 /** Shape of `commands::download::DownloadResult` (serde camelCase). */
@@ -322,12 +335,12 @@ export async function downloadVersionOnce(
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+      const transient = isTransientDownloadError(msg);
       if (!transient || attempt === 2) {
         return { ok: false, error: msg };
       }
       lastError = msg;
-      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+      await new Promise((r) => setTimeout(r, retryDelayMs(lastError, attempt)));
     }
   }
   return { ok: false, error: lastError };

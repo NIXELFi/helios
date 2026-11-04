@@ -29,6 +29,7 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 - **The SOLIDWORKS add-in keeps working while Helios is minimized.** Helios stopped renewing its sign-in while its window was hidden, so about an hour after you minimized it the add-in's requests started failing (it could no longer read file status or versions) until you brought Helios back to the front. Helios now keeps the sign-in fresh in the background.
+- **Big syncs ride out storage rate limits.** When a large pull got a "too many requests" reply from storage, that file failed for the whole sync pass. Helios now waits and retries it.
 
 ## [6.6.1] - 2026-11-04
 
