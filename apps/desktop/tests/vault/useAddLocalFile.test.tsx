@@ -185,6 +185,31 @@ describe("useAddLocalFile", () => {
     ]);
   });
 
+  it("refuses ANSYS solver output before reading, uploading or creating anything", async () => {
+    const c = buildHappyClient();
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    readFileMock.mockClear();
+    const solverFile = {
+      basename: "file.rst",
+      relativePath: "Upright_files/dp1/SYS/MECH/file.rst",
+      absolutePath: "/vault/Upright_files/dp1/SYS/MECH/file.rst",
+      sha256: SCAN_SHA,
+      sizeBytes: 906_625_024,
+    };
+    let returned: any;
+    await act(async () => {
+      returned = await result.current.hook.run("v1", solverFile);
+    });
+    expect(returned.ok).toBe(false);
+    expect(returned.error).toMatch(/zip it up/);
+    expect(callLog).toEqual([]);
+    expect(readFileMock).not.toHaveBeenCalled();
+  });
+
   it("broadcasts a lock change when the add acquires a lock (new file → checked out)", async () => {
     let notified = 0;
     const unsub = subscribeLockChanges(() => { notified++; });

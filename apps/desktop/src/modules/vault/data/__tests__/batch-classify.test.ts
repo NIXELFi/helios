@@ -200,3 +200,28 @@ describe("sync-ledger awareness", () => {
     expect(classifyCheckIn(file("a"), c, true).kind).toBe("mine-stale");
   });
 });
+
+describe("ANSYS solver output", () => {
+  it("never uploads a changed solver file, whether or not it is checked out", () => {
+    const mine = ctx({ versions: [version("a", "aa")], locals: [local("file.rst", "zz")], locks: [lock("a", ME)] });
+    expect(classifyCheckIn(file("a", "file.rst"), mine, false).kind).toBe("solver-output");
+    const free = ctx({ versions: [version("b", "bb")], locals: [local("job.esav", "zz", false)] });
+    expect(classifyCheckIn(file("b", "job.esav"), free, false).kind).toBe("solver-output");
+  });
+
+  it("still releases an unchanged checkout of a solver file", () => {
+    const c = ctx({ versions: [version("a", "aa")], locals: [local("file.rst", "aa")], locks: [lock("a", ME)] });
+    expect(classifyCheckIn(file("a", "file.rst"), c, true)).toEqual({ kind: "eligible", changed: false, needsLock: false });
+  });
+
+  it("lists solver files in the folder plan instead of checking them in", () => {
+    const c = ctx({
+      versions: [version("a", "aa"), version("b", "bb")],
+      locals: [local("file.rst", "zz"), local("b.sldprt", "zz")],
+      locks: [lock("a", ME), lock("b", ME)],
+    });
+    const plan = planCheckIn([file("a", "file.rst"), file("b")], c);
+    expect(plan.eligible.map((f) => f.id)).toEqual(["b"]);
+    expect(plan.solverOutput.map((f) => f.id)).toEqual(["a"]);
+  });
+});

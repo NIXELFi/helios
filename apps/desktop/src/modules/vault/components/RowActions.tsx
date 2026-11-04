@@ -16,6 +16,7 @@ import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ledgerRecord, ledgerShaFor } from "../data/sync-ledger";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 import { toast } from "../data/toast";
+import { ANSYS_SOLVER_OUTPUT_NOTE, isAnsysSolverOutput } from "../data/ansys-solver-output";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { fetchWhereUsed } from "../data/useReferences";
 import { whereUsedWarning } from "../data/whereUsedWarning";
@@ -458,6 +459,12 @@ export function CheckInButton({
     // Read the bytes first, then open the in-app comment modal. Tauri's webview
     // doesn't render window.prompt() — it returns null — so the comment was
     // always lost (audit C1). The modal collects the comment in-app instead.
+    // Solver output is refused before the read: a result file can be a GB.
+    const rel = relForCtx({ folderId, fileName, folders }) ?? localFile?.relativePath ?? fileName ?? "";
+    if (isAnsysSolverOutput(rel)) {
+      toast(`${ANSYS_SOLVER_OUTPUT_NOTE} To release the checkout, use Undo check-out (it puts the vault copy back, so zip your results first if you want to keep them).`, "error");
+      return;
+    }
     const bytes = await readBytes();
     if (!bytes) return;
     setPendingBytes(bytes);

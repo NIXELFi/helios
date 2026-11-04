@@ -20,6 +20,7 @@ import {
 } from "./local-delete-events";
 import { useSupabaseClient } from "@helios/auth";
 import { exists } from "@tauri-apps/plugin-fs";
+import { isAnsysSolverOutput } from "./ansys-solver-output";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -320,6 +321,11 @@ export function useAutoSync(input: {
         skipped++;
         continue;
       }
+      // ANSYS solver output that reached the vault before it was blocked is
+      // left in the cloud: each result file is hundreds of MB, regenerated on
+      // every solve, and pulling it to every teammate is what stalled sync.
+      // Get Latest on the row still fetches one on purpose.
+      if (isAnsysSolverOutput(vaultRelativePath(file, folders))) { skipped++; continue; }
       const ver = versionsByFileId.get(file.id)?.[0];
       if (!ver) { skipped++; continue; }
       const m = matchLocal(file, localFiles, versionsByFileId, folders);

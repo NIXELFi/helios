@@ -12,6 +12,7 @@ import { folderPath } from "../data/folder-paths";
 import { relativeWhen, absoluteWhen } from "../lib/when";
 import { loadLedger } from "../data/sync-ledger";
 import type { FileId, FolderId, VaultFile } from "../data/types";
+import { ANSYS_SOLVER_OUTPUT_NOTE } from "../data/ansys-solver-output";
 
 export type FolderBatchOp = "checkout" | "checkin";
 
@@ -236,6 +237,12 @@ export function FolderBatchDialog({ op, scope, scopeFiles, ctx, locksReady = tru
                     title={`Checked out to you, but your copy is an older version (${inPlan.mineStale.length}), will be skipped`}
                     hint="You haven't edited these here, and checking them in would replace the latest. Get the latest first (or check them in from the computer you edited them on)."
                     rows={inPlan.mineStale.map((f) => ({ key: f.id, path: relPath(f) }))}
+                  />
+                  <Section
+                    tone="warn"
+                    title={`ANSYS solver output (${inPlan.solverOutput.length}), will be skipped`}
+                    hint={ANSYS_SOLVER_OUTPUT_NOTE}
+                    rows={inPlan.solverOutput.map((f) => ({ key: f.id, path: relPath(f) }))}
                   />
                   <Section
                     tone="info"

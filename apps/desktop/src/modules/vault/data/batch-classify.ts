@@ -8,6 +8,7 @@
 // refused by the server (one active lock per file) and reported per row.
 
 import { matchLocal, normalizePathForCompare, vaultRelativePath } from "./local-match";
+import { isAnsysSolverOutput } from "./ansys-solver-output";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 
@@ -90,9 +91,24 @@ export type CheckInClass =
   | { kind: "mine-stale" }
   /** Nothing to do: not checked out and no local edits (synced, missing, or a
    *  read-only copy that's merely an older version). */
-  | { kind: "nothing" };
+  | { kind: "nothing" }
+  /** ANSYS solver output with local changes. New bytes never go up (see
+   *  ansys-solver-output.ts); an unchanged checkout can still be released. */
+  | { kind: "solver-output" };
 
 export function classifyCheckIn(
+  file: VaultFile,
+  ctx: ClassifyCtx,
+  includeUnchangedMine: boolean,
+): CheckInClass {
+  const c = classifyCheckInIgnoringSolverOutput(file, ctx, includeUnchangedMine);
+  if (c.kind === "eligible" && c.changed && isAnsysSolverOutput(vaultRelativePath(file, ctx.folders))) {
+    return { kind: "solver-output" };
+  }
+  return c;
+}
+
+function classifyCheckInIgnoringSolverOutput(
   file: VaultFile,
   ctx: ClassifyCtx,
   includeUnchangedMine: boolean,
@@ -171,11 +187,13 @@ export interface CheckInPlan {
   mineNoLocal: VaultFile[];
   /** Checked out to you, but the local copy is an older untouched version. */
   mineStale: VaultFile[];
+  /** ANSYS solver output with local changes; never uploaded. */
+  solverOutput: VaultFile[];
 }
 
 export function planCheckIn(files: readonly VaultFile[], ctx: ClassifyCtx): CheckInPlan {
   const plan: CheckInPlan = {
-    eligible: [], changed: 0, unchanged: 0, unchangedFiles: [], blocked: [], others: [], mineNoLocal: [], mineStale: [],
+    eligible: [], changed: 0, unchanged: 0, unchangedFiles: [], blocked: [], others: [], mineNoLocal: [], mineStale: [], solverOutput: [],
   };
   for (const f of files) {
     const c = classifyCheckIn(f, ctx, true);
@@ -189,6 +207,8 @@ export function planCheckIn(files: readonly VaultFile[], ctx: ClassifyCtx): Chec
       plan.mineNoLocal.push(f);
     } else if (c.kind === "mine-stale") {
       plan.mineStale.push(f);
+    } else if (c.kind === "solver-output") {
+      plan.solverOutput.push(f);
     }
   }
   return plan;

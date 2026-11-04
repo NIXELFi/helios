@@ -276,6 +276,27 @@ describe("useAutoSync", () => {
     expect(readonlyCalls).toContainEqual({ path: "/v/a.bin", readonly: true });
   });
 
+  it("leaves ANSYS solver output in the cloud and downloads everything else", async () => {
+    const files: VaultFile[] = [makeFile("f1", "file.rst"), makeFile("f2", "job.esav"), makeFile("f3", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-rst", 906_625_024)]],
+      ["f2", [makeVersion("f2", "sha-esav")]],
+      ["f3", [makeVersion("f3", "sha-part")]],
+    ]);
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
+      }),
+      { wrapper },
+    );
+    await waitFor(() => { expect(downloadResolvers.has("sha-part")).toBe(true); });
+    await act(async () => { resolveDownload("sha-part", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(downloadCalls.map((c) => c.sha)).toEqual(["sha-part"]);
+    expect(result.current.lastDownloaded).toBe(1);
+  });
+
   it("does not freeze a file whose download FAILED", async () => {
     const files: VaultFile[] = [makeFile("f1", "a.bin")];
     const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-fail")]]]);

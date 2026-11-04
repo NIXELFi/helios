@@ -4,6 +4,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { gzipBytes } from "./compression";
+import { ANSYS_SOLVER_OUTPUT_NOTE, isAnsysSolverOutput } from "./ansys-solver-output";
 import { notifyLockChange } from "./lock-events";
 import { ledgerRecord } from "./sync-ledger";
 import { sanitizePathSegment } from "./folder-paths";
@@ -211,6 +212,13 @@ export function useAddLocalFile() {
         const msg = "not authenticated";
         setError(new Error(msg));
         return { ok: false, error: msg };
+      }
+      // Checked before anything is read: a result file can be a GB, and
+      // reading it into the webview is itself part of the problem.
+      const targetRel = targetPrefix ? `${targetPrefix}/${local.relativePath}` : local.relativePath;
+      if (isAnsysSolverOutput(targetRel)) {
+        setError(new Error(ANSYS_SOLVER_OUTPUT_NOTE));
+        return { ok: false, error: ANSYS_SOLVER_OUTPUT_NOTE };
       }
       setLoading(true);
       setError(null);

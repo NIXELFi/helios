@@ -39,6 +39,7 @@ import type { VaultCursor } from "../data/vault-cursor";
 import { useModuleLive } from "../../../shell/module-activity";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { findUnmatchedLocal, vaultSnapshotConsistent } from "../data/find-unmatched";
+import { ANSYS_SOLVER_OUTPUT_NOTE, partitionSolverOutput } from "../data/ansys-solver-output";
 import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
@@ -47,6 +48,7 @@ import { FolderBatchDialog, type FolderBatchOp } from "../components/FolderBatch
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { AutoAddBanner } from "../components/AutoAddBanner";
 import { VaultWarningBanner } from "../components/VaultWarningBanner";
+import { SolverOutputNotice } from "../components/SolverOutputNotice";
 import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { Breadcrumbs } from "../components/Breadcrumbs";
@@ -268,11 +270,15 @@ export function BrowseScreen() {
   // files then read as phantom "add" candidates, and auto-add below would act
   // on them for real (cross-vault draft adds during a vault switch). An
   // inconsistent pass yields [] and the refetch self-heals.
-  const unmatched = useMemo(
+  // ANSYS solver output is split off here so neither auto-add nor the manual
+  // banner ever offers it; the notice below tells the user to zip it instead.
+  const { allowed: unmatched, blocked: blockedSolverOutput } = useMemo(
     () =>
-      allFiles && localFiles && folders && vaultSnapshotConsistent(vaultId, allFiles, folders)
-        ? findUnmatchedLocal(allFiles, localFiles, folders)
-        : [],
+      partitionSolverOutput(
+        allFiles && localFiles && folders && vaultSnapshotConsistent(vaultId, allFiles, folders)
+          ? findUnmatchedLocal(allFiles, localFiles, folders)
+          : [],
+      ),
     [allFiles, localFiles, folders, vaultId],
   );
 
@@ -836,6 +842,7 @@ export function BrowseScreen() {
           }}
         />
       )}
+      {canEdit && <SolverOutputNotice blocked={blockedSolverOutput} />}
       <LocalDeleteBanner />
       <VaultWarningBanner />
       <div className="flex min-h-0 flex-1">
@@ -1225,6 +1232,9 @@ export function BrowseScreen() {
                 style={{ width: `${dropImport.total ? (dropImport.results.length / dropImport.total) * 100 : 0}%` }}
               />
             </div>
+          )}
+          {dropImport.results.some((r) => r.error === ANSYS_SOLVER_OUTPUT_NOTE) && (
+            <p className="mb-2 text-[11px] text-[#FFB300]">{ANSYS_SOLVER_OUTPUT_NOTE}</p>
           )}
           {dropImport.results.length > 0 && (
             <ul className="max-h-40 space-y-0.5 overflow-auto">

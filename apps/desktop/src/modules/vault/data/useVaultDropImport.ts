@@ -10,6 +10,7 @@ import {
 import { resolveDropFolder } from "./drop-target";
 import type { Folder, FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
+import { ANSYS_SOLVER_OUTPUT_NOTE, isAnsysSolverOutput } from "./ansys-solver-output";
 
 /** Per-item outcome of a drag-drop import batch. */
 export interface DropImportResult {
@@ -293,6 +294,12 @@ export function useVaultDropImport({
       for (const item of items) {
         if (signal.aborted) return;
         const name = item.relativePath;
+        // Before the read: a dropped solve folder can hold GB-sized results.
+        if (isAnsysSolverOutput(prefix ? `${prefix}/${name}` : name)) {
+          collected.push({ name, ok: false, error: ANSYS_SOLVER_OUTPUT_NOTE });
+          setResults([...collected]);
+          continue;
+        }
         try {
           const bytes = new Uint8Array(await item.file.arrayBuffer());
           const sha = await sha256Hex(bytes);

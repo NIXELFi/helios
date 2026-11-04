@@ -4,12 +4,12 @@ import { readDir, readFile, stat, watch } from "@tauri-apps/plugin-fs";
 
 /**
  * Rust-side debounce window for the vault-folder watcher (plugin-fs `watch`
- * → notify-debouncer-full). MUST stay a debounced watch, never
+ * -> notify-debouncer-full). MUST stay a debounced watch, never
  * `watchImmediate`: the native downloader streams each file to disk in
  * 8 KiB writes and Windows reports a modify event per write, and with
  * watchImmediate every one of those crossed the bridge as its own
  * `webview.eval` on the Tauri main thread. A 4-worker auto-sync pass
- * produced thousands of evals per second — the same thread that serves
+ * produced thousands of evals per second, the same thread that serves
  * every invoke (the title-bar close button included) and pumps WebView2, so
  * the whole app appeared to hang until the pass finished. The debouncer
  * collapses a file's write burst into a single event before it reaches IPC.
@@ -538,7 +538,7 @@ export function useLocalFolderScan(
     Boolean(rootPath) && rescanOnFocus,
   );
 
-  // Native filesystem watcher (Tauri/notify), debounced in Rust — see
+  // Native filesystem watcher (Tauri/notify), debounced in Rust; see
   // WATCH_DEBOUNCE_MS for why this must never be `watchImmediate`. A second,
   // longer JS debounce coalesces the per-file events into one rescan.
   useEffect(() => {

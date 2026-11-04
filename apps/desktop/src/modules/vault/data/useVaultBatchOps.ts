@@ -23,6 +23,7 @@ import { localDestPathStrict } from "./folder-paths";
 import { ledgerRecord, loadLedger } from "./sync-ledger";
 import { setReadonly, flipSwReadonly } from "./fs-readonly";
 import { activeLockMap, classifyCheckIn, classifyCheckOut, lockKind, type ClassifyCtx } from "./batch-classify";
+import { ANSYS_SOLVER_OUTPUT_NOTE } from "./ansys-solver-output";
 import { runPool } from "../lib/pool";
 import { toast } from "./toast";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "./types";
@@ -413,6 +414,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         return;
       }
       if (cls.kind === "nothing") { c.skipped++; skip(id, "Nothing to check in"); return; }
+      if (cls.kind === "solver-output") { c.skipped++; skip(id, ANSYS_SOLVER_OUTPUT_NOTE); return; }
       const m = matchLocal(file, ctx.localFiles ?? null, ctx.versionsByFileId, ctx.folders);
       const local = m.local!;
       const prevVersionId = ctx.versionsByFileId.get(id)?.[0]?.id ?? null;
