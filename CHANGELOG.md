@@ -30,10 +30,11 @@ follow [semver](https://semver.org/).
 ## [6.6.1] - 2026-11-04
 
 ### Fixed
+- **Vault downloads no longer load whole files into the app window.** The faster native downloader added in 5.7.1 never actually turned on in installed copies of Helios (it was looking for the Supabase key in a place that only exists in development builds), so every download, including 1 GB ANSYS archives, was held in the window's memory while it was decompressed and checked. Big files could exhaust that memory and turn the window black. Downloads now stream straight to disk.
 - **Helios no longer freezes or goes black while the Vault syncs big files.** Helios used to react to every small write to a file in the vault folder separately, and Windows reports one for every few KB written. Downloading a large file (or ANSYS writing results inside the vault folder) buried the app under those notifications until the window stopped drawing. They are now grouped, about one per file per second.
 
 ### Changed
-- **ANSYS solver output can't be added to the Vault.** Files in a Workbench solver folder (`<project>_files/dpN/SYS/MECH/`, such as `file.rst`, `ds.dat`, `solve.out` and `cleanup-ansys-*.bat`) and MAPDL result/scratch files are skipped by auto-add, the "add to vault" banner, drag-and-drop and check-in. Helios shows a note instead. If a solve needs to be in the Vault, zip it up into a .zip file and add that. The `.wbpj`, `SYS.mechdb`, engineering data, design points and journals are still vaulted as before.
+- **ANSYS solver output can't be added to the Vault.** Files in a Workbench solver folder (`<project>_files/dpN/SYS/MECH/` and `_ProjectScratch/`, such as `file.rst`, `ds.dat`, `solve.out` and `cleanup-ansys-*.bat`) and MAPDL result/scratch files are skipped by auto-add, the "add to vault" banner, drag-and-drop and check-in. Helios shows a note instead. If a solve needs to be in the Vault, zip it up into a .zip file and add that. The `.wbpj`, `SYS.mechdb`, engineering data, design points and journals are still vaulted as before.
 - **Auto-sync no longer downloads ANSYS solver output that is already in the Vault.** Those files are hundreds of MB each and regenerated on every solve. Get Latest on a file still downloads it if you really want it.
 
 ## [6.6.0] - 2026-10-31

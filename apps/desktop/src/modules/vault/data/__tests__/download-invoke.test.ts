@@ -59,6 +59,35 @@ afterEach(() => {
 });
 
 describe("downloadVersionOnce native path", () => {
+  it("uses the client's own URL and key when the build has no VITE_SUPABASE_* env (every shipped build)", async () => {
+    // Release builds never bake in a Supabase project: the user types the URL
+    // and anon key into the Connect step, so they exist only on the client.
+    // Reading them from import.meta.env alone sent every production download
+    // down the webview fallback, buffering whole files (a 1 GB .wbpz) in
+    // WebView2 until the window went black.
+    vi.unstubAllEnvs();
+    vi.stubEnv("VITE_SUPABASE_ANON_KEY", "");
+    vi.stubEnv("VITE_SUPABASE_URL", "");
+    invoke.mockResolvedValue({ tempPath: TEMP, bytes: 5, wasGzip: true });
+    const runtimeClient = {
+      supabaseUrl: "https://runtime.supabase.co/",
+      supabaseKey: "runtime-anon",
+      auth: { getSession: async () => ({ data: { session: { access_token: "user-jwt" } } }) },
+      storage: { from: () => ({ download: storageDownload }) },
+    } as never;
+
+    const result = await downloadVersionOnce(runtimeClient, SHA, DEST);
+
+    expect(result).toEqual({ ok: true });
+    expect(invoke).toHaveBeenCalledWith("download_object_to_temp", {
+      req: expect.objectContaining({
+        url: `https://runtime.supabase.co/storage/v1/object/vault-objects/2c/${SHA}`,
+        apikey: "runtime-anon",
+      }),
+    });
+    expect(storageDownload).not.toHaveBeenCalled();
+  });
+
   it("renames the temp file the Rust command produced onto the destination", async () => {
     invoke.mockResolvedValue({ tempPath: TEMP, bytes: 5, wasGzip: true });
 

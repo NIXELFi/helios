@@ -14,6 +14,8 @@ describe("isAnsysSolverOutput", () => {
       expect(isAnsysSolverOutput(`${LCA}/dp0/SYS/MECH/${name}`)).toBe(true);
     }
     expect(isAnsysSolverOutput(`${LCA}/dp0/SYS-2/MECH/file.rst`)).toBe(true);
+    expect(isAnsysSolverOutput("EV-Suspension/Upright/ANSYS/Upright V5 Ansys folder/_ProjectScratch/Scr5B96/file0.full")).toBe(true);
+    expect(isAnsysSolverOutput("EV-Suspension/Upright/ANSYS/Upright V5 Ansys folder/_ProjectScratch/Scr5B96/ds.dat")).toBe(true);
   });
 
   it("keeps the project file, the model database and engineering data", () => {
@@ -38,6 +40,7 @@ describe("isAnsysSolverOutput", () => {
     expect(isAnsysSolverOutput("Chassis/frame.SLDPRT")).toBe(false);
     expect(isAnsysSolverOutput("Data/run.dat")).toBe(false);
     expect(isAnsysSolverOutput("EV-Suspension/Upright/ANSYS/Upright V5 results.zip")).toBe(false);
+    expect(isAnsysSolverOutput("EV-Suspension/Upright/ANSYS/Upright V5 Ansys folder/Upright V5 Ansussy Backup 11-02.wbpz")).toBe(false);
     expect(isAnsysSolverOutput("MECH/file.txt")).toBe(false);
   });
 

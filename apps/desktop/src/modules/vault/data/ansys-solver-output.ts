@@ -11,6 +11,9 @@
  * `dpN/global/MECH/SYS.mechdb` and the engineering data in `dpN/SYS/ENGD/`,
  * which stay vaultable, as do the .wbpj, design points and journals.
  *
+ * `_ProjectScratch/` (Workbench's temporary solve folder, which held 961 MB
+ * file0.full matrices in Oct 2026) is all scratch too.
+ *
  * Outside Workbench, standalone MAPDL runs leave result and scratch files with
  * ANSYS-only extensions, flagged anywhere. `.rst` is also reStructuredText, so
  * it only counts under a `_files` tree or as MAPDL's default `file.rst`.
@@ -37,6 +40,9 @@ export function isAnsysSolverOutput(relativePath: string): boolean {
   if (!name) return false;
   const dirs = segs.slice(0, -1);
   const inWorkbenchTree = dirs.some((d) => d.endsWith("_files"));
+
+  // Workbench's temporary solve area: <project folder>/_ProjectScratch/ScrXXXX/
+  if (dirs.includes("_projectscratch")) return true;
 
   // <project>_files/dpN/SYS[-n]/MECH/<anything>
   for (let i = 0; i + 3 < dirs.length; i++) {

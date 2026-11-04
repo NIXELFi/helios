@@ -227,10 +227,14 @@ async function nativeDownload(
   sha: string,
   destPath: string,
 ): Promise<NativeDownloadResult | null> {
-  const supabaseUrl =
-    (client as unknown as { supabaseUrl?: string }).supabaseUrl ??
-    (import.meta.env.VITE_SUPABASE_URL as string | undefined);
-  const apikey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  // Shipped builds bake in no Supabase project: the URL and anon key are typed
+  // into the Connect step and live only on the client. Read them from the
+  // client first; the VITE_* env exists only in dev. Reading the key from env
+  // alone made every production download fall back to the webview path.
+  const own = client as unknown as { supabaseUrl?: string; supabaseKey?: string };
+  const supabaseUrl = (own.supabaseUrl || (import.meta.env.VITE_SUPABASE_URL as string | undefined))
+    ?.replace(/\/+$/, "");
+  const apikey = own.supabaseKey || (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
   if (!supabaseUrl || !apikey) return null;
   // supabase-js sends the user's access token when a session exists and the
   // anon key otherwise. Mirror that exactly so storage RLS sees the same role
