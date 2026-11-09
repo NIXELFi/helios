@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { forgetSettledAttempts, recordInstallAttempt, retractInstallAttempt } from "./update-attempts";
 
 /** Lifecycle of the update checker, surfaced to the UI as a discriminated
  *  union so the header pill can pattern-match. */
@@ -75,6 +76,9 @@ export function useUpdater(): UpdaterApi {
     if (!quiet) setState({ kind: "checking" });
     try {
       const update = await check();
+      // Tidy the install-attempt records (see update-attempts.ts) against the
+      // version we're actually running: a landed update's record goes away.
+      forgetSettledAttempts(update ? update.currentVersion : await getCurrentVersionSafe());
       if (update) {
         setState({
           kind: "available",
@@ -126,6 +130,12 @@ export function useUpdater(): UpdaterApi {
     let total: number | null = null;
     let lastProgressAt = 0;
     setState({ kind: "downloading", update: state.update, downloaded, total });
+    // Record the hand-off BEFORE it happens: on Windows downloadAndInstall
+    // launches the installer and exits Helios mid-call, so nothing after it
+    // runs. If Helios comes back still on this version, the install didn't
+    // land, and auto-update stops retrying it (update-attempts.ts).
+    const { version: target, currentVersion: from } = state.update;
+    recordInstallAttempt(target, from);
     try {
       await handle.downloadAndInstall((event) => {
         // Tauri emits "Started" → many "Progress" → "Finished".
@@ -163,6 +173,9 @@ export function useUpdater(): UpdaterApi {
         setState({ kind: "installed", version: state.update.version });
       }
     } catch (e) {
+      // The download or signature check failed, so Helios never quit and
+      // nothing was installed: that wasn't an install that didn't land.
+      retractInstallAttempt(target, from);
       setState({ kind: "offline", error: String(e) });
     }
   };

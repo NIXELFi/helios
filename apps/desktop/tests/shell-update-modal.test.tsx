@@ -135,3 +135,33 @@ describe("Shell update-modal auto-open gating (MODAL-ESC)", () => {
     expect(recheck).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Shell auto-update stands down after installs that didn't land", () => {
+  function seedAttempts(count: number) {
+    localStorage.setItem(
+      "helios.updater.installAttempts",
+      JSON.stringify({ "3.8.0": { from: "3.7.0", count, lastAt: Date.now() } }),
+    );
+  }
+
+  it("still counts down for one quiet retry after a single failed install", async () => {
+    seedAttempts(1);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("logs-app")).toBeInTheDocument());
+    setUpdaterState({ kind: "available", update });
+    await waitFor(() => expect(screen.getByText(/installing automatically in/i)).toBeInTheDocument());
+  });
+
+  it("no countdown once the limit is hit; explains and offers the manual download", async () => {
+    seedAttempts(2);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("logs-app")).toBeInTheDocument());
+    setUpdaterState({ kind: "available", update });
+    await waitFor(() => expect(screen.getByText(/won't try again on its/i)).toBeInTheDocument());
+    expect(screen.queryByText(/installing automatically in/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /download the installer/i })).toBeInTheDocument();
+    // The user can still choose to try again.
+    fireEvent.click(screen.getByRole("button", { name: /install and restart/i }));
+    expect(installAndRelaunch).toHaveBeenCalledTimes(1);
+  });
+});

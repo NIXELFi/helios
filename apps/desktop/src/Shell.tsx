@@ -31,6 +31,7 @@ import { OPEN_AUTH_EVENT } from "./lib/open-auth";
 import { applyTheme, useThemeVersion } from "./lib/theme";
 import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
+import { AUTO_INSTALL_ATTEMPT_LIMIT, failedInstallAttempts } from "./lib/update-attempts";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
 import type { ReportKind } from "./shell/report/types";
@@ -341,10 +342,21 @@ function HeliosShell() {
   const [deferUsedFor, setDeferUsedFor] = useState<string | null>(null);
   const autoArmedForRef = useRef<string | null>(null);
   const availableVersion = updater.state.kind === "available" ? updater.state.update.version : null;
+  const availableFrom = updater.state.kind === "available" ? updater.state.update.currentVersion : null;
+  // Installs of this release already handed to the installer that didn't
+  // land (we're still on the old version). Past the limit, auto-install
+  // stands down for this release so a failing install can't loop at every
+  // launch; the modal explains and offers the manual download instead.
+  const failedAttempts = useMemo(
+    () => (availableVersion && availableFrom ? failedInstallAttempts(availableVersion, availableFrom) : 0),
+    [availableVersion, availableFrom],
+  );
+  const autoInstallStuck = failedAttempts >= AUTO_INSTALL_ATTEMPT_LIMIT;
   // Never auto-install into a `pnpm dev` build: the updater would replace the
   // folder three levels above target/debug/helios-desktop with Helios.app.
   // (Vitest runs in MODE "test", so the countdown stays covered by tests.)
-  const autoUpdateActive = prefs.autoUpdate && availableVersion !== null && import.meta.env.MODE !== "development";
+  const autoUpdateActive =
+    prefs.autoUpdate && availableVersion !== null && !autoInstallStuck && import.meta.env.MODE !== "development";
   useEffect(() => {
     if (!autoUpdateActive || availableVersion === null) {
       setAutoInstallIn(null);
@@ -693,6 +705,7 @@ function HeliosShell() {
           autoInstallIn={autoInstallIn}
           onDefer={deferAutoUpdate}
           canDefer={deferUsedFor !== availableVersion}
+          failedInstalls={failedAttempts}
         />
       )}
       {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
