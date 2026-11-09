@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.7.1] - 2026-11-09
+
 ### Fixed
 - **Auto-update can no longer get stuck in a loop.** If Helios hands an update to the installer and then starts up still on the old version (antivirus or SmartScreen blocked the installer, or an older second copy of Helios is the one starting at login), it used to find the same update, count down and launch the installer again, every launch and every boot. Helios now remembers each attempt. After two that didn't land, it stops installing that release automatically, explains what happened in the update dialog and links to the installer to run by hand. **Install and restart** still works if you want to try again.
 
