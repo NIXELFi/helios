@@ -27,6 +27,16 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault: back and forward like File Explorer.** The mouse thumb buttons, Alt+← / Alt+→ and new ← → buttons beside the folder path go back and forward through the folders you've visited in Browse.
+- **Vault: resize or hide the details pane.** Drag the left edge of the details/history pane to make it wider or narrower (double-click the edge to reset), or hide it with the new Details button at the end of the path bar. Helios remembers both on this computer.
+
+### Fixed
+- **Checking out a file that's already open in SOLIDWORKS makes it editable without the add-in.** Helios's helper used to ask SOLIDWORKS once and ignore the answer, so a refused switch left the file read-only and you found out only when Save failed. It now retries and checks the result. If the file is still read-only and has no unsaved changes, Helios reloads it from disk as editable. Otherwise Helios tells you which file needs closing and reopening. Bulk and folder check-outs now include every file, not just ones SOLIDWORKS had marked with a lock file, and all files go through one helper run. Two open files with the same name in different folders no longer get mixed up. The add-in's own fallback had the same problem: it reloaded the file read-only again. That is fixed as well.
+- **Large vault files no longer download over and over.** When someone checked a file in or out, auto-sync started its pass again. It threw away a big download that was still running and started the same file from the beginning. On a busy day a 1 GB file could be fetched dozens of times without ever finishing; in early November that used up the team's storage bandwidth. A restarted pass now picks up the download already in progress. A file that keeps failing to download is retried after 30 s, then 1 min, 2 min and so on (at most every 30 min) instead of on every pass.
+- **Check-in can't spin forever on a dropped connection.** If the upload or the server stops answering, the check-in stops with an error after a time limit based on the file size. You keep the checkout and can try again.
+- **The title bar's minimize/maximize/close stay responsive during big vault operations.** Setting files read-only during sync and bulk check-outs no longer runs on the thread the window controls use. If a window button fails or is slow, Helios now records it for bug reports.
+
 ## [6.6.2] - 2026-11-04
 
 ### Fixed

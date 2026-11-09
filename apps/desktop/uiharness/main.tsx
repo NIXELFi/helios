@@ -13,6 +13,9 @@ import { HelpDrawer } from "../src/modules/marketplace/authoring/HelpDrawer";
 import { MyPluginsView } from "../src/modules/marketplace/manage/MyPluginsView";
 import { InstalledView } from "../src/modules/marketplace/views/InstalledView";
 import { FolderBatchDialog } from "../src/modules/vault/components/FolderBatchDialog";
+import { DetailPane, DetailPaneToggle, useDetailPaneLayout } from "../src/modules/vault/components/DetailPane";
+import { useFolderHistory } from "../src/modules/vault/data/useFolderHistory";
+import { useRef } from "react";
 
 const noop = () => {};
 const INSTALLED = [
@@ -130,6 +133,7 @@ function Harness() {
       </div>
     );
   }
+  if (view === "vault-browse") return <VaultBrowseLayout />;
   if (view === "help") {
     return (
       <div className="min-h-screen bg-helios-base">
@@ -140,6 +144,48 @@ function Harness() {
   return (
     <div className="min-h-screen bg-helios-base">
       <SubmitWizard onClose={() => {}} />
+    </div>
+  );
+}
+
+/** Vault Browse layout bits: folder back/forward + the resizable, hideable
+ *  details pane, around stand-in content (the real BrowseScreen needs the
+ *  whole vault data stack). */
+function VaultBrowseLayout() {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const folders = ["Chassis", "Suspension", "Brakes", "Aero"];
+  const nav = useFolderHistory({
+    isVisible: () => rootRef.current?.offsetParent != null,
+    liveFolderIds: new Set(folders),
+  });
+  const pane = useDetailPaneLayout();
+  return (
+    <div ref={rootRef} className="flex h-screen bg-helios-base text-helios-text">
+      <div className="w-56 shrink-0 border-r border-helios-line p-2 text-sm">
+        {folders.map((f) => (
+          <button key={f} data-folder={f} onClick={() => nav.navigate(f)} className={`block w-full rounded px-2 py-1 text-left ${nav.current === f ? "bg-helios-line" : ""}`}>
+            {f}
+          </button>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-3 border-b border-helios-line px-3 py-1.5 text-sm">
+          <div className="-mr-1 flex shrink-0 items-center">
+            <button type="button" aria-label="Back" onClick={nav.goBack} disabled={!nav.canGoBack} className="rounded px-1.5 py-0.5 text-sm text-helios-dim hover:bg-helios-line disabled:opacity-30">←</button>
+            <button type="button" aria-label="Forward" onClick={nav.goForward} disabled={!nav.canGoForward} className="rounded px-1.5 py-0.5 text-sm text-helios-dim hover:bg-helios-line disabled:opacity-30">→</button>
+          </div>
+          <span data-testid="crumb">SDM27 / {nav.current ?? "(root)"}</span>
+          <input placeholder="Search vault…" className="ml-auto w-64 rounded border border-helios-line bg-transparent px-2 py-0.5" />
+          <DetailPaneToggle hidden={pane.hidden} onToggle={pane.toggleHidden} />
+        </div>
+        <div className="p-3 text-sm text-helios-dim">file table…</div>
+      </div>
+      <DetailPane width={pane.width} onResize={pane.setWidth} hidden={pane.hidden} hideWhenNarrow={false}>
+        <aside className="flex h-full w-full flex-col border-l border-helios-line bg-helios-base p-3 text-sm">
+          <b>frame.sldprt</b>
+          <span className="text-helios-dim">History · v12 · checked in by You</span>
+        </aside>
+      </DetailPane>
     </div>
   );
 }
