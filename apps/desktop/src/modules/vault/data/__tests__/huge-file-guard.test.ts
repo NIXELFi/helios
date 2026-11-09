@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   HUGE_FILE_BYTES,
+  HUGE_FILE_WARNING,
+  checkHugeUpload,
   answerHugeUpload,
   confirmHugeUpload,
   currentHugeUpload,
@@ -24,16 +26,37 @@ describe("huge-file warning", () => {
     await expect(confirmHugeUpload(big("a"))).resolves.toBe(true);
   });
 
-  it("asks, and remembers the answer for the same file + content", async () => {
+  it("asks every time: a \"no\" isn't remembered", async () => {
     subscribeHugeUploads(() => {});
     const p = confirmHugeUpload(big("a"));
     await flush();
     expect(currentHugeUpload()?.key).toBe("a");
     answerHugeUpload("a", false);
     await expect(p).resolves.toBe(false);
-    // auto-add re-scans: no second dialog
-    await expect(confirmHugeUpload(big("a"))).resolves.toBe(false);
+    const again = confirmHugeUpload(big("a"));
+    await flush();
+    expect(currentHugeUpload()?.key).toBe("a"); // asked again
+    answerHugeUpload("a", true);
+    await expect(again).resolves.toBe(true);
+  });
+
+  it("background sources never open a dialog; they get the warning text", async () => {
+    subscribeHugeUploads(() => {});
+    const auto = await checkHugeUpload({ ...big("a"), source: "auto" });
+    const bridge = await checkHugeUpload({ ...big("b"), action: "check in", source: "bridge" });
     expect(currentHugeUpload()).toBeNull();
+    expect(auto.ok).toBe(false);
+    expect(!auto.ok && auto.error).toContain(HUGE_FILE_WARNING);
+    expect(!bridge.ok && bridge.error).toMatch(/check in it from the Helios Vault window/);
+  });
+
+  it("a declined user check-in says the checkout is kept", async () => {
+    subscribeHugeUploads(() => {});
+    const p = checkHugeUpload({ ...big("c"), action: "check in", source: "user" });
+    await flush();
+    answerHugeUpload("c", false);
+    const r = await p;
+    expect(!r.ok && r.error).toMatch(/still have it checked out/);
   });
 
   it("confirm-then-close (ConfirmDialog calls both) answers only the shown file", async () => {

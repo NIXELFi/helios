@@ -138,10 +138,15 @@ export function BridgeOpHandler(): null {
           }
           const bytes = await readFile(p.path);
           const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-          const ver = await checkInRef.current(p.fileId, buf, p.comment ?? null);
+          let why: string | null = null;
+          const ver = await checkInRef.current(p.fileId, buf, p.comment ?? null, {
+            source: "bridge",
+            fileName: p.path.split(/[\\/]/).pop(),
+            onError: (e) => { why = e.message; },
+          });
           respond(ver
             ? { ok: true, versionNum: ver.version_num, versionId: ver.id }
-            : { ok: false, error: "check-in failed" });
+            : { ok: false, error: why ?? "check-in failed" });
         } else if (p.op === "getLatest") {
           // Containment: only write inside the vault tree. Without this the op
           // is an arbitrary-file-WRITE primitive (drop an attacker-chosen blob
@@ -197,7 +202,7 @@ export function BridgeOpHandler(): null {
             sha256: "", // empty → useAddLocalFile reads + hashes the file itself
             sizeBytes: 0,
           };
-          const res = await addRef.current(resolved.vaultId, local);
+          const res = await addRef.current(resolved.vaultId, local, undefined, "bridge");
           respond(res.ok
             ? { ok: true, lockAcquired: res.lockAcquired, alreadyExisted: res.alreadyExisted }
             : { ok: false, error: res.error });

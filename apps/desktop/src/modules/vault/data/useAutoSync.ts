@@ -21,7 +21,7 @@ import {
 import { useSupabaseClient } from "@helios/auth";
 import { exists } from "@tauri-apps/plugin-fs";
 import { isAnsysSolverOutput } from "./ansys-solver-output";
-import { continueSyncingToday, isOverBudget, isRepeatBlocked, loadGuard, recordFetch, saveGuard, REPEAT_LIMIT } from "./auto-sync-guard";
+import { continueSyncingToday, isOverBudget, isRepeatBlocked, loadGuard, recordSuccessfulFetch, REPEAT_LIMIT } from "./auto-sync-guard";
 import { toast } from "./toast";
 
 export interface AutoSyncStatus {
@@ -200,8 +200,15 @@ export function useAutoSync(input: {
   // failures schedules its own retry instead of stalling until something moves.
   const [retryTick, setRetryTick] = useState(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAtRef = useRef(0);
   // Survives passes (and supersession); reset when the vault folder changes.
   const failedDownloadsRef = useRef<FailedDownloads>(new Map());
+  // dest → sha this session's passes have put on disk since the last local
+  // scan. The scan is paused while a pass runs, so a pass that supersedes
+  // another partitions against a scan from BEFORE the first pass's downloads;
+  // without this it fetched those files (a 1 GB file included) all over again.
+  const landedRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => { landedRef.current = new Map(); }, [localFiles]);
   // Warn once per session per file / per budget pause, not on every pass.
   const warnedRepeatRef = useRef<Set<string>>(new Set());
   const warnedBudgetRef = useRef(false);
@@ -446,9 +453,12 @@ export function useAutoSync(input: {
       }
       // Recently failed and still backing off: count it as failed (it is) but
       // don't fetch it again yet. The retry timer below comes back for it.
-      const failKey = failedDownloadKey(ver.sha256, localDestPath(vaultRoot, file.folder_id, file.name, folders));
-      stillWanted.add(failKey);
+      const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+      if (landedRef.current.get(dest) === ver.sha256) { skipped++; continue; }
+      const failKey = failedDownloadKey(ver.sha256, dest);
       if (guard && isRepeatBlocked(guard, failKey)) {
+        // Not retried today, so no backoff entry may keep the timer alive.
+        failedDownloadsRef.current.delete(failKey);
         repeatBlocked.push(file.name);
         if (!warnedRepeatRef.current.has(failKey)) {
           warnedRepeatRef.current.add(failKey);
@@ -461,6 +471,7 @@ export function useAutoSync(input: {
         skipped++;
         continue;
       }
+      stillWanted.add(failKey);
       const backoff = failedDownloadsRef.current.get(failKey);
       if (backoff && Date.now() < backoff.nextAttemptAt) { deferredFailed++; continue; }
       tasks.push({
@@ -487,6 +498,8 @@ export function useAutoSync(input: {
       for (const file of files) vaultBytes += versionsByFileId.get(file.id)?.[0]?.size_bytes ?? 0;
       if (isOverBudget(guard, vaultBytes)) {
         pausedOverBudget = true;
+        // Nothing downloads until "Continue syncing", so no retry timer.
+        failedDownloadsRef.current.clear();
         if (!warnedBudgetRef.current) {
           warnedBudgetRef.current = true;
           console.warn(`[vault] auto-sync paused: ${Math.round(guard.bytes / 1e9)} GB downloaded today`);
@@ -558,10 +571,12 @@ export function useAutoSync(input: {
         if (ok || !myAbort.signal.aborted) {
           const key = failedDownloadKey(t.sha, t.dest);
           recordDownloadOutcome(failedDownloadsRef.current, key, ok, Date.now());
-          if (guard && t.vaultId) {
-            recordFetch(guard, key, t.size || 0);
-            saveGuard(t.vaultId, guard);
-          }
+          // Only bytes that actually landed count toward the breaker (a 429
+          // or a rename onto a file SOLIDWORKS holds is the backoff's job).
+          // Read-modify-write of the stored guard: an overlapping pass's
+          // counts aren't overwritten by this pass's stale copy.
+          if (ok && t.vaultId) recordSuccessfulFetch(t.vaultId, key, t.size || 0);
+          if (ok) landedRef.current.set(t.dest, t.sha);
         }
         activeTaskIds.delete(t.id);
         // Rebuild activeFiles from the still-active id set so a worker
@@ -700,13 +715,20 @@ export function useAutoSync(input: {
         // list / recycle bin to refresh.
         if (downloaded > 0 || propagated.length > 0) onCompleteRef.current?.();
         const retryIn = nextRetryInMs(failedDownloadsRef.current, Date.now());
-        if (retryIn !== null && !retryTimerRef.current) {
+        const retryAt = retryIn === null ? null : Date.now() + Math.max(FAILED_RETRY_MS, retryIn);
+        // A newly failed file (30 s) must not wait behind a pending 30 min timer.
+        if (retryAt !== null && retryTimerRef.current && retryAt < retryAtRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+        if (retryAt !== null && !retryTimerRef.current) {
+          retryAtRef.current = retryAt;
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             // A pass already in flight covers the retry (and re-schedules on
             // its own failures); bumping now would supersede and abort it.
             if (activeGenRef.current === 0) setRetryTick((t) => t + 1);
-          }, Math.max(FAILED_RETRY_MS, retryIn));
+          }, Math.max(0, retryAt - Date.now()));
         }
       }
     } finally {

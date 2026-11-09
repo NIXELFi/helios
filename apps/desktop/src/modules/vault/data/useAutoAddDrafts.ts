@@ -137,7 +137,9 @@ export function useAutoAddDrafts(opts: {
           if (cancelled) break;
           attemptsRef.current.set(f.relativePath, Date.now());
           setStatus((s) => ({ ...s, adding: f.basename }));
-          const r = await addRunRef.current(vaultId, f);
+          // "auto": a huge file is left for a person to add by hand, never
+          // a dialog popped up from a background job.
+          const r = await addRunRef.current(vaultId, f, undefined, "auto");
           if (r.ok) added.push(f.basename);
           else failures.push({ name: f.basename, error: r.error ?? "failed" });
         }

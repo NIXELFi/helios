@@ -7,6 +7,7 @@ import {
   isRepeatBlocked,
   loadGuard,
   recordFetch,
+  recordSuccessfulFetch,
   saveGuard,
   today,
 } from "../auto-sync-guard";
@@ -49,5 +50,15 @@ describe("auto-sync circuit breaker", () => {
     continueSyncingToday("v1");
     expect(isOverBudget(loadGuard("v1"), 1e9)).toBe(false);
     expect(loadGuard("v1").day).toBe(today());
+  });
+
+  it("records straight into storage, so overlapping passes don't lose counts", () => {
+    const passA = loadGuard("v1"); // a pass that loaded before the next one counted
+    recordSuccessfulFetch("v1", "k", 10);
+    recordSuccessfulFetch("v1", "k", 10);
+    expect(passA.fetches.k).toBeUndefined();
+    const now = loadGuard("v1");
+    expect(now.fetches.k).toBe(2);
+    expect(now.bytes).toBe(20);
   });
 });

@@ -5,7 +5,7 @@ import { gzipBytes } from "./compression";
 import { friendlyPgError, friendlyUploadError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
 import { setLockOverlay } from "./lock-overlay";
-import { HUGE_UPLOAD_DECLINED, confirmHugeUpload } from "./huge-file-guard";
+import { checkHugeUpload, type UploadSource } from "./huge-file-guard";
 
 const BUCKET = "vault-objects";
 
@@ -83,6 +83,33 @@ function isDuplicateUploadError(err: { message?: string; statusCode?: string | n
   );
 }
 
+/** The newest version of `file_id` with these bytes, created at or after
+ *  `sinceMs` (with a little clock slack), or null. */
+async function findVersionSince(
+  client: ReturnType<typeof useSupabaseClient>,
+  file_id: FileId,
+  sha: string,
+  sinceMs: number,
+): Promise<Version | null> {
+  try {
+    const { data, error } = await withTimeout(
+      (client.from("versions") as any)
+        .select("*")
+        .eq("file_id", file_id)
+        .eq("sha256", sha)
+        .gte("created_at", new Date(sinceMs - 60_000).toISOString())
+        .order("version_num", { ascending: false })
+        .limit(1),
+      PROBE_TIMEOUT_MS,
+      "version lookup timed out",
+    ) as { data: Version[] | null; error: unknown };
+    if (error || !Array.isArray(data) || data.length === 0) return null;
+    return data[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   // Wrap in a Uint8Array first — this normalises the buffer across realms
   // (e.g. jsdom vs Node in tests) so SubtleCrypto always sees a TypedArray.
@@ -119,6 +146,8 @@ export function useCheckIn() {
         baseSha?: string | null;
         /** Shown in the huge-file warning. */
         fileName?: string;
+        /** Who asked; decides how the huge-file warning is shown. */
+        source?: UploadSource;
       } = {},
     ): Promise<Version | null> => {
       setLoading(true);
@@ -130,13 +159,14 @@ export function useCheckIn() {
 
         // Huge files ask first (a warning, not a limit): see huge-file-guard.ts.
         // Declining keeps the checkout so nothing is lost.
-        const go = await confirmHugeUpload({
+        const gate = await checkHugeUpload({
           key: `checkin|${file_id}|${sha}`,
           name: opts.fileName ?? "This file",
           bytes: bytes.byteLength,
           action: "check in",
+          source: opts.source ?? "user",
         });
-        if (!go) throw new Error(HUGE_UPLOAD_DECLINED);
+        if (!gate.ok) throw new Error(gate.error);
 
         // "unknown" falls through to the upload attempt — the duplicate handling
         // below makes that safe even when the content was in fact already there.
@@ -185,18 +215,33 @@ export function useCheckIn() {
           }
         }
 
-        const { data: ver, error: rpcErr } = await withTimeout(
-          client.rpc("pdm_check_in", {
-            p_file_id: file_id,
-            p_sha256: sha,
-            p_size: bytes.byteLength,
-            p_comment: comment,
-            ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
-          }),
-          CHECK_IN_RPC_TIMEOUT_MS,
-          "The vault server didn't answer in time. The check-in may still have gone through; wait a moment and check the file's history before trying again.",
-        );
-        if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
+        const rpcStartedAt = Date.now();
+        let ver: unknown;
+        try {
+          const res = await withTimeout(
+            client.rpc("pdm_check_in", {
+              p_file_id: file_id,
+              p_sha256: sha,
+              p_size: bytes.byteLength,
+              p_comment: comment,
+              ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
+            }),
+            CHECK_IN_RPC_TIMEOUT_MS,
+            "The vault server didn't answer in time. The check-in may still have gone through; wait a moment and check the file's history before trying again.",
+          );
+          if (res.error) throw new Error(friendlyPgError(res.error, "version").message);
+          ver = res.data;
+        } catch (e) {
+          // The server may have committed even though we stopped waiting: if a
+          // version with exactly these bytes appeared since we asked, the
+          // check-in went through, so finish it as one (lock overlay, and the
+          // caller's read-only bit + ledger) instead of leaving a writable
+          // file with no lock and a confusing retry.
+          if (!(e instanceof CheckInTimeout)) throw e;
+          const landed = await findVersionSince(client, file_id, sha, rpcStartedAt);
+          if (!landed) throw e;
+          ver = landed;
+        }
         // pdm_check_in releases the caller's lock server-side. Clear the pill
         // this frame (optimistic remove) so check-in feels as instant as
         // checkout, then broadcast so every mounted useLocks() refetches rather

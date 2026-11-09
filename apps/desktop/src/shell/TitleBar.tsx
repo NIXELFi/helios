@@ -9,6 +9,25 @@ import { handleWindowDragMouseDown, tauriWindow } from "./windowDrag";
  *  this platform renders one. */
 const TITLEBAR_HEIGHT_PX = 38;
 
+/** Run a window control and log a failure: these used to be fire-and-forget,
+ *  so a report that the buttons "stop working" arrived with nothing in its
+ *  breadcrumbs. The console line lands there now. */
+function windowControl(
+  label: string,
+  action: (win: NonNullable<ReturnType<typeof tauriWindow>>) => Promise<void>,
+): void {
+  const win = tauriWindow();
+  if (!win) return;
+  const started = performance.now();
+  Promise.resolve()
+    .then(() => action(win))
+    .then(() => {
+      const ms = performance.now() - started;
+      if (ms > 1000) console.warn(`[titlebar] ${label} took ${Math.round(ms)} ms`);
+    })
+    .catch((e) => console.error(`[titlebar] ${label} failed:`, e));
+}
+
 /**
  * Custom in-app title bar for platforms where the native frame is disabled
  * (Windows: `decorations: false` in src-tauri/tauri.windows.conf.json).
@@ -23,24 +42,6 @@ const TITLEBAR_HEIGHT_PX = 38;
  * Design per the approved 2026-06-16 mockup: logo + HELIOS wordmark +
  * module crumb left, min/max/close right, red close hover.
  */
-/** Run a window control and log a failure: these used to be fire-and-forget,
- *  so a report that the buttons "stop working" arrived with nothing in its
- *  breadcrumbs. The console line lands there now. */
-function windowControl(
-  label: string,
-  action: (win: NonNullable<ReturnType<typeof tauriWindow>>) => Promise<void>,
-): void {
-  const win = tauriWindow();
-  if (!win) return;
-  const started = performance.now();
-  action(win)
-    .then(() => {
-      const ms = performance.now() - started;
-      if (ms > 1000) console.warn(`[titlebar] ${label} took ${Math.round(ms)} ms`);
-    })
-    .catch((e) => console.error(`[titlebar] ${label} failed:`, e));
-}
-
 export function TitleBar({ context }: { context: string | null }) {
   const [maximized, setMaximized] = useState(false);
 

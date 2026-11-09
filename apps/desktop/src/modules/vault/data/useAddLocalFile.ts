@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { HUGE_UPLOAD_DECLINED, confirmHugeUpload } from "./huge-file-guard";
+import { checkHugeUpload, type UploadSource } from "./huge-file-guard";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { FolderId, VaultId } from "./types";
@@ -208,6 +208,8 @@ export function useAddLocalFile() {
       // Chassis/frame and names the file there. Backward compatible: omitting it
       // (or passing "") preserves the prior root-relative behavior verbatim.
       targetPrefix?: string,
+      /** Who asked; decides how the huge-file warning is shown. */
+      source: UploadSource = "user",
     ): Promise<AddLocalFileResult> => {
       if (!user) {
         const msg = "not authenticated";
@@ -222,15 +224,21 @@ export function useAddLocalFile() {
         return { ok: false, error: ANSYS_SOLVER_OUTPUT_NOTE };
       }
       // Huge files ask first (a warning, not a limit): see huge-file-guard.ts.
-      const ok = await confirmHugeUpload({
-        key: `add|${targetRel}|${local.sizeBytes}`,
+      // The scan knows the size; a caller without it (the SOLIDWORKS add-in)
+      // is checked again once the file has been read, below.
+      const hugeCheck = (bytes: number) => checkHugeUpload({
+        key: `add|${targetRel}|${local.sha256 || bytes}`,
         name: targetRel.split("/").pop() || targetRel,
-        bytes: local.sizeBytes,
+        bytes,
         action: "add",
+        source,
       });
-      if (!ok) {
-        setError(new Error(HUGE_UPLOAD_DECLINED));
-        return { ok: false, error: HUGE_UPLOAD_DECLINED };
+      if (local.sizeBytes > 0) {
+        const gate = await hugeCheck(local.sizeBytes);
+        if (!gate.ok) {
+          setError(new Error(gate.error));
+          return { ok: false, error: gate.error };
+        }
       }
       setLoading(true);
       setError(null);
@@ -269,6 +277,10 @@ export function useAddLocalFile() {
           const b = await readBytes();
           sha = await sha256Hex(b);
           size = b.length;
+        }
+        if (!(local.sizeBytes > 0)) {
+          const gate = await hugeCheck(size);
+          if (!gate.ok) throw new Error(gate.error);
         }
 
         // 3. Upload bytes (skip if content already exists in storage by sha).

@@ -41,5 +41,17 @@ export function useVaults(): QueryResult<Vault[]> {
     vaultChangeListeners.add(refetch);
     return () => { vaultChangeListeners.delete(refetch); };
   }, [refetch]);
+  // Other computers learn about a vault change (e.g. an admin archiving last
+  // year's car, which stops their auto-sync) when Helios regains focus or
+  // every 10 minutes: Helios often runs in the tray for days. One tiny query.
+  useEffect(() => {
+    const onFocus = () => refetch();
+    window.addEventListener("focus", onFocus);
+    const id = window.setInterval(refetch, 10 * 60_000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(id);
+    };
+  }, [refetch]);
   return { data, loading, error, refetch };
 }

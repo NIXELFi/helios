@@ -212,7 +212,7 @@ export function SettingsScreen() {
       </section>
 
       {isVaultAdmin && activeVault && <AssemblyAlertSettings key={activeVault.id} vault={activeVault} />}
-      {isVaultAdmin && activeVault && <ArchiveVaultSettings vault={activeVault} />}
+      {isVaultAdmin && activeVault && <ArchiveVaultSettings key={activeVault.id} vault={activeVault} />}
 
       <section className="max-w-xl space-y-3">
         <h2 className="text-sm uppercase tracking-wider text-helios-dim">

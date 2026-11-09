@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * The Vault's right-hand details/history pane: drag its left edge to resize,
@@ -13,10 +13,21 @@ export const DETAIL_PANE_DEFAULT_WIDTH = 320;
 export const DETAIL_PANE_MIN_WIDTH = 240;
 export const DETAIL_PANE_MAX_WIDTH = 760;
 
-/** Clamp to the pane's limits, and never more than 60 % of the window so the
- *  file list can't be squeezed off-screen. */
+/** Room the rail, folder tree and a usable file list need beside the pane. */
+const RESERVED_FOR_REST = 560;
+
+/** Largest pane width this window allows: never more than 60 % of it, and
+ *  always leaving room for the rail, tree and file list. */
+export function maxPaneWidth(viewportWidth: number): number {
+  return Math.max(
+    DETAIL_PANE_MIN_WIDTH,
+    Math.min(DETAIL_PANE_MAX_WIDTH, Math.floor(viewportWidth * 0.6), viewportWidth - RESERVED_FOR_REST),
+  );
+}
+
+/** Clamp to the pane's limits for this window size. */
 export function clampPaneWidth(width: number, viewportWidth: number): number {
-  const max = Math.max(DETAIL_PANE_MIN_WIDTH, Math.min(DETAIL_PANE_MAX_WIDTH, Math.floor(viewportWidth * 0.6)));
+  const max = maxPaneWidth(viewportWidth);
   if (!Number.isFinite(width)) return DETAIL_PANE_DEFAULT_WIDTH;
   return Math.round(Math.min(max, Math.max(DETAIL_PANE_MIN_WIDTH, width)));
 }
@@ -77,12 +88,22 @@ export function DetailPane({
 }) {
   const drag = useRef<{ startX: number; startWidth: number; last: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  // The saved width is what the user chose; the pane shows as much of it as
+  // the window allows right now, so shrinking or snapping the window can't
+  // push the file list to nothing (and widening it again restores the choice).
+  const [viewport, setViewport] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const shownWidth = clampPaneWidth(width, viewport);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { startX: e.clientX, startWidth: width, last: width };
+    drag.current = { startX: e.clientX, startWidth: shownWidth, last: shownWidth };
     setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -100,9 +121,10 @@ export function DetailPane({
     onResize(d.last, true);
   };
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // Alt+arrows = folder back/forward
     const step = e.shiftKey ? 64 : 16;
-    if (e.key === "ArrowLeft") { e.preventDefault(); onResize(width + step, true); }
-    else if (e.key === "ArrowRight") { e.preventDefault(); onResize(width - step, true); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); onResize(shownWidth + step, true); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); onResize(shownWidth - step, true); }
   };
 
   if (hidden) return null;
@@ -110,16 +132,16 @@ export function DetailPane({
   return (
     <div
       className={`relative h-full shrink-0 ${hideWhenNarrow ? "hidden lg:flex" : "flex"}`}
-      style={{ width }}
+      style={{ width: shownWidth }}
       data-testid="vault-detail-pane"
     >
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize details pane"
-        aria-valuenow={width}
+        aria-valuenow={shownWidth}
         aria-valuemin={DETAIL_PANE_MIN_WIDTH}
-        aria-valuemax={DETAIL_PANE_MAX_WIDTH}
+        aria-valuemax={maxPaneWidth(viewport)}
         tabIndex={0}
         title="Drag to resize · double-click to reset"
         onPointerDown={onPointerDown}

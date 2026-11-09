@@ -124,4 +124,38 @@ describe("shared native transfers", () => {
     await downloadVersionOnce(client, SHA, DEST);
     expect(invoke).toHaveBeenCalledTimes(2);
   });
+
+  it("a joiner isn't told ok until the claimer has actually renamed the file", async () => {
+    const finish = pendingTransfer();
+    let releaseRename!: () => void;
+    rename.mockImplementationOnce(() => new Promise<void>((r) => { releaseRename = r; }));
+    const p1 = downloadVersionOnce(client, SHA, DEST);
+    const p2 = downloadVersionOnce(client, SHA, DEST);
+    await flush();
+    finish();
+    let p2Done = false;
+    void p2.then(() => { p2Done = true; });
+    await flush();
+    await flush();
+    expect(p2Done).toBe(false); // the rename hasn't happened yet
+    releaseRename();
+    expect(await p1).toEqual({ ok: true });
+    expect(await p2).toEqual({ ok: true });
+  });
+
+  it("when the claimer's rename fails, the joiner fetches for itself instead of reporting ok", async () => {
+    const finish = pendingTransfer();
+    rename.mockRejectedValueOnce(new Error("os error 32: file in use"));
+    const p1 = downloadVersionOnce(client, SHA, DEST);
+    const p2 = downloadVersionOnce(client, SHA, DEST);
+    await flush();
+    invoke.mockResolvedValueOnce({ tempPath: `${TEMP}2`, bytes: 1, wasGzip: true });
+    finish();
+    const r1 = await p1;
+    const r2 = await p2;
+    expect(r1.ok).toBe(false);
+    expect(r2).toEqual({ ok: true });
+    expect(invoke).toHaveBeenCalledTimes(2); // the joiner started its own transfer
+    expect(rename).toHaveBeenLastCalledWith(`${TEMP}2`, DEST);
+  });
 });

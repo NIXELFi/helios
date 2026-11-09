@@ -412,6 +412,50 @@ describe("useAutoSync", () => {
     expect(result.current.lastDownloaded).toBe(2);
   });
 
+  it("a pass that supersedes another doesn't re-fetch files the first one already landed", async () => {
+    // The local scan is paused while a pass runs, so the superseding pass
+    // partitions against the scan from BEFORE the first pass downloaded.
+    // Without remembering what landed, it fetched those files again: on
+    // 2026-11-03 that re-fetched a 1 GB file every time anyone checked out.
+    const files: VaultFile[] = [makeFile("fa", "big.bin"), makeFile("fb", "other.bin")];
+    const versions = new Map<string, Version[]>([
+      ["fa", [makeVersion("fa", "sha-big")]],
+      ["fb", [makeVersion("fb", "sha-other")]],
+    ]);
+    const base = {
+      enabled: true,
+      files,
+      versionsByFileId: versions,
+      localFiles: EMPTY_LOCAL,
+      currentUserId: "u1",
+      vaultRoot: "/tmp/vault",
+      vaultId: null,
+      folders: EMPTY_FOLDERS,
+      onComplete: () => {},
+    };
+    const { rerender } = renderHook(
+      ({ locks }) => useAutoSync({ ...base, locks }),
+      { wrapper, initialProps: { locks: EMPTY_LOCKS } },
+    );
+    await waitFor(() => { expect(downloadResolvers.has("sha-big")).toBe(true); });
+    await waitFor(() => { expect(downloadResolvers.has("sha-other")).toBe(true); });
+    await act(async () => { resolveDownload("sha-big", true); });
+
+    // A teammate checks something out → new locks array → supersede.
+    const otherLock: Lock[] = [
+      { id: "lx", file_id: "zz", user_id: "u2", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    rerender({ locks: otherLock });
+    await act(async () => { resolveDownload("sha-other", false); });
+
+    // The new pass picks other.bin up again, but must not fetch big.bin.
+    await waitFor(() => {
+      expect(downloadCalls.filter((c) => c.sha === "sha-other").length).toBe(2);
+    }, { timeout: 4000 });
+    expect(downloadCalls.filter((c) => c.sha === "sha-big").length).toBe(1);
+    await act(async () => { resolveDownload("sha-other", true); });
+  });
+
   it("drops state writes from a superseded generation after deps change mid-flight", async () => {
     // Start a run, let it begin a download, then change deps so the trigger
     // effect supersedes the in-flight generation. The stale run's completion

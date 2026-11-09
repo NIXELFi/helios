@@ -57,6 +57,16 @@ export function folderHistoryReducer(
 const MOUSE_BACK = 3;
 const MOUSE_FORWARD = 4;
 
+/** A dialog is up: navigating behind it would change the folder a pending
+ *  confirm (delete folder, new folder…) acts on. */
+function modalOpen(): boolean {
+  // Only dialogs actually on screen: hidden modules stay mounted, and one
+  // left open in another module must not switch back/forward off here.
+  const found = document.querySelectorAll('[aria-modal="true"], [role="dialog"], [role="alertdialog"]');
+  for (const el of found) if ((el as HTMLElement).getClientRects().length > 0) return true;
+  return false;
+}
+
 /**
  * Folder navigation with history. Thumb buttons and Alt+←/Alt+→ go back and
  * forward while `isVisible()` says the browse view is on screen: the shell keeps
@@ -89,13 +99,15 @@ export function useFolderHistory(opts: {
       if ((e.button === MOUSE_BACK || e.button === MOUSE_FORWARD) && isVisible()) e.preventDefault();
     };
     const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== MOUSE_BACK && e.button !== MOUSE_FORWARD) return;
       if (!isVisible()) return;
+      if (modalOpen()) { e.preventDefault(); return; }
       if (e.button === MOUSE_BACK) { e.preventDefault(); goBack(); }
       else if (e.button === MOUSE_FORWARD) { e.preventDefault(); goForward(); }
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (!isVisible()) return;
+      if (!isVisible() || modalOpen()) return;
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       const t = e.target as HTMLElement | null;
       // Alt+arrows inside a text field belong to the field.

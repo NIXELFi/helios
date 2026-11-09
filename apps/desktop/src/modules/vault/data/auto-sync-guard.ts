@@ -7,8 +7,9 @@
  * loop is fixed; this catches the next one we haven't thought of, and it
  * warns rather than blocks:
  *
- * - The same file content (sha + path) fetched REPEAT_LIMIT times today:
- *   auto-sync stops fetching it and says so. Get Latest still works.
+ * - The same file content (sha + path) successfully downloaded REPEAT_LIMIT
+ *   times today: auto-sync stops fetching it and says so. Get Latest still
+ *   works. Failures don't count here; the per-file backoff handles them.
  * - More than the day's budget downloaded for a vault: auto-sync pauses with a
  *   "Continue syncing" button. The budget is 1.5x the vault's full size plus
  *   5 GB, so a brand-new full sync never trips it.
@@ -66,10 +67,18 @@ export function isOverBudget(g: DayGuard, vaultBytes: number): boolean {
   return !g.continued && g.bytes >= dailyBudgetBytes(vaultBytes);
 }
 
-/** Count one finished fetch (success or failure; not an abandoned one). */
+/** Count one successful download. */
 export function recordFetch(g: DayGuard, key: string, bytes: number): void {
   g.fetches[key] = (g.fetches[key] ?? 0) + 1;
   g.bytes += Math.max(0, bytes);
+}
+
+/** Count one successful download straight into storage (read, change,
+ *  write), so passes that overlap never overwrite each other's counts. */
+export function recordSuccessfulFetch(vaultId: string, key: string, bytes: number): void {
+  const g = loadGuard(vaultId);
+  recordFetch(g, key, bytes);
+  saveGuard(vaultId, g);
 }
 
 /** "Continue syncing": lift today's budget pause for this vault. */
