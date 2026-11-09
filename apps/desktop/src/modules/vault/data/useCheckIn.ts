@@ -5,8 +5,30 @@ import { gzipBytes } from "./compression";
 import { friendlyPgError, friendlyUploadError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
 import { setLockOverlay } from "./lock-overlay";
+import { checkHugeUpload, type UploadSource } from "./huge-file-guard";
 
 const BUCKET = "vault-objects";
+
+/** Time limits so a dropped connection ends a check-in with an error instead
+ *  of a spinner that never stops (a 2026-10-29 report: "it just loaded for
+ *  like 20 mins"). On a timeout the user keeps the checkout and can retry. */
+const PROBE_TIMEOUT_MS = 30_000;
+const CHECK_IN_RPC_TIMEOUT_MS = 60_000;
+/** Two minutes plus one second per 128 KB (an upload slower than about
+ *  1 Mbit/s is treated as stalled). */
+export function uploadTimeoutMs(uploadBytes: number): number {
+  return 120_000 + Math.ceil(uploadBytes / (128 * 1024)) * 1000;
+}
+
+class CheckInTimeout extends Error {}
+
+function withTimeout<T>(work: PromiseLike<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new CheckInTimeout(message)), ms);
+  });
+  return Promise.race([Promise.resolve(work), timeout]).finally(() => clearTimeout(timer));
+}
 
 /** Storage paths in this bucket are content-addressed (path === sha256 of
  *  bytes), so if the object already exists the bytes are guaranteed identical.
@@ -32,7 +54,11 @@ async function objectExists(
   sha: string,
 ): Promise<ObjectProbe> {
   try {
-    const { data, error } = await client.rpc("pdm_object_exists", { p_sha: sha });
+    const { data, error } = await withTimeout(
+      client.rpc("pdm_object_exists", { p_sha: sha }),
+      PROBE_TIMEOUT_MS,
+      "object probe timed out",
+    );
     if (error) return "unknown";
     return data === true ? "present" : "absent";
   } catch {
@@ -55,6 +81,33 @@ function isDuplicateUploadError(err: { message?: string; statusCode?: string | n
     msg.includes("already exists") ||
     msg.includes("resource already exists")
   );
+}
+
+/** The newest version of `file_id` with these bytes, created at or after
+ *  `sinceMs` (with a little clock slack), or null. */
+async function findVersionSince(
+  client: ReturnType<typeof useSupabaseClient>,
+  file_id: FileId,
+  sha: string,
+  sinceMs: number,
+): Promise<Version | null> {
+  try {
+    const { data, error } = await withTimeout(
+      (client.from("versions") as any)
+        .select("*")
+        .eq("file_id", file_id)
+        .eq("sha256", sha)
+        .gte("created_at", new Date(sinceMs - 60_000).toISOString())
+        .order("version_num", { ascending: false })
+        .limit(1),
+      PROBE_TIMEOUT_MS,
+      "version lookup timed out",
+    ) as { data: Version[] | null; error: unknown };
+    if (error || !Array.isArray(data) || data.length === 0) return null;
+    return data[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -91,6 +144,10 @@ export function useCheckIn() {
         // entry). The server refuses the check-in if a different version is
         // latest now, instead of silently replacing it. Omit to skip the check.
         baseSha?: string | null;
+        /** Shown in the huge-file warning. */
+        fileName?: string;
+        /** Who asked; decides how the huge-file warning is shown. */
+        source?: UploadSource;
       } = {},
     ): Promise<Version | null> => {
       setLoading(true);
@@ -99,6 +156,17 @@ export function useCheckIn() {
       try {
         const sha = await sha256Hex(bytes);
         const path = `${sha.slice(0, 2)}/${sha}`;
+
+        // Huge files ask first (a warning, not a limit): see huge-file-guard.ts.
+        // Declining keeps the checkout so nothing is lost.
+        const gate = await checkHugeUpload({
+          key: `checkin|${file_id}|${sha}`,
+          name: opts.fileName ?? "This file",
+          bytes: bytes.byteLength,
+          action: "check in",
+          source: opts.source ?? "user",
+        });
+        if (!gate.ok) throw new Error(gate.error);
 
         // "unknown" falls through to the upload attempt — the duplicate handling
         // below makes that safe even when the content was in fact already there.
@@ -109,12 +177,17 @@ export function useCheckIn() {
           // ORIGINAL uncompressed content, so download can decompress and
           // verify integrity.
           const compressed = await gzipBytes(new Uint8Array(bytes));
-          const { error: upErr } = await client.storage
-            .from(BUCKET)
-            .upload(path, compressed as BufferSource, {
+          // storage-js upload() takes no AbortSignal, so a stalled request is
+          // abandoned rather than cancelled. Content addressing makes that
+          // safe: if it completes later, the next attempt finds it present.
+          const { error: upErr } = await withTimeout(
+            client.storage.from(BUCKET).upload(path, compressed as BufferSource, {
               contentType: "application/octet-stream",
               upsert: false,
-            });
+            }),
+            uploadTimeoutMs(compressed.byteLength),
+            "Upload timed out. Your connection may have dropped. You still have the file checked out; try checking it in again.",
+          );
           if (upErr) {
             // Race: another client uploaded the same content between our
             // check and our upload. Re-probe once before giving up. We log
@@ -142,14 +215,33 @@ export function useCheckIn() {
           }
         }
 
-        const { data: ver, error: rpcErr } = await client.rpc("pdm_check_in", {
-          p_file_id: file_id,
-          p_sha256: sha,
-          p_size: bytes.byteLength,
-          p_comment: comment,
-          ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
-        });
-        if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
+        const rpcStartedAt = Date.now();
+        let ver: unknown;
+        try {
+          const res = await withTimeout(
+            client.rpc("pdm_check_in", {
+              p_file_id: file_id,
+              p_sha256: sha,
+              p_size: bytes.byteLength,
+              p_comment: comment,
+              ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
+            }),
+            CHECK_IN_RPC_TIMEOUT_MS,
+            "The vault server didn't answer in time. The check-in may still have gone through; wait a moment and check the file's history before trying again.",
+          );
+          if (res.error) throw new Error(friendlyPgError(res.error, "version").message);
+          ver = res.data;
+        } catch (e) {
+          // The server may have committed even though we stopped waiting: if a
+          // version with exactly these bytes appeared since we asked, the
+          // check-in went through, so finish it as one (lock overlay, and the
+          // caller's read-only bit + ledger) instead of leaving a writable
+          // file with no lock and a confusing retry.
+          if (!(e instanceof CheckInTimeout)) throw e;
+          const landed = await findVersionSince(client, file_id, sha, rpcStartedAt);
+          if (!landed) throw e;
+          ver = landed;
+        }
         // pdm_check_in releases the caller's lock server-side. Clear the pill
         // this frame (optimistic remove) so check-in feels as instant as
         // checkout, then broadcast so every mounted useLocks() refetches rather

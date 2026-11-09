@@ -45,11 +45,11 @@ interface Props {
 
 export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, heldByMe, vaultId, isWatched, onToggleWatch }: Props) {
   if (!fileId) {
-    // Placeholder panel is hidden on narrow windows — it carries no content,
-    // and the space matters more (SQUEEZE). Selecting a file still shows the
-    // real panel at every width.
+    // The placeholder is hidden on narrow windows (it carries no content and
+    // the space matters more — SQUEEZE). BrowseScreen's DetailPane does that,
+    // since it owns the pane's width.
     return (
-      <aside className="hidden h-full w-72 shrink-0 items-center justify-center border-l border-helios-line bg-helios-base p-4 text-sm text-helios-dim lg:flex xl:w-80">
+      <aside className="flex h-full w-full items-center justify-center border-l border-helios-line bg-helios-base p-4 text-sm text-helios-dim">
         Select a file to see its history.
       </aside>
     );
@@ -62,7 +62,7 @@ export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, he
 
   if (fileMissing) {
     return (
-      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+      <aside className="flex h-full w-full flex-col border-l border-helios-line bg-helios-base">
         <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
           History
         </header>
@@ -167,7 +167,7 @@ function FileDetailLoader({
   // never fires). Mirrors the version-history error path further down.
   if (showBom && bomResult.error) {
     return (
-      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+      <aside className="flex h-full w-full flex-col border-l border-helios-line bg-helios-base">
         <header className="flex items-center justify-between border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
           <span>Bill of Materials</span>
           <button
@@ -195,7 +195,7 @@ function FileDetailLoader({
   // When BOM panel is open and graph is loaded, show BomPanel full-pane.
   if (showBom && bomResult.data && fileName) {
     return (
-      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+      <aside className="flex h-full w-full flex-col border-l border-helios-line bg-helios-base">
         <BomPanel
           fileId={fileId}
           fileName={fileName}
@@ -207,7 +207,7 @@ function FileDetailLoader({
   }
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+    <aside className="flex h-full w-full flex-col border-l border-helios-line bg-helios-base">
       <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
         {/* Show the file's name so a stale empty-history selection is
             distinguishable from a real file that simply has no versions. */}

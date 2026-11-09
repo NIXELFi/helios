@@ -9,6 +9,25 @@ import { handleWindowDragMouseDown, tauriWindow } from "./windowDrag";
  *  this platform renders one. */
 const TITLEBAR_HEIGHT_PX = 38;
 
+/** Run a window control and log a failure: these used to be fire-and-forget,
+ *  so a report that the buttons "stop working" arrived with nothing in its
+ *  breadcrumbs. The console line lands there now. */
+function windowControl(
+  label: string,
+  action: (win: NonNullable<ReturnType<typeof tauriWindow>>) => Promise<void>,
+): void {
+  const win = tauriWindow();
+  if (!win) return;
+  const started = performance.now();
+  Promise.resolve()
+    .then(() => action(win))
+    .then(() => {
+      const ms = performance.now() - started;
+      if (ms > 1000) console.warn(`[titlebar] ${label} took ${Math.round(ms)} ms`);
+    })
+    .catch((e) => console.error(`[titlebar] ${label} failed:`, e));
+}
+
 /**
  * Custom in-app title bar for platforms where the native frame is disabled
  * (Windows: `decorations: false` in src-tauri/tauri.windows.conf.json).
@@ -90,7 +109,7 @@ export function TitleBar({ context }: { context: string | null }) {
           type="button"
           title="Minimize"
           aria-label="Minimize"
-          onClick={() => void tauriWindow()?.minimize()}
+          onClick={() => windowControl("minimize", (w) => w.minimize())}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center text-helios-dim transition-colors hover:bg-white/[0.07] hover:text-helios-text"
         >
           <svg viewBox="0 0 11 11" className="size-[11px]">
@@ -101,7 +120,7 @@ export function TitleBar({ context }: { context: string | null }) {
           type="button"
           title={maximized ? "Restore" : "Maximize"}
           aria-label={maximized ? "Restore" : "Maximize"}
-          onClick={() => void tauriWindow()?.toggleMaximize()}
+          onClick={() => windowControl("maximize", (w) => w.toggleMaximize())}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center text-helios-dim transition-colors hover:bg-white/[0.07] hover:text-helios-text"
         >
           {maximized ? (
@@ -140,7 +159,7 @@ export function TitleBar({ context }: { context: string | null }) {
           type="button"
           title="Close"
           aria-label="Close"
-          onClick={() => void tauriWindow()?.close()}
+          onClick={() => windowControl("close", (w) => w.close())}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center text-helios-dim transition-colors hover:bg-[#EF5350] hover:text-white"
         >
           <svg viewBox="0 0 11 11" className="size-[11px]">

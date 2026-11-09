@@ -17,6 +17,7 @@ import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
+import { HugeFileConfirmHost } from "./modules/vault/components/HugeFileConfirmHost";
 import { useOrgAccess } from "./shell/useOrgAccess";
 import { usePurchasingAlerts } from "./modules/purchasing/lib/usePurchasingAlerts";
 import { NoAccessScreen } from "./shell/NoAccessScreen";
@@ -697,6 +698,10 @@ function HeliosShell() {
       {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
           vault's tested upload/download code. Mounted only when signed in. */}
       {vaultEnabled && !noOrgAccess && <BridgeOpHandler />}
+      {/* "This file is huge" warning before any vault add / check-in (from the
+          Vault, auto-add or the SOLIDWORKS add-in). Here, not in VaultHome, so
+          it shows even when the Vault tab was never opened. */}
+      {vaultEnabled && !noOrgAccess && <HugeFileConfirmHost />}
       <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
       <ChangePasswordModal
         open={changePwOpen}

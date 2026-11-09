@@ -153,6 +153,7 @@ export function CheckOutButton({
         !localFile ||
         (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
       // "Keep my copy": take the lock only, leave the writable local file as is.
+      let downloaded = false;
       if (latestSha && stale && mode !== "keep") {
         const ok = await download.run(latestSha, dest);
         if (!ok) {
@@ -175,9 +176,13 @@ export function CheckOutButton({
         }
         // Record the freshly-downloaded latest version in the ledger (T6).
         recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+        downloaded = true;
       }
       await setReadonly(dest, false);
-      flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
+      // Make it editable even if open in SW (no add-in needed). If we just
+      // downloaded newer bytes, SW may hold the OLD version in memory: reload
+      // it from disk rather than unlocking the old copy in place.
+      flipSwReadonly(dest, false, { reload: downloaded });
     }
     recordBreadcrumb("action", `vault: check-out ${fileName ?? "file"}`);
     toast(
@@ -484,7 +489,7 @@ export function CheckInButton({
       ? (await ledgerShaFor(vaultId, rel)) ?? null
       : null;
     let why: string | null = null;
-    const result = await checkIn.run(fileId, bytes, comment, { baseSha, onError: (e) => { why = e.message; } });
+    const result = await checkIn.run(fileId, bytes, comment, { baseSha, fileName: fileName ?? undefined, onError: (e) => { why = e.message; } });
     if (result) {
       recordBreadcrumb("action", `vault: check-in ${fileName ?? "file"}`);
       // The file is now the latest version and no longer checked out → make the
@@ -1089,7 +1094,7 @@ export function CancelButton({
         setRestoreError(download.errorRef?.current?.message ?? "could not restore the latest version");
         return;
       }
-      await setReadonly(dest, true); flipSwReadonly(dest, true);
+      await setReadonly(dest, true); flipSwReadonly(dest, true, { reason: "cancel" });
       // Undo-checkout restored the latest vaulted version locally → record it
       // (T6): the local copy now matches latestSha and is ledger-tracked.
       recordLedger({ folderId, fileName, folders, vaultId }, latestSha);

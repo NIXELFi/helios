@@ -232,12 +232,16 @@ namespace HeliosVault
                 if (!ok)
                 {
                     // Fallback: reload from disk (now writable) so it reopens
-                    // read-write. Override user settings so it doesn't silently
-                    // reopen read-only again.
+                    // read-write. ReloadOrReplace(ReadOnly, ReplaceFileName,
+                    // DontSave): ReadOnly must be FALSE (this used to pass true,
+                    // which reloaded it read-only again), and a reload drops
+                    // in-memory edits, so only when there are none.
+                    bool dirty;
+                    try { dirty = doc.GetSaveFlag(); } catch { dirty = true; }
                     var path = doc.GetPathName();
-                    if (!string.IsNullOrEmpty(path))
+                    if (!dirty && !string.IsNullOrEmpty(path))
                     {
-                        try { doc.ReloadOrReplace(true, path, true); } catch { /* best effort */ }
+                        try { doc.ReloadOrReplace(false, path, true); } catch { /* best effort */ }
                     }
                 }
             }

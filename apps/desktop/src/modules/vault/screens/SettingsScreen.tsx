@@ -4,6 +4,7 @@ import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useIsVaultAdmin } from "../data/useVaultRole";
 import { AssemblyAlertSettings } from "../components/AssemblyAlertSettings";
+import { ArchiveVaultSettings } from "../components/ArchiveVaultSettings";
 import { useMyDisplayRole } from "../../../auth/useMyDisplayRole";
 import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
@@ -211,6 +212,7 @@ export function SettingsScreen() {
       </section>
 
       {isVaultAdmin && activeVault && <AssemblyAlertSettings key={activeVault.id} vault={activeVault} />}
+      {isVaultAdmin && activeVault && <ArchiveVaultSettings key={activeVault.id} vault={activeVault} />}
 
       <section className="max-w-xl space-y-3">
         <h2 className="text-sm uppercase tracking-wider text-helios-dim">
@@ -255,6 +257,11 @@ export function SettingsScreen() {
           </div>
           {!activeVaultId && (
             <p className="mt-2 text-xs text-helios-dim">Select a vault to change its download mode.</p>
+          )}
+          {activeVault?.archived && (
+            <p className="mt-2 text-xs text-asu-gold">
+              {activeVault.name} is archived, so it downloads on click whichever you pick here.
+            </p>
           )}
         </div>
       </section>

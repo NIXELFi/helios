@@ -224,13 +224,36 @@ describe("FolderBatchDialog: check out", () => {
     expect(releaseLockRun).toHaveBeenCalledWith("front");
   });
 
-  it("only flips the SOLIDWORKS session for files the scan saw open", async () => {
+  it("asks SOLIDWORKS about every checked-out file, not just ones with a ~$ lock file", async () => {
     vi.mocked(flipSwReadonly).mockClear();
     renderDialog("checkout", baseCtx({ openInSw: new Set(["Brakes/Rotors/hub.sldprt"]) }));
     await act(async () => {}); // ledger load
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out 4 files/i })); });
     await waitFor(() => expect(screen.getByText(/checked out 4 of 4 files/i)).toBeInTheDocument());
-    expect(vi.mocked(flipSwReadonly).mock.calls).toEqual([["/vault/Brakes/Rotors/hub.sldprt", false]]);
+    // A document opened read-only may have no ~$ lock file, so the scan's
+    // open set can't be trusted to filter. The flip queue batches these into
+    // one helper run, which reports "not-open" for the rest.
+    const flipped = vi.mocked(flipSwReadonly).mock.calls;
+    expect(flipped).toHaveLength(4);
+    expect(flipped.every(([, ro]) => ro === false)).toBe(true);
+    expect(flipped.map(([p]) => p)).toContain("/vault/Brakes/Rotors/hub.sldprt");
+  });
+
+  it("asks SOLIDWORKS to RELOAD only the files whose newer version was just downloaded", async () => {
+    vi.mocked(flipSwReadonly).mockClear();
+    renderDialog("checkout", baseCtx({
+      localFiles: [
+        local("Brakes/Rotors/hub.sldprt", "sha-hub", true), // already the latest
+        local("Brakes/Rotors/front.sldprt", "sha-old", true), // stale: v4 over open v3
+      ],
+    }));
+    await act(async () => {}); // ledger load
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out 4 files/i })); });
+    await waitFor(() => expect(screen.getByText(/checked out 4 of 4 files/i)).toBeInTheDocument());
+    const byPath = new Map(vi.mocked(flipSwReadonly).mock.calls.map(([p, ro, opts]) => [p, { ro, reload: opts?.reload }]));
+    expect(byPath.get("/vault/Brakes/Rotors/hub.sldprt")).toEqual({ ro: false, reload: false });
+    expect(byPath.get("/vault/Brakes/Rotors/front.sldprt")).toEqual({ ro: false, reload: true });
+    expect(downloadRun).not.toHaveBeenCalledWith("sha-hub", expect.anything(), expect.anything());
   });
 
   it("reports the check-in failure reason for its own row", async () => {

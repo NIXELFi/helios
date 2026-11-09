@@ -19,6 +19,7 @@ import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
+import { useFolderHistory } from "../data/useFolderHistory";
 import { ManualDownloadAll } from "../components/ManualDownloadAll";
 import { useBulkDownload } from "../data/useBulkDownload";
 import { BulkDownloadModal } from "../components/BulkDownloadModal";
@@ -62,6 +63,7 @@ import { toast } from "../data/toast";
 import { fetchWhereUsed } from "../data/useReferences";
 import { whereUsedWarning } from "../data/whereUsedWarning";
 import { FileDetailPanel } from "./FileDetailPanel";
+import { DetailPane, DetailPaneToggle, useDetailPaneLayout } from "../components/DetailPane";
 import { useWatchedFilesContext } from "../data/WatchedFilesContext";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
@@ -109,7 +111,21 @@ export function BrowseScreen() {
   const { isWatched, toggle: toggleWatch } = useWatchedFilesContext();
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
-  const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
+  // Folder navigation keeps a back/forward history (mouse thumb buttons,
+  // Alt+←/→ and the arrows by the breadcrumbs), like File Explorer.
+  const liveFolderIds = useMemo(
+    () => (folders ? new Set<string>(folders.map((f) => f.id)) : undefined),
+    [folders],
+  );
+  // Root element of this screen. The drop-import listeners attach HERE, not on
+  // window, so they go inert when the Shell hides the Vault module; the folder
+  // history uses it the same way (hidden modules stay mounted, so "showing"
+  // means "laid out").
+  const browseRootRef = useRef<HTMLDivElement | null>(null);
+  const isBrowseVisible = useCallback(() => browseRootRef.current?.offsetParent != null, []);
+  const folderNav = useFolderHistory({ isVisible: isBrowseVisible, liveFolderIds });
+  const { current: selectedFolder, navigate: setSelectedFolder, reset: resetFolderNav } = folderNav;
+  const detailPane = useDetailPaneLayout();
 
   const { data: locks, error: locksError, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
@@ -118,14 +134,14 @@ export function BrowseScreen() {
   // Reset folder/file selection on vault switch so we don't show a SDM27 folder
   // tree but a SDM26 file open in the side panel.
   useEffect(() => {
-    setSelectedFolder(null);
+    resetFolderNav();
     setSelectedFile(null);
     setSelected(new Set());
     // Version watermarks are per-vault; carrying SDM25's newest timestamp into
     // SDM26 would make the delta query skip real check-ins. (The ref is
     // declared further down — effects run after the whole render body.)
     lastVersionSeenRef.current = "";
-  }, [vaultId]);
+  }, [vaultId, resetFolderNav]);
 
   // Clear the checkbox multi-selection whenever the effective folder context
   // changes — selecting a different folder shows a different file list, so a
@@ -148,7 +164,11 @@ export function BrowseScreen() {
   // the files under the vault name correctly.
   const { root: heliosRoot, path: vaultFolderPath, setRoot: setHeliosRoot } =
     useVaultFolder({ vaultName: vault?.name ?? null });
-  const { mode: downloadMode } = useDownloadMode(vaultId);
+  const { mode: chosenDownloadMode } = useDownloadMode(vaultId);
+  // An archived vault (a previous year's car) behaves as download-on-click
+  // whatever this computer chose: nobody auto-syncs old cars.
+  const vaultArchived = vault?.archived === true;
+  const downloadMode = vaultArchived ? "manual" : chosenDownloadMode;
   const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
   // While a sync pass is writing files we suppress automatic rescans so the
@@ -693,9 +713,6 @@ export function BrowseScreen() {
   // target for the tree, runs the sequential import, and reports per-item
   // results for the strip below. On batch completion it refreshes everything
   // (folders may have been created; files added as locked drafts) + rescans.
-  // Root element of this screen — the drop-import listeners attach HERE, not
-  // on window, so they go inert when the Shell hides the Vault module.
-  const browseRootRef = useRef<HTMLDivElement | null>(null);
   // Unmount guard for the fire-and-forget single-file delete path.  The async
   // buildBody() fetches where-used references before opening the confirm dialog;
   // if the component unmounts while that fetch is in-flight the .then() callback
@@ -844,6 +861,14 @@ export function BrowseScreen() {
       )}
       {canEdit && <SolverOutputNotice blocked={blockedSolverOutput} />}
       <LocalDeleteBanner />
+      {vaultArchived && (
+        <div className="flex items-center gap-2 border-b border-helios-line bg-asu-gold/10 px-3 py-1.5 text-xs text-helios-text">
+          <span className="font-semibold text-asu-gold">{vault?.name} is archived.</span>
+          <span className="text-helios-dim">
+            It's a previous year's car, so Helios doesn't auto-sync it. Download the files or folders you need.
+          </span>
+        </div>
+      )}
       <VaultWarningBanner />
       <div className="flex min-h-0 flex-1">
       <div className="flex w-56 shrink-0 flex-col border-r border-helios-line bg-helios-base xl:w-64">
@@ -925,6 +950,28 @@ export function BrowseScreen() {
         <>
           {/* Orientation bar: clickable folder path + vault-wide search. */}
           <div className="flex items-center gap-3 border-b border-helios-line px-3 py-1.5">
+            <div className="-mr-1 flex shrink-0 items-center">
+              <button
+                type="button"
+                onClick={folderNav.goBack}
+                disabled={!folderNav.canGoBack}
+                title="Back (mouse back button · Alt+←)"
+                aria-label="Back"
+                className="rounded px-1.5 py-0.5 text-sm text-helios-dim hover:bg-helios-line hover:text-helios-text disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={folderNav.goForward}
+                disabled={!folderNav.canGoForward}
+                title="Forward (mouse forward button · Alt+→)"
+                aria-label="Forward"
+                className="rounded px-1.5 py-0.5 text-sm text-helios-dim hover:bg-helios-line hover:text-helios-text disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                →
+              </button>
+            </div>
             <Breadcrumbs
               vaultName={vault?.name ?? "Vault"}
               folders={folders ?? []}
@@ -937,6 +984,7 @@ export function BrowseScreen() {
               propertiesMap={vaultPropertiesMap}
               onPick={jumpToFile}
             />
+            <DetailPaneToggle hidden={detailPane.hidden} onToggle={detailPane.toggleHidden} />
           </div>
           <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 border-b border-helios-line px-3 py-1.5">
               {vaultFolderPath && autoSyncEnabled && (
@@ -1165,6 +1213,12 @@ export function BrowseScreen() {
       {/* Pass `undefined` (not `[]`) while allFiles is still loading so the
           panel shows its normal state, not a false "file deleted" message. It
           only treats a selection as missing once the list has actually loaded. */}
+      <DetailPane
+        width={detailPane.width}
+        onResize={detailPane.setWidth}
+        hidden={detailPane.hidden}
+        hideWhenNarrow={!selectedFile}
+      >
       <FileDetailPanel
         fileId={selectedFile}
         files={allFiles ?? undefined}
@@ -1180,6 +1234,7 @@ export function BrowseScreen() {
         isWatched={selectedFile ? isWatched(selectedFile) : false}
         onToggleWatch={toggleWatch}
       />
+      </DetailPane>
       </div>
       {/* Full-pane drag overlay: names the live drop target so a drop is never
           a guess. pointer-events-none keeps the underlying hit-testing (tree
@@ -1775,12 +1830,13 @@ function VaultSyncSection(props: {
   });
   const onBusyChange = props.onBusyChange;
   useEffect(() => { onBusyChange(status.busy); }, [status.busy, onBusyChange]);
-  return <SyncStatusPill status={status} onRescan={props.onRescan} />;
+  return <SyncStatusPill status={status} onRescan={props.onRescan} onResume={status.resume} />;
 }
 
-function SyncStatusPill({ status, onRescan }: {
+function SyncStatusPill({ status, onRescan, onResume }: {
   status: import("../data/useAutoSync").AutoSyncStatus;
   onRescan: () => void;
+  onResume: () => void;
 }) {
   // Tick once a second while syncing AND the popover is open, so elapsed/ETA
   // updates inside the popover. Toolbar pill itself only re-renders on real
@@ -1805,7 +1861,7 @@ function SyncStatusPill({ status, onRescan }: {
   }, [open]);
 
   const { busy, lastDownloaded, lastFailed, lastRunAt, totalTasks, completedTasks,
-    totalBytes, completedBytes, activeFiles, startedAt } = status;
+    totalBytes, completedBytes, activeFiles, startedAt, pausedOverBudget, repeatBlocked } = status;
 
   let label: string;
   let tone: string;
@@ -1819,6 +1875,10 @@ function SyncStatusPill({ status, onRescan }: {
     label = inFlight ? `${base} · ${inFlight}` : base;
     tone = "text-asu-gold";
     dot = "bg-asu-gold animate-pulse";
+  } else if (pausedOverBudget) {
+    label = "Sync paused";
+    tone = "text-[#EF5350]";
+    dot = "bg-[#EF5350]";
   } else if (lastFailed > 0) {
     label = `${lastFailed} failed`;
     tone = "text-[#EF5350]";
@@ -1895,6 +1955,27 @@ function SyncStatusPill({ status, onRescan }: {
                   ? `Last sync: ${new Date(lastRunAt).toLocaleTimeString()}`
                   : "No sync yet this session."}
               </div>
+              {pausedOverBudget && (
+                <div className="mt-2 space-y-2 rounded border border-[#EF5350]/40 bg-[#EF5350]/10 p-2 text-helios-text">
+                  <p>
+                    Auto-sync has downloaded far more than usual today on this computer (more than
+                    the whole vault one and a half times), so it paused in case something is wrong.
+                  </p>
+                  <button
+                    onClick={() => { setOpen(false); onResume(); }}
+                    className="w-full rounded border border-helios-line bg-helios-base px-2 py-1 hover:bg-helios-line"
+                  >
+                    Continue syncing
+                  </button>
+                </div>
+              )}
+              {repeatBlocked.length > 0 && (
+                <div className="mt-2 rounded border border-helios-line p-2 text-helios-dim">
+                  Not downloading again today (already downloaded 3 times on this computer):{" "}
+                  <span className="text-helios-text">{repeatBlocked.slice(0, 5).join(", ")}</span>
+                  {repeatBlocked.length > 5 && ` and ${repeatBlocked.length - 5} more`}. Use Get Latest if you need one.
+                </div>
+              )}
               <button
                 onClick={() => { setOpen(false); onRescan(); }}
                 className="mt-2 w-full rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line"

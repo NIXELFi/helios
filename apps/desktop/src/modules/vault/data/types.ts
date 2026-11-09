@@ -14,6 +14,9 @@ export interface Vault {
    *  surfaced in the Insights view. DB-stored on pdm.vaults, admin-changeable.
    *  Null when no spotlight has been chosen. */
   spotlight_file_id?: FileId | null;
+  /** A previous year's car: Helios doesn't auto-sync it (download on demand).
+   *  Admin-changeable; missing on servers without the 20261109 migration. */
+  archived?: boolean;
 }
 
 export interface Folder {

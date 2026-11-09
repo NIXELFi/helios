@@ -276,6 +276,106 @@ async function nativeDownload(
 }
 
 /**
+ * Native transfers in flight, keyed by `sha|dest`, so a caller that wants the
+ * same bytes at the same place JOINS the running transfer instead of starting
+ * another one.
+ *
+ * Why: auto-sync supersedes (aborts) its in-flight pass whenever vault data
+ * changes, which on a busy team is every time anyone checks a file in or out.
+ * The native transfer can't be cancelled mid-stream, so before this the old
+ * transfer ran to the end and was thrown away while the new pass started the
+ * same file from zero. A 1 GB file on a busy afternoon was fetched again and
+ * again and never landed; on 2026-11-03 that was ~290 GB of storage egress.
+ *
+ * Ownership of the finished temp file: the first caller still interested
+ * (not aborted) claims it and renames it into place. Callers that gave up
+ * leave it for the others; the last one out deletes it if nobody claimed it.
+ */
+interface SharedTransfer {
+  promise: Promise<NativeDownloadResult | null>;
+  waiters: number;
+  claimed: boolean;
+  /** Settles once the claimer has renamed the file into place (true) or
+   *  given up (false). Joiners wait on it so they never report "ok" before,
+   *  or without, the bytes actually landing. */
+  placed: Promise<boolean>;
+  settlePlaced: (ok: boolean) => void;
+}
+const sharedTransfers = new Map<string, SharedTransfer>();
+
+/** Test hook: number of distinct native transfers currently running. */
+export function inFlightNativeTransfers(): number {
+  return sharedTransfers.size;
+}
+
+type JoinResult =
+  /** This caller owns the temp file and MUST call `settle` exactly once. */
+  | { kind: "claimed"; native: NativeDownloadResult; settle: (ok: boolean) => void }
+  /** Another caller wanting the same sha at the same path placed it. */
+  | { kind: "placed-by-other" }
+  /** The caller that took the bytes failed to place them: start over. */
+  | { kind: "other-failed" }
+  | { kind: "aborted" }
+  | { kind: "no-native" };
+
+async function joinNativeDownload(
+  client: SupabaseClient,
+  sha: string,
+  destPath: string,
+  signal: AbortSignal | undefined,
+): Promise<JoinResult> {
+  const key = `${String(sha).toLowerCase()}|${destPath}`;
+  let entry = sharedTransfers.get(key);
+  if (!entry) {
+    let settlePlaced: (ok: boolean) => void = () => {};
+    const placed = new Promise<boolean>((resolve) => { settlePlaced = resolve; });
+    const created: SharedTransfer = {
+      promise: nativeDownload(client, sha, destPath),
+      waiters: 0,
+      claimed: false,
+      placed,
+      settlePlaced,
+    };
+    sharedTransfers.set(key, created);
+    // A finished transfer is no longer joinable: later callers must start a
+    // fresh one (the temp file may already have been renamed or removed).
+    const forget = () => {
+      if (sharedTransfers.get(key) === created) sharedTransfers.delete(key);
+    };
+    created.promise.then(forget, forget);
+    entry = created;
+  }
+  entry.waiters++;
+  let native: NativeDownloadResult | null;
+  try {
+    native = await entry.promise;
+  } finally {
+    entry.waiters--;
+  }
+  if (!native) return { kind: "no-native" };
+  if (signal?.aborted) {
+    // Someone else may still want these bytes; the last one out cleans up.
+    if (entry.waiters === 0 && !entry.claimed) {
+      entry.claimed = true;
+      entry.settlePlaced(false);
+      try { await remove(native.tempPath); } catch { /* best-effort */ }
+    }
+    return { kind: "aborted" };
+  }
+  if (entry.claimed) {
+    return (await entry.placed) ? { kind: "placed-by-other" } : { kind: "other-failed" };
+  }
+  entry.claimed = true;
+  let settled = false;
+  const settle = (ok: boolean) => {
+    if (settled) return;
+    settled = true;
+    entry!.settlePlaced(ok);
+  };
+  return { kind: "claimed", native, settle };
+}
+
+/**
  * Download the bytes for `sha` and put them at `destPath`.
  *
  * The transfer itself runs in Rust (`download_object_to_temp`), which leaves
@@ -297,42 +397,60 @@ export async function downloadVersionOnce(
   const signal = opts?.signal;
   if (signal?.aborted) return { ok: false, error: "aborted" };
   let lastError = "download failed";
+  let otherFailedRestarts = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (signal?.aborted) return { ok: false, error: "aborted" };
     try {
-      let native: NativeDownloadResult | null;
+      let joined: JoinResult;
       try {
-        native = await nativeDownload(client, sha, destPath);
+        joined = await joinNativeDownload(client, sha, destPath, signal);
       } catch (e) {
         if (!isMissingTauriHost(e)) throw e;
-        native = null;
+        joined = { kind: "no-native" };
       }
-      if (!native) {
+      if (joined.kind === "no-native") {
         return await downloadVersionOnceInWebview(client, sha, destPath, opts);
       }
-      const dir = parentDir(destPath);
-      if (dir) {
-        try { await mkdir(dir, { recursive: true }); }
-        catch { /* mkdir errors when the dir exists in some Tauri versions */ }
+      if (joined.kind === "aborted") return { ok: false, error: "aborted" };
+      if (joined.kind === "placed-by-other") return { ok: true };
+      if (joined.kind === "other-failed") {
+        // Not counted as a failed attempt: the transfer we joined is gone,
+        // so the next join starts a fresh one for this caller.
+        if (signal?.aborted) return { ok: false, error: "aborted" };
+        attempt--;
+        if (++otherFailedRestarts > 3) return { ok: false, error: lastError };
+        continue;
       }
+      const { native, settle } = joined;
+      let placedOk = false;
       try {
-        // Last-chance abort check: a supersede can land while the transfer
-        // ran. Without this the rename commits a superseded pass's bytes over
-        // a path a newer pass now owns. Checked BEFORE un-protecting the
-        // destination so an aborted download leaves the old copy read-only.
-        if (signal?.aborted) {
-          try { await remove(native.tempPath); } catch { /* best-effort */ }
-          return { ok: false, error: "aborted" };
+        const dir = parentDir(destPath);
+        if (dir) {
+          try { await mkdir(dir, { recursive: true }); }
+          catch { /* mkdir errors when the dir exists in some Tauri versions */ }
         }
-        // The real-vault model leaves non-checked-out files read-only, and
-        // renaming onto a read-only destination fails on Windows.
-        await setReadonly(destPath, false);
-        await rename(native.tempPath, destPath);
-      } catch (writeErr) {
-        try { await remove(native.tempPath); } catch { /* best-effort */ }
-        throw writeErr;
+        try {
+          // Last-chance abort check: a supersede can land while the transfer
+          // ran. Without this the rename commits a superseded pass's bytes over
+          // a path a newer pass now owns. Checked BEFORE un-protecting the
+          // destination so an aborted download leaves the old copy read-only.
+          if (signal?.aborted) {
+            try { await remove(native.tempPath); } catch { /* best-effort */ }
+            return { ok: false, error: "aborted" };
+          }
+          // The real-vault model leaves non-checked-out files read-only, and
+          // renaming onto a read-only destination fails on Windows.
+          await setReadonly(destPath, false);
+          await rename(native.tempPath, destPath);
+        } catch (writeErr) {
+          try { await remove(native.tempPath); } catch { /* best-effort */ }
+          throw writeErr;
+        }
+        placedOk = true;
+        return { ok: true };
+      } finally {
+        settle(placedOk);
       }
-      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const transient = isTransientDownloadError(msg);

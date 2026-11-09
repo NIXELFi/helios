@@ -26,6 +26,7 @@ Views:
 | `?view=help` | The author help drawer |
 | `?view=folder-checkout` | Vault folder check-out pre-flight (teammate locks, local edits) |
 | `?view=folder-checkin` | Vault folder check-in pre-flight (blocked, missing local, comment) |
+| `?view=vault-browse` | Vault Browse: folder back/forward + resizable, hideable details pane |
 
 The wizard's later steps are reached by **clicking**, not by a query flag — that
 way the screenshots show states the real state machine produced. Drive it with a
