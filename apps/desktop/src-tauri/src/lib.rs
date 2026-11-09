@@ -314,6 +314,7 @@ pub fn run() {
             commands::restart::helios_relaunch,
             commands::set_readonly::set_path_readonly,
             commands::set_readonly::sw_flip_readonly,
+            commands::set_readonly::sw_flip_readonly_batch,
             commands::parse_refs::parse_sw_refs,
             commands::parse_refs::parse_sw_properties,
             commands::reveal::reveal_in_explorer,

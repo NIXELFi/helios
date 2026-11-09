@@ -19,7 +19,13 @@ use tauri::{AppHandle, Manager};
 /// Set or clear the read-only attribute on `path`. Cross-platform:
 /// `Permissions::set_readonly` maps to the Windows read-only file attribute and
 /// to clearing/setting the owner+group+other write bits on Unix.
-#[tauri::command]
+///
+/// `async` in the attribute runs it on Tauri's worker pool instead of the main
+/// thread (a plain `fn` command runs on the main thread). Vault sync and bulk
+/// check-out/check-in call this once per file, and on the main thread a long
+/// burst of them queued ahead of the title bar's minimize/maximize/close
+/// calls, which need the main thread too.
+#[tauri::command(async)]
 pub fn set_path_readonly(path: String, readonly: bool) -> Result<(), String> {
     // Input hardening: reject symlinks and operate on the canonical target.
     // `set_path_readonly` is reachable from any renderer context (it's an app
@@ -106,11 +112,100 @@ fn resolve_sw_helper(app: &AppHandle) -> Option<PathBuf> {
     }
 }
 
+/// One file's outcome from a batch flip (see `sw-helper/src/Program.cs`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwFlipResult {
+    pub path: String,
+    /// not-open | already | flipped | reloaded | failed-dirty | failed | ambiguous
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwFlipBatch {
+    /// False when the helper is missing, couldn't run, or found no running
+    /// SOLIDWORKS; `results` is then empty.
+    pub sw_running: bool,
+    pub results: Vec<SwFlipResult>,
+}
+
+impl SwFlipBatch {
+    fn none() -> Self {
+        SwFlipBatch { sw_running: false, results: Vec::new() }
+    }
+}
+
+/// Parse the helper's result file: `sw<TAB>running|none`, then
+/// `<status><TAB><path>` per input path.
+pub fn parse_flip_results(text: &str) -> SwFlipBatch {
+    let mut sw_running = false;
+    let mut results = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_start_matches('\u{feff}').trim_end_matches('\r');
+        let Some((status, rest)) = line.split_once('\t') else { continue };
+        if status == "sw" {
+            sw_running = rest.trim() == "running";
+        } else if !rest.is_empty() {
+            results.push(SwFlipResult { path: rest.to_string(), status: status.to_string() });
+        }
+    }
+    if !sw_running {
+        results.clear();
+    }
+    SwFlipBatch { sw_running, results }
+}
+
+/// Frontend-callable batch form: flip every open document among `paths` in ONE
+/// helper process (one COM connection) and report what happened to each, so a
+/// refused flip reaches the user instead of leaving a checked-out file
+/// silently read-only in SOLIDWORKS. Files that aren't open come back as
+/// `not-open`. Because one process covers the whole batch, bulk callers no
+/// longer pre-filter to files with a SOLIDWORKS `~$` lock file (which a
+/// document opened read-only may not have).
+#[tauri::command]
+pub async fn sw_flip_readonly_batch(app: AppHandle, paths: Vec<String>, readonly: bool) -> SwFlipBatch {
+    if paths.is_empty() {
+        return SwFlipBatch::none();
+    }
+    let Some(exe) = resolve_sw_helper(&app) else { return SwFlipBatch::none() };
+    let mode = helper_mode(readonly);
+    tauri::async_runtime::spawn_blocking(move || {
+        let stem = format!("helios-swflip-{}", uuid::Uuid::new_v4());
+        let list = std::env::temp_dir().join(format!("{stem}.txt"));
+        let out = std::env::temp_dir().join(format!("{stem}.out"));
+        if fs::write(&list, paths.join("\n")).is_err() {
+            return SwFlipBatch::none();
+        }
+        // A refused flip retries for ~1.2 s, so scale the limit with the batch.
+        let timeout = HELPER_TIMEOUT + Duration::from_millis(1500 * paths.len().min(400) as u64);
+        let args = [
+            "--batch".to_string(),
+            mode.to_string(),
+            list.to_string_lossy().into_owned(),
+            out.to_string_lossy().into_owned(),
+        ];
+        run_helper_args(&exe, &args, timeout);
+        let parsed = fs::read_to_string(&out)
+            .map(|t| parse_flip_results(&t))
+            .unwrap_or_else(|_| SwFlipBatch::none());
+        let _ = fs::remove_file(&list);
+        let _ = fs::remove_file(&out);
+        parsed
+    })
+    .await
+    .unwrap_or_else(|_| SwFlipBatch::none())
+}
+
 /// Run `exe <path> <mode>` (hidden window on Windows) and wait for it, killing
 /// it if it outlives `timeout`. Returns true iff it exited by itself in time.
 fn run_helper(exe: &Path, path: &str, mode: &str, timeout: Duration) -> bool {
+    run_helper_args(exe, &[path.to_string(), mode.to_string()], timeout)
+}
+
+fn run_helper_args(exe: &Path, args: &[String], timeout: Duration) -> bool {
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg(path).arg(mode);
+    cmd.args(args);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -161,6 +256,32 @@ mod tests {
 
         // Must be writable to remove on some platforms; we cleared it above.
         let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn parses_helper_results() {
+        let batch = parse_flip_results(
+            "\u{feff}sw\trunning\r\nflipped\tC:\\v\\a.sldprt\r\nnot-open\tC:\\v\\b.sldasm\r\nfailed-dirty\tC:\\v\\c.sldprt\r\n",
+        );
+        assert!(batch.sw_running);
+        let got: Vec<(&str, &str)> =
+            batch.results.iter().map(|r| (r.status.as_str(), r.path.as_str())).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("flipped", "C:\\v\\a.sldprt"),
+                ("not-open", "C:\\v\\b.sldasm"),
+                ("failed-dirty", "C:\\v\\c.sldprt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_solidworks_means_no_results() {
+        let batch = parse_flip_results("sw\tnone\nnot-open\tC:\\v\\a.sldprt\n");
+        assert!(!batch.sw_running);
+        assert!(batch.results.is_empty());
+        assert!(!parse_flip_results("").sw_running);
     }
 
     #[test]

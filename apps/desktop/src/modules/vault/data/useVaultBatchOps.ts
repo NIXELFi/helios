@@ -167,15 +167,12 @@ export function useVaultBatchOps(ctx: BatchCtx) {
     currentUserId: ctx.currentUserId,
   };
 
-  const openInSwNorm = useMemo(
-    () => (ctx.openInSw ? new Set(Array.from(ctx.openInSw, normalizePathForCompare)) : null),
-    [ctx.openInSw],
-  );
-  /** Tell an open SOLIDWORKS session about a read-only change. Skipped for
-   *  files the scan didn't see open, so a 300-file batch doesn't queue 300
-   *  helper launches. */
-  function flipIfOpen(file: VaultFile, path: string, readonly: boolean) {
-    if (openInSwNorm && !openInSwNorm.has(normalizePathForCompare(vaultRelativePath(file, ctx.folders)))) return;
+  /** Tell an open SOLIDWORKS session about a read-only change. The flip
+   *  queue batches these into one helper run, so every file is passed: the
+   *  old filter (only files with a SOLIDWORKS `~$` lock file) skipped
+   *  documents opened read-only, which may have no lock file, and those are
+   *  exactly the ones a check-out needs to make editable. */
+  function flipIfOpen(_file: VaultFile, path: string, readonly: boolean) {
     flipSwReadonly(path, readonly);
   }
 

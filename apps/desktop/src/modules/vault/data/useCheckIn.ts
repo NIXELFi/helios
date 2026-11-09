@@ -8,6 +8,27 @@ import { setLockOverlay } from "./lock-overlay";
 
 const BUCKET = "vault-objects";
 
+/** Time limits so a dropped connection ends a check-in with an error instead
+ *  of a spinner that never stops (a 2026-10-29 report: "it just loaded for
+ *  like 20 mins"). On a timeout the user keeps the checkout and can retry. */
+const PROBE_TIMEOUT_MS = 30_000;
+const CHECK_IN_RPC_TIMEOUT_MS = 60_000;
+/** Two minutes plus one second per 128 KB (an upload slower than about
+ *  1 Mbit/s is treated as stalled). */
+export function uploadTimeoutMs(uploadBytes: number): number {
+  return 120_000 + Math.ceil(uploadBytes / (128 * 1024)) * 1000;
+}
+
+class CheckInTimeout extends Error {}
+
+function withTimeout<T>(work: PromiseLike<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new CheckInTimeout(message)), ms);
+  });
+  return Promise.race([Promise.resolve(work), timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Storage paths in this bucket are content-addressed (path === sha256 of
  *  bytes), so if the object already exists the bytes are guaranteed identical.
  *  We probe first and only upload when missing — this avoids the fragile
@@ -32,7 +53,11 @@ async function objectExists(
   sha: string,
 ): Promise<ObjectProbe> {
   try {
-    const { data, error } = await client.rpc("pdm_object_exists", { p_sha: sha });
+    const { data, error } = await withTimeout(
+      client.rpc("pdm_object_exists", { p_sha: sha }),
+      PROBE_TIMEOUT_MS,
+      "object probe timed out",
+    );
     if (error) return "unknown";
     return data === true ? "present" : "absent";
   } catch {
@@ -109,12 +134,17 @@ export function useCheckIn() {
           // ORIGINAL uncompressed content, so download can decompress and
           // verify integrity.
           const compressed = await gzipBytes(new Uint8Array(bytes));
-          const { error: upErr } = await client.storage
-            .from(BUCKET)
-            .upload(path, compressed as BufferSource, {
+          // storage-js upload() takes no AbortSignal, so a stalled request is
+          // abandoned rather than cancelled. Content addressing makes that
+          // safe: if it completes later, the next attempt finds it present.
+          const { error: upErr } = await withTimeout(
+            client.storage.from(BUCKET).upload(path, compressed as BufferSource, {
               contentType: "application/octet-stream",
               upsert: false,
-            });
+            }),
+            uploadTimeoutMs(compressed.byteLength),
+            "Upload timed out. Your connection may have dropped. You still have the file checked out; try checking it in again.",
+          );
           if (upErr) {
             // Race: another client uploaded the same content between our
             // check and our upload. Re-probe once before giving up. We log
@@ -142,13 +172,17 @@ export function useCheckIn() {
           }
         }
 
-        const { data: ver, error: rpcErr } = await client.rpc("pdm_check_in", {
-          p_file_id: file_id,
-          p_sha256: sha,
-          p_size: bytes.byteLength,
-          p_comment: comment,
-          ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
-        });
+        const { data: ver, error: rpcErr } = await withTimeout(
+          client.rpc("pdm_check_in", {
+            p_file_id: file_id,
+            p_sha256: sha,
+            p_size: bytes.byteLength,
+            p_comment: comment,
+            ...(opts.baseSha ? { p_base_sha256: opts.baseSha } : {}),
+          }),
+          CHECK_IN_RPC_TIMEOUT_MS,
+          "The vault server didn't answer in time. The check-in may still have gone through; wait a moment and check the file's history before trying again.",
+        );
         if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
         // pdm_check_in releases the caller's lock server-side. Clear the pill
         // this frame (optimistic remove) so check-in feels as instant as

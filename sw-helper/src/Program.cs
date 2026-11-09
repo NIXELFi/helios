@@ -22,62 +22,150 @@ namespace HeliosSwReadonly
     /// </summary>
     internal static class Program
     {
+        // Single file (original form, kept for compatibility):
+        //   HeliosSwReadonly.exe "<full path>" <rw|ro>
+        // Batch (one process and one COM connection for a whole bulk action):
+        //   HeliosSwReadonly.exe --batch <rw|ro> <list file> <result file>
+        //   <list file>: UTF-8, one full path per line.
+        //   <result file>: written as UTF-8 lines. First "sw<TAB>running|none",
+        //   then one "<status><TAB><path>" per input path, where status is
+        //   not-open | already | flipped | reloaded | failed-dirty | failed | ambiguous.
         [STAThread]
         private static int Main(string[] args)
         {
             try
             {
+                if (args.Length >= 4 && args[0] == "--batch")
+                {
+                    bool ro = IsRo(args[1]);
+                    var paths = new System.Collections.Generic.List<string>();
+                    foreach (var line in System.IO.File.ReadAllLines(args[2], System.Text.Encoding.UTF8))
+                        if (!string.IsNullOrWhiteSpace(line)) paths.Add(line.Trim());
+                    var lines = Run(paths, ro);
+                    System.IO.File.WriteAllLines(args[3], lines, new System.Text.UTF8Encoding(false));
+                    return 0;
+                }
                 if (args.Length < 2 || string.IsNullOrEmpty(args[0])) return 2;
-                string target = Norm(args[0]);
-                bool readOnly = args[1].Equals("ro", StringComparison.OrdinalIgnoreCase) || args[1] == "1";
+                Run(new System.Collections.Generic.List<string> { args[0] }, IsRo(args[1]));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Diag("fatal: " + ex);
+                return 1;
+            }
+        }
 
-                var sw = ConnectToSolidWorks();
-                Diag($"target={target} want-ro={readOnly} connected={sw != null}");
-                if (sw == null) return 0; // SW not running — nothing to flip
+        private static bool IsRo(string mode) =>
+            mode.Equals("ro", StringComparison.OrdinalIgnoreCase) || mode == "1";
 
-                if (!(sw.GetDocuments() is object[] docs)) { Diag("GetDocuments: none"); return 0; }
-                // Canonical form of the target for robust comparison (resolves
-                // mapped drives, UNC paths, 8.3 names, trailing separators).
-                string targetCanon = TryCanon(target);
-                // Filename-only fallback for when GetFullPath can't resolve a UNC
-                // or mapped drive from a different session context.
-                string targetFile = System.IO.Path.GetFileName(args[0]).ToLowerInvariant();
-                Diag($"open docs={docs.Length} targetCanon={targetCanon} targetFile={targetFile}");
+        private sealed class OpenDoc
+        {
+            public IModelDoc2 Doc;
+            public string Norm;
+            public string Canon;
+            public string File;
+        }
+
+        private static System.Collections.Generic.List<string> Run(System.Collections.Generic.List<string> targets, bool readOnly)
+        {
+            var output = new System.Collections.Generic.List<string>();
+            var sw = ConnectToSolidWorks();
+            Diag($"targets={targets.Count} want-ro={readOnly} connected={sw != null}");
+            output.Add(sw == null ? "sw	none" : "sw	running");
+            if (sw == null)
+            {
+                foreach (var t in targets) output.Add("not-open	" + t);
+                return output;
+            }
+
+            // Snapshot the open documents once for the whole batch.
+            var open = new System.Collections.Generic.List<OpenDoc>();
+            if (sw.GetDocuments() is object[] docs)
+            {
                 foreach (var o in docs)
                 {
                     if (!(o is IModelDoc2 doc)) continue;
                     string path;
                     try { path = doc.GetPathName(); } catch { continue; }
-                    Diag($"  doc: {path}");
                     if (string.IsNullOrEmpty(path)) continue;
-                    // Primary match: canonical path comparison handles UNC / mapped
-                    // drive / 8.3 / mixed-slash variants pointing to the same file.
-                    // Fallback: exact normalised string (original behaviour), then
-                    // filename-only match as a last resort for unusual path forms.
-                    string pathNorm   = Norm(path);
-                    string pathCanon  = TryCanon(pathNorm);
-                    string pathFile   = System.IO.Path.GetFileName(path).ToLowerInvariant();
-                    bool matched = (targetCanon != null && pathCanon != null && targetCanon == pathCanon)
-                                || pathNorm == target
-                                || (!string.IsNullOrEmpty(targetFile) && pathFile == targetFile);
-                    if (!matched) continue;
-
-                    bool isReadOnly;
-                    try { isReadOnly = doc.IsOpenedReadOnly(); } catch { isReadOnly = !readOnly; }
-                    Diag($"  MATCH wasReadOnly={isReadOnly}");
-                    if (isReadOnly != readOnly)
-                    {
-                        try { doc.SetReadOnlyState(readOnly); Diag("  flipped"); } catch (Exception ex) { Diag("  flip failed: " + ex.Message); }
-                    }
-                    return 0;
+                    string n = Norm(path);
+                    open.Add(new OpenDoc { Doc = doc, Norm = n, Canon = TryCanon(n), File = System.IO.Path.GetFileName(path).ToLowerInvariant() });
+                    Diag($"  open: {path}");
                 }
-                Diag("no match (not open)");
-                return 0; // not open in SOLIDWORKS
             }
-            catch
+
+            foreach (var target in targets)
             {
-                return 1;
+                string status;
+                try { status = FlipOne(open, target, readOnly); }
+                catch (Exception ex) { Diag("  error: " + ex.Message); status = "failed"; }
+                Diag($"  {status}: {target}");
+                output.Add(status + "	" + target);
             }
+            return output;
+        }
+
+        private static string FlipOne(System.Collections.Generic.List<OpenDoc> open, string target, bool readOnly)
+        {
+            string norm = Norm(target);
+            string canon = TryCanon(norm);
+            string file = System.IO.Path.GetFileName(target).ToLowerInvariant();
+
+            // Match by full path (canonical form handles UNC / mapped drives /
+            // 8.3 names). Fall back to the file name only when exactly ONE open
+            // document has that name: two "bracket.sldprt" from different
+            // folders must never flip the wrong one.
+            OpenDoc match = null;
+            foreach (var d in open)
+            {
+                if ((canon != null && d.Canon != null && canon == d.Canon) || d.Norm == norm) { match = d; break; }
+            }
+            if (match == null && !string.IsNullOrEmpty(file))
+            {
+                var byName = open.FindAll(d => d.File == file);
+                if (byName.Count > 1) return "ambiguous";
+                if (byName.Count == 1) match = byName[0];
+            }
+            if (match == null) return "not-open";
+
+            var doc = match.Doc;
+            if (SafeIsReadOnly(doc, !readOnly) == readOnly) return "already";
+
+            // SetReadOnlyState flips the session state in place (no reload, the
+            // feature tree and any unsaved edits stay). It can refuse while
+            // SOLIDWORKS is busy (rebuilding, a dialog open), so try a few times
+            // and CHECK the outcome: the old helper ignored the result, so a
+            // refused flip left a checked-out file read-only with no sign of it.
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                try { doc.SetReadOnlyState(readOnly); } catch (Exception ex) { Diag("  SetReadOnlyState threw: " + ex.Message); }
+                if (SafeIsReadOnly(doc, !readOnly) == readOnly) return "flipped";
+                System.Threading.Thread.Sleep(400);
+            }
+
+            if (readOnly) return "failed";
+
+            // Still read-only. Reloading from the (now writable) file opens it
+            // read-write, but throws away in-memory edits, so only when there
+            // are none.
+            bool dirty;
+            try { dirty = doc.GetSaveFlag(); } catch { dirty = true; }
+            if (dirty) return "failed-dirty";
+            string path;
+            try { path = doc.GetPathName(); } catch { return "failed"; }
+            try
+            {
+                // ReloadOrReplace(ReadOnly, ReplaceFileName, DontSave)
+                doc.ReloadOrReplace(false, path, true);
+            }
+            catch (Exception ex) { Diag("  ReloadOrReplace threw: " + ex.Message); return "failed"; }
+            return SafeIsReadOnly(doc, true) ? "failed" : "reloaded";
+        }
+
+        private static bool SafeIsReadOnly(IModelDoc2 doc, bool fallback)
+        {
+            try { return doc.IsOpenedReadOnly(); } catch { return fallback; }
         }
 
         private static string Norm(string p) =>
