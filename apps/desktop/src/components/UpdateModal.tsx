@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { UpdaterAvailable, UpdaterState } from "../lib/use-updater";
+import { AUTO_INSTALL_ATTEMPT_LIMIT, MANUAL_DOWNLOAD_URL } from "../lib/update-attempts";
+import { openExternal } from "../lib/external-links";
 
 /** Tauri's updater `date` is an RFC3339-ish string like
  *  "2026-05-01 12:00:00.000 +00:00:00", which `new Date()` won't reliably
@@ -41,9 +43,13 @@ interface Props {
   onDefer?: () => void;
   /** False once the single deferral has been used; the button disappears. */
   canDefer?: boolean;
+  /** Earlier installs of this release that were handed to the installer but
+   *  didn't land (Helios came back on the old version). At the limit,
+   *  auto-install has stood down and the modal says why. */
+  failedInstalls?: number;
 }
 
-export function UpdateModal({ state, playbackBlocked, installAttempted = false, onInstall, onRetry, onClose, autoInstallIn = null, onDefer, canDefer = true }: Props) {
+export function UpdateModal({ state, playbackBlocked, installAttempted = false, onInstall, onRetry, onClose, autoInstallIn = null, onDefer, canDefer = true, failedInstalls = 0 }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Capture whatever was focused before the modal opened so we can restore
   // it on close (focus-restore, per the modal a11y recipe).
@@ -291,6 +297,20 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
               {autoInstallIn !== null
                 ? "Installing automatically once playback stops — the app will restart."
                 : "Pause playback before installing — the app will restart and lose your scrub position."}
+            </div>
+          )}
+          {failedInstalls >= AUTO_INSTALL_ATTEMPT_LIMIT && !inFlight && (
+            <div className="mt-3 text-xs text-[#FFB800]" role="status">
+              Helios has already tried to install v{update.version}{" "}
+              {failedInstalls === 1 ? "once" : `${failedInstalls} times`}, but you're still on v{update.currentVersion}
+              {" "}— something on this computer (often antivirus) is stopping the installer. It won't try again on its
+              own. Click Install and restart to try once more, or{" "}
+              <button
+                type="button"
+                onClick={() => openExternal(MANUAL_DOWNLOAD_URL)}
+                className="underline hover:text-asu-gold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold rounded-sm"
+              >download the installer</button>{" "}
+              and run it yourself (close Helios first).
             </div>
           )}
           {autoInstallIn !== null && !inFlight && !playbackBlocked && (
