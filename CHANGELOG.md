@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-11-09
+
 ### Added
 - **Vault: back and forward like File Explorer.** The mouse thumb buttons, Alt+← / Alt+→ and new ← → buttons beside the folder path go back and forward through the folders you've visited in Browse.
 - **Vault: a warning before adding or checking in a huge file.** Anything over 250 MB asks first: "This file is huge and could brick Helios for everyone. Please ask a maintainer." Every teammate's Helios downloads every vault file, so one big file is downloaded once per person. "Add anyway" / "Check in anyway" still goes ahead. Check-in, drag-and-drop and the add banner ask every time. Auto-add and the SOLIDWORKS add-in don't add a file that big themselves: they show the warning and leave it for you to add or check in from the Helios Vault window.
