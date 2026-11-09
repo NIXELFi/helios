@@ -5,6 +5,7 @@ import { gzipBytes } from "./compression";
 import { friendlyPgError, friendlyUploadError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
 import { setLockOverlay } from "./lock-overlay";
+import { HUGE_UPLOAD_DECLINED, confirmHugeUpload } from "./huge-file-guard";
 
 const BUCKET = "vault-objects";
 
@@ -116,6 +117,8 @@ export function useCheckIn() {
         // entry). The server refuses the check-in if a different version is
         // latest now, instead of silently replacing it. Omit to skip the check.
         baseSha?: string | null;
+        /** Shown in the huge-file warning. */
+        fileName?: string;
       } = {},
     ): Promise<Version | null> => {
       setLoading(true);
@@ -124,6 +127,16 @@ export function useCheckIn() {
       try {
         const sha = await sha256Hex(bytes);
         const path = `${sha.slice(0, 2)}/${sha}`;
+
+        // Huge files ask first (a warning, not a limit): see huge-file-guard.ts.
+        // Declining keeps the checkout so nothing is lost.
+        const go = await confirmHugeUpload({
+          key: `checkin|${file_id}|${sha}`,
+          name: opts.fileName ?? "This file",
+          bytes: bytes.byteLength,
+          action: "check in",
+        });
+        if (!go) throw new Error(HUGE_UPLOAD_DECLINED);
 
         // "unknown" falls through to the upload attempt — the duplicate handling
         // below makes that safe even when the content was in fact already there.

@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { HUGE_UPLOAD_DECLINED, confirmHugeUpload } from "./huge-file-guard";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { FolderId, VaultId } from "./types";
@@ -219,6 +220,17 @@ export function useAddLocalFile() {
       if (isAnsysSolverOutput(targetRel)) {
         setError(new Error(ANSYS_SOLVER_OUTPUT_NOTE));
         return { ok: false, error: ANSYS_SOLVER_OUTPUT_NOTE };
+      }
+      // Huge files ask first (a warning, not a limit): see huge-file-guard.ts.
+      const ok = await confirmHugeUpload({
+        key: `add|${targetRel}|${local.sizeBytes}`,
+        name: targetRel.split("/").pop() || targetRel,
+        bytes: local.sizeBytes,
+        action: "add",
+      });
+      if (!ok) {
+        setError(new Error(HUGE_UPLOAD_DECLINED));
+        return { ok: false, error: HUGE_UPLOAD_DECLINED };
       }
       setLoading(true);
       setError(null);

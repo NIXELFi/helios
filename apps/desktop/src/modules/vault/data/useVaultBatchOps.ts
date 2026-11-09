@@ -441,7 +441,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         const baseSha = prevVersionId
           ? runCtx.ledger?.[normalizePathForCompare(vaultRelativePath(file, ctx.folders))]?.sha256 ?? null
           : null;
-        const r = await checkIn.run(id, ab, comment, { onError: (e) => { why = e.message; }, baseSha });
+        const r = await checkIn.run(id, ab, comment, { onError: (e) => { why = e.message; }, baseSha, fileName: file.name });
         // Aborted before the RPC landed: give the lock back and stop. If it DID
         // land, fall through: the read-only + ledger finalize must run even on
         // abort, or the checked-in copy stays writable and reads as an unsaved

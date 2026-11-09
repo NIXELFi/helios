@@ -484,7 +484,7 @@ export function CheckInButton({
       ? (await ledgerShaFor(vaultId, rel)) ?? null
       : null;
     let why: string | null = null;
-    const result = await checkIn.run(fileId, bytes, comment, { baseSha, onError: (e) => { why = e.message; } });
+    const result = await checkIn.run(fileId, bytes, comment, { baseSha, fileName: fileName ?? undefined, onError: (e) => { why = e.message; } });
     if (result) {
       recordBreadcrumb("action", `vault: check-in ${fileName ?? "file"}`);
       // The file is now the latest version and no longer checked out → make the

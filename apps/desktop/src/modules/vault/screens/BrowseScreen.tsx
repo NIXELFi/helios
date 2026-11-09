@@ -1818,12 +1818,13 @@ function VaultSyncSection(props: {
   });
   const onBusyChange = props.onBusyChange;
   useEffect(() => { onBusyChange(status.busy); }, [status.busy, onBusyChange]);
-  return <SyncStatusPill status={status} onRescan={props.onRescan} />;
+  return <SyncStatusPill status={status} onRescan={props.onRescan} onResume={status.resume} />;
 }
 
-function SyncStatusPill({ status, onRescan }: {
+function SyncStatusPill({ status, onRescan, onResume }: {
   status: import("../data/useAutoSync").AutoSyncStatus;
   onRescan: () => void;
+  onResume: () => void;
 }) {
   // Tick once a second while syncing AND the popover is open, so elapsed/ETA
   // updates inside the popover. Toolbar pill itself only re-renders on real
@@ -1848,7 +1849,7 @@ function SyncStatusPill({ status, onRescan }: {
   }, [open]);
 
   const { busy, lastDownloaded, lastFailed, lastRunAt, totalTasks, completedTasks,
-    totalBytes, completedBytes, activeFiles, startedAt } = status;
+    totalBytes, completedBytes, activeFiles, startedAt, pausedOverBudget, repeatBlocked } = status;
 
   let label: string;
   let tone: string;
@@ -1862,6 +1863,10 @@ function SyncStatusPill({ status, onRescan }: {
     label = inFlight ? `${base} · ${inFlight}` : base;
     tone = "text-asu-gold";
     dot = "bg-asu-gold animate-pulse";
+  } else if (pausedOverBudget) {
+    label = "Sync paused";
+    tone = "text-[#EF5350]";
+    dot = "bg-[#EF5350]";
   } else if (lastFailed > 0) {
     label = `${lastFailed} failed`;
     tone = "text-[#EF5350]";
@@ -1938,6 +1943,27 @@ function SyncStatusPill({ status, onRescan }: {
                   ? `Last sync: ${new Date(lastRunAt).toLocaleTimeString()}`
                   : "No sync yet this session."}
               </div>
+              {pausedOverBudget && (
+                <div className="mt-2 space-y-2 rounded border border-[#EF5350]/40 bg-[#EF5350]/10 p-2 text-helios-text">
+                  <p>
+                    Auto-sync has downloaded far more than usual today on this computer (more than
+                    the whole vault one and a half times), so it paused in case something is wrong.
+                  </p>
+                  <button
+                    onClick={() => { setOpen(false); onResume(); }}
+                    className="w-full rounded border border-helios-line bg-helios-base px-2 py-1 hover:bg-helios-line"
+                  >
+                    Continue syncing
+                  </button>
+                </div>
+              )}
+              {repeatBlocked.length > 0 && (
+                <div className="mt-2 rounded border border-helios-line p-2 text-helios-dim">
+                  Not downloading again today (already downloaded 3 times on this computer):{" "}
+                  <span className="text-helios-text">{repeatBlocked.slice(0, 5).join(", ")}</span>
+                  {repeatBlocked.length > 5 && ` and ${repeatBlocked.length - 5} more`}. Use Get Latest if you need one.
+                </div>
+              )}
               <button
                 onClick={() => { setOpen(false); onRescan(); }}
                 className="mt-2 w-full rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line"

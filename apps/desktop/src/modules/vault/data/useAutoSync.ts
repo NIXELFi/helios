@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Folder, VaultFile, Version, Lock } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { matchLocal, shouldHoldBack, vaultRelativePath, normalizePathForCompare } from "./local-match";
@@ -21,6 +21,8 @@ import {
 import { useSupabaseClient } from "@helios/auth";
 import { exists } from "@tauri-apps/plugin-fs";
 import { isAnsysSolverOutput } from "./ansys-solver-output";
+import { continueSyncingToday, isOverBudget, isRepeatBlocked, loadGuard, recordFetch, saveGuard, REPEAT_LIMIT } from "./auto-sync-guard";
+import { toast } from "./toast";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -37,6 +39,12 @@ export interface AutoSyncStatus {
   lastHeldBack: number;
   /** ISO timestamp of the last completed pass. */
   lastRunAt: string | null;
+  /** Circuit breaker (auto-sync-guard.ts): today's downloads passed the
+   *  budget, so this pass downloaded nothing until the user continues. */
+  pausedOverBudget: boolean;
+  /** Circuit breaker: files not fetched again because they were already
+   *  fetched REPEAT_LIMIT times today on this computer. */
+  repeatBlocked: string[];
   /** Total number of files queued for download in the current pass. */
   totalTasks: number;
   /** Number of those files finished (success or fail) so far. */
@@ -147,7 +155,7 @@ export function useAutoSync(input: {
    *  ones vault-wide. Downloads still run (that's how bootstrap works). */
   rootMissing?: boolean;
   onComplete?: () => void;
-}): AutoSyncStatus {
+}): AutoSyncStatus & { resume: () => void } {
   const {
     enabled, files, localFiles, versionsByFileId, locks,
     currentUserId, vaultRoot, folders, vaultId, rootMissing, onComplete,
@@ -181,6 +189,7 @@ export function useAutoSync(input: {
 
   const [status, setStatus] = useState<AutoSyncStatus>({
     busy: false, lastDownloaded: 0, lastSkipped: 0, lastFailed: 0, lastHeldBack: 0, lastRunAt: null,
+    pausedOverBudget: false, repeatBlocked: [],
     totalTasks: 0, completedTasks: 0, totalBytes: 0, completedBytes: 0,
     activeFiles: [], startedAt: null,
   });
@@ -193,6 +202,9 @@ export function useAutoSync(input: {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Survives passes (and supersession); reset when the vault folder changes.
   const failedDownloadsRef = useRef<FailedDownloads>(new Map());
+  // Warn once per session per file / per budget pause, not on every pass.
+  const warnedRepeatRef = useRef<Set<string>>(new Set());
+  const warnedBudgetRef = useRef(false);
   useEffect(() => { failedDownloadsRef.current = new Map(); }, [vaultId, vaultRoot]);
 
   // Keep the latest onComplete in a ref so the run effect doesn't re-fire just
@@ -263,6 +275,9 @@ export function useAutoSync(input: {
     // Download keys this pass still needs; failure memory for anything else
     // (synced some other way, deleted, superseded by a new version) is dropped.
     const stillWanted = new Set<string>();
+    // Circuit breaker state for today (null without a vault id).
+    const guard = vaultId ? loadGuard(vaultId) : null;
+    const repeatBlocked: string[] = [];
     const myLocks = new Set(
       currentUserId
         ? (locks ?? []).filter((l) => l.user_id === currentUserId).map((l) => l.file_id)
@@ -433,6 +448,19 @@ export function useAutoSync(input: {
       // don't fetch it again yet. The retry timer below comes back for it.
       const failKey = failedDownloadKey(ver.sha256, localDestPath(vaultRoot, file.folder_id, file.name, folders));
       stillWanted.add(failKey);
+      if (guard && isRepeatBlocked(guard, failKey)) {
+        repeatBlocked.push(file.name);
+        if (!warnedRepeatRef.current.has(failKey)) {
+          warnedRepeatRef.current.add(failKey);
+          console.warn(`[vault] auto-sync stopped re-downloading ${file.name}: fetched ${REPEAT_LIMIT} times today`);
+          toast(
+            `Auto-sync stopped downloading ${file.name}: it was already downloaded ${REPEAT_LIMIT} times today on this computer, which usually means something is wrong. Use Get Latest if you need it.`,
+            "error",
+          );
+        }
+        skipped++;
+        continue;
+      }
       const backoff = failedDownloadsRef.current.get(failKey);
       if (backoff && Date.now() < backoff.nextAttemptAt) { deferredFailed++; continue; }
       tasks.push({
@@ -449,6 +477,23 @@ export function useAutoSync(input: {
 
     for (const key of failedDownloadsRef.current.keys()) {
       if (!stillWanted.has(key)) failedDownloadsRef.current.delete(key);
+    }
+
+    // Daily budget: the vault's full size x1.5 + 5 GB (a brand-new full sync
+    // never reaches it). Over it, pause downloads until "Continue syncing".
+    let pausedOverBudget = false;
+    if (guard && tasks.length > 0) {
+      let vaultBytes = 0;
+      for (const file of files) vaultBytes += versionsByFileId.get(file.id)?.[0]?.size_bytes ?? 0;
+      if (isOverBudget(guard, vaultBytes)) {
+        pausedOverBudget = true;
+        if (!warnedBudgetRef.current) {
+          warnedBudgetRef.current = true;
+          console.warn(`[vault] auto-sync paused: ${Math.round(guard.bytes / 1e9)} GB downloaded today`);
+        }
+        skipped += tasks.length;
+        tasks.length = 0;
+      }
     }
 
     const totalBytes = tasks.reduce((sum, t) => sum + (t.size || 0), 0);
@@ -511,7 +556,12 @@ export function useAutoSync(input: {
         if (ok) downloaded++; else failed++;
         // A superseded pass's "failure" is just the abort, not a bad file.
         if (ok || !myAbort.signal.aborted) {
-          recordDownloadOutcome(failedDownloadsRef.current, failedDownloadKey(t.sha, t.dest), ok, Date.now());
+          const key = failedDownloadKey(t.sha, t.dest);
+          recordDownloadOutcome(failedDownloadsRef.current, key, ok, Date.now());
+          if (guard && t.vaultId) {
+            recordFetch(guard, key, t.size || 0);
+            saveGuard(t.vaultId, guard);
+          }
         }
         activeTaskIds.delete(t.id);
         // Rebuild activeFiles from the still-active id set so a worker
@@ -633,6 +683,8 @@ export function useAutoSync(input: {
           lastDownloaded: downloaded,
           lastSkipped: skipped,
           lastFailed: failed + deferredFailed,
+          pausedOverBudget,
+          repeatBlocked,
           lastHeldBack: heldBack.length,
           lastRunAt: new Date().toISOString(),
           activeFiles: [],
@@ -727,5 +779,13 @@ export function useAutoSync(input: {
     };
   }, [enabled, run, retryTick]);
 
-  return status;
+  /** "Continue syncing" after a budget pause: lift today's pause for this
+   *  vault and run a pass now. */
+  const resume = useCallback(() => {
+    if (vaultId) continueSyncingToday(vaultId);
+    warnedBudgetRef.current = false;
+    setRetryTick((t) => t + 1);
+  }, [vaultId]);
+
+  return useMemo(() => ({ ...status, resume }), [status, resume]);
 }
