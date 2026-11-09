@@ -19,11 +19,21 @@ Seven modules ship today, plus admin-only Org & Access tooling:
 
 A self-hosted SolidWorks PDM Standard alternative — check-out/check-in with real file locking, built on Supabase (Postgres + RLS + content-addressed storage) so a student team can run it for free:
 
-- **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker, flipped even while the file is open in SolidWorks). Check your own files in individually or all at once straight from the Checkouts screen, without hunting them down in the tree.
+- **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker). Check your own files in individually, by folder, or all at once from the Checkouts screen.
+- **Works with files already open in SolidWorks, add-in or not.** Checking out a file that's open switches it to editable in place, and checking it in switches it back. Without the add-in, a bundled helper (`sw-helper/`) does this over COM for a whole batch at once. It checks the result, reloads the file from disk if it has no unsaved changes, and tells you if you need to close and reopen it.
 - **Versioning** — immutable, content-addressed (sha256) version history with comments, revisions, and per-version SolidWorks data cards (custom properties parsed natively from the CAD file at check-in).
 - **Assembly references** — Contains / Where-Used panels parsed from `.sldasm`/`.sldprt` at check-in; unresolved references are surfaced.
 - **Multi-vault + roles** — access is granted per vault (owner/admin/editor/viewer) or through team-wide Org & Access roles (Engineer/Lead/VP/Executive) whose capabilities bridge into the vault, all enforced by row-level security. Today any granted member can read every vault: team-wide access is intentional for a single team storing its own CAD. Per-subteam isolation is planned once a vault-to-subteam mapping exists — until then, a role grant is team-wide, not scoped to one subteam's vault.
-- **Auto-vaulting & sync** — new local files become private drafts automatically; a sync daemon mirrors vault state to disk with guards that never clobber or delete unsaved local work.
+- **Auto-vaulting & sync** — new local files become private drafts automatically; a sync daemon mirrors vault state to disk with guards that never clobber or delete unsaved local work. Downloads stream straight to disk in Rust and are checked against their sha256.
+- **Bandwidth safeguards.** Every member's auto-sync downloads every vault file, so storage egress is the real cost of the Vault. Helios guards it in several ways:
+  - A restarted sync joins a download that is already running instead of fetching the file again.
+  - A failing file backs off from 30 s up to 30 min instead of being retried on every pass.
+  - Auto-sync stops fetching a file after 3 downloads in a day on one computer.
+  - It pauses with a "Continue syncing" prompt if a vault's downloads for the day pass 1.5× its full size.
+  - Adding or checking in anything over 250 MB asks first.
+  - ANSYS solver output is kept out of the vault entirely.
+- **Archived vaults** — admins mark a previous year's car archived in Vault Settings; nobody auto-syncs it, and members download only what they need.
+- **Explorer-style browsing** — back/forward with the mouse thumb buttons or Alt+←/→, and a details/history pane you can resize or hide.
 - **Recycle bin** — soft-delete with restore for files and folders.
 - **SolidWorks integration** — a Task Pane add-in (check in/out from inside SolidWorks via a localhost bridge with bearer-token auth), Explorer shell overlays, and a one-click in-app installer for both.
 - **Insights** — vault analytics dashboard (activity, storage, lock hygiene, member stats).
@@ -73,6 +83,8 @@ pnpm dev          # development build with HMR
 pnpm build        # release build via tauri build
 ```
 
+The C# pieces (SolidWorks add-in `HeliosVault.dll`, Explorer shell extension, read-only helper `HeliosSwReadonly.exe`) are **not** built by `tauri build` or CI. They're prebuilt on a Windows dev machine and committed under `apps/desktop/src-tauri/resources/`. If you change their source, rebuild and commit the binaries before tagging a release. `scripts/check-bundled-resources.mjs` only checks that they exist, not that they're fresh. Rebuild with `pnpm -C apps/desktop build:addin`, `build:shell` or `build:swhelper`. That needs the .NET SDK (`scoop install dotnet-sdk` works without admin) and a SolidWorks install for its API assemblies.
+
 ## Repo layout
 
 ```text
@@ -98,7 +110,7 @@ packages/            TypeScript packages
   ui/ auth/ pm-ui/     primitives, Supabase auth, project-management UI
   plugin-sdk/          plugin manifest, host/plugin protocol, capability contracts
   lapsim-core/ lap-sim-plugin/  lap-simulator core + its packaged marketplace plugin
-infra/pdm-supabase/  Vault backend: 136 SQL migrations + RLS/RPC test suite
+infra/pdm-supabase/  Vault backend: 190+ SQL migrations + RLS/RPC test suite
 solidworks-addin/    SolidWorks Task Pane add-in (C#)
 shell-ext/ sw-helper/  Explorer overlay shell extension + read-only helper
 docs/                architecture, channel registry, design specs, wiki
