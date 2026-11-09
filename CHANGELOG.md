@@ -29,6 +29,8 @@ follow [semver](https://semver.org/).
 
 ### Added
 - **Vault: back and forward like File Explorer.** The mouse thumb buttons, Alt+← / Alt+→ and new ← → buttons beside the folder path go back and forward through the folders you've visited in Browse.
+- **Vault: a warning before adding or checking in a huge file.** Anything over 250 MB asks first: "This file is huge and could brick Helios for everyone. Please ask a maintainer." Every teammate's Helios downloads every vault file, so one big file is downloaded once per person. "Add anyway" / "Check in anyway" still goes ahead. This covers check-in, drag-and-drop, the add banner, auto-add and the SOLIDWORKS add-in.
+- **Vault auto-sync stops itself if it's downloading far too much.** If a file has already been downloaded 3 times today on your computer, auto-sync stops fetching it and tells you (Get Latest still works). If a vault has downloaded more than one and a half times its full size today, auto-sync pauses and the sync status shows a Continue syncing button. A normal first-time sync never comes close.
 - **Vault: resize or hide the details pane.** Drag the left edge of the details/history pane to make it wider or narrower (double-click the edge to reset), or hide it with the new Details button at the end of the path bar. Helios remembers both on this computer.
 
 ### Fixed
