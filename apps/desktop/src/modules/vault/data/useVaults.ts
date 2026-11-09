@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { QueryResult, Vault } from "./types";
 
+// Every useVaults instance refetches when a vault row changes in this window
+// (e.g. archiving in Settings must reach the Browse screen at once).
+const vaultChangeListeners = new Set<() => void>();
+export function notifyVaultsChanged(): void {
+  for (const l of vaultChangeListeners) l();
+}
+
 export function useVaults(): QueryResult<Vault[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<Vault[] | null>(null);
@@ -30,5 +37,9 @@ export function useVaults(): QueryResult<Vault[]> {
   }, [client, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
+  useEffect(() => {
+    vaultChangeListeners.add(refetch);
+    return () => { vaultChangeListeners.delete(refetch); };
+  }, [refetch]);
   return { data, loading, error, refetch };
 }

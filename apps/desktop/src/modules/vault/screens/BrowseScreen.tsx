@@ -164,7 +164,11 @@ export function BrowseScreen() {
   // the files under the vault name correctly.
   const { root: heliosRoot, path: vaultFolderPath, setRoot: setHeliosRoot } =
     useVaultFolder({ vaultName: vault?.name ?? null });
-  const { mode: downloadMode } = useDownloadMode(vaultId);
+  const { mode: chosenDownloadMode } = useDownloadMode(vaultId);
+  // An archived vault (a previous year's car) behaves as download-on-click
+  // whatever this computer chose: nobody auto-syncs old cars.
+  const vaultArchived = vault?.archived === true;
+  const downloadMode = vaultArchived ? "manual" : chosenDownloadMode;
   const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
   // While a sync pass is writing files we suppress automatic rescans so the
@@ -857,6 +861,14 @@ export function BrowseScreen() {
       )}
       {canEdit && <SolverOutputNotice blocked={blockedSolverOutput} />}
       <LocalDeleteBanner />
+      {vaultArchived && (
+        <div className="flex items-center gap-2 border-b border-helios-line bg-asu-gold/10 px-3 py-1.5 text-xs text-helios-text">
+          <span className="font-semibold text-asu-gold">{vault?.name} is archived.</span>
+          <span className="text-helios-dim">
+            It's a previous year's car, so Helios doesn't auto-sync it. Download the files or folders you need.
+          </span>
+        </div>
+      )}
       <VaultWarningBanner />
       <div className="flex min-h-0 flex-1">
       <div className="flex w-56 shrink-0 flex-col border-r border-helios-line bg-helios-base xl:w-64">
