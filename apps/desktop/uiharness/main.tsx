@@ -16,6 +16,7 @@ import { FolderBatchDialog } from "../src/modules/vault/components/FolderBatchDi
 import { DetailPane, DetailPaneToggle, useDetailPaneLayout } from "../src/modules/vault/components/DetailPane";
 import { useFolderHistory } from "../src/modules/vault/data/useFolderHistory";
 import { useRef } from "react";
+import { UpdateModal } from "../src/components/UpdateModal";
 
 const noop = () => {};
 const INSTALLED = [
@@ -134,6 +135,20 @@ function Harness() {
     );
   }
   if (view === "vault-browse") return <VaultBrowseLayout />;
+  if (view === "update-stuck") {
+    return (
+      <UpdateModal
+        state={{
+          kind: "available",
+          update: { version: "6.7.1", currentVersion: "6.7.0", notes: "### Fixed\n- Auto-update can no longer get stuck in a loop.", date: "2026-11-09", _handle: {} as never },
+        }}
+        playbackBlocked={false}
+        onInstall={noop}
+        onClose={noop}
+        failedInstalls={2}
+      />
+    );
+  }
   if (view === "help") {
     return (
       <div className="min-h-screen bg-helios-base">

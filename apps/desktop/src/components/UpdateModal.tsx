@@ -302,8 +302,8 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
           {failedInstalls >= AUTO_INSTALL_ATTEMPT_LIMIT && !inFlight && (
             <div className="mt-3 text-xs text-[#FFB800]" role="status">
               Helios has already tried to install v{update.version}{" "}
-              {failedInstalls === 1 ? "once" : `${failedInstalls} times`}, but you're still on v{update.currentVersion}
-              {" "}— something on this computer (often antivirus) is stopping the installer. It won't try again on its
+              {failedInstalls === 1 ? "once" : failedInstalls === 2 ? "twice" : `${failedInstalls} times`}, but you're still on
+              v{update.currentVersion} — something on this computer (often antivirus) is probably stopping the installer. It won't try again on its
               own. Click Install and restart to try once more, or{" "}
               <button
                 type="button"
