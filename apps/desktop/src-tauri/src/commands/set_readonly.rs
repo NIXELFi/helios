@@ -98,7 +98,19 @@ pub async fn sw_flip_readonly(app: AppHandle, path: String, readonly: bool) {
 const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn helper_mode(readonly: bool) -> &'static str {
-    if readonly { "ro" } else { "rw" }
+    batch_mode(readonly, false)
+}
+
+/// Helper mode for a batch: `ro` (check-in / cancel), `rw` (check-out, flip in
+/// place) or `rwr` (check-out that just DOWNLOADED newer bytes: reload from
+/// disk, so the user doesn't edit the older version SOLIDWORKS has in memory
+/// and save it over the newer one).
+fn batch_mode(readonly: bool, reload: bool) -> &'static str {
+    match (readonly, reload) {
+        (true, _) => "ro",
+        (false, true) => "rwr",
+        (false, false) => "rw",
+    }
 }
 
 /// The bundled helper, or None when it isn't shipped / resolvable.
@@ -117,7 +129,8 @@ fn resolve_sw_helper(app: &AppHandle) -> Option<PathBuf> {
 #[serde(rename_all = "camelCase")]
 pub struct SwFlipResult {
     pub path: String,
-    /// not-open | already | flipped | reloaded | failed-dirty | failed | ambiguous
+    /// not-open | already | flipped | reloaded | failed | ambiguous |
+    /// failed-dirty (rw) | stale-dirty (rwr) | flipped-dirty (ro)
     pub status: String,
 }
 
@@ -137,8 +150,13 @@ impl SwFlipBatch {
 }
 
 /// Parse the helper's result file: `sw<TAB>running|none`, then
-/// `<status><TAB><path>` per input path.
-pub fn parse_flip_results(text: &str) -> SwFlipBatch {
+/// `<status><TAB><path>` per input path. The helper writes each line as it
+/// goes, so a helper that was killed (timeout) or crashed part-way leaves a
+/// partial file: every `requested` path with no line of its own is then
+/// reported `failed` (SOLIDWORKS was running, but nobody knows what happened
+/// to that file), never silently dropped. With no `sw` line at all, it never
+/// got as far as SOLIDWORKS, so nothing is reported.
+pub fn parse_flip_results(text: &str, requested: &[String]) -> SwFlipBatch {
     let mut sw_running = false;
     let mut results = Vec::new();
     for line in text.lines() {
@@ -152,6 +170,13 @@ pub fn parse_flip_results(text: &str) -> SwFlipBatch {
     }
     if !sw_running {
         results.clear();
+        return SwFlipBatch { sw_running, results };
+    }
+    let mut seen: std::collections::HashSet<String> = results.iter().map(|r| r.path.clone()).collect();
+    for p in requested {
+        if seen.insert(p.clone()) {
+            results.push(SwFlipResult { path: p.clone(), status: "failed".to_string() });
+        }
     }
     SwFlipBatch { sw_running, results }
 }
@@ -163,13 +188,23 @@ pub fn parse_flip_results(text: &str) -> SwFlipBatch {
 /// `not-open`. Because one process covers the whole batch, bulk callers no
 /// longer pre-filter to files with a SOLIDWORKS `~$` lock file (which a
 /// document opened read-only may not have).
+///
+/// `reload` (check-out only, ignored with `readonly`) selects the `rwr` mode:
+/// the check-out downloaded newer bytes, so an open document is RELOADED from
+/// disk (`reloaded`) instead of flipped in place, or reported `stale-dirty`
+/// when it has unsaved changes a reload would throw away.
 #[tauri::command]
-pub async fn sw_flip_readonly_batch(app: AppHandle, paths: Vec<String>, readonly: bool) -> SwFlipBatch {
+pub async fn sw_flip_readonly_batch(
+    app: AppHandle,
+    paths: Vec<String>,
+    readonly: bool,
+    reload: Option<bool>,
+) -> SwFlipBatch {
     if paths.is_empty() {
         return SwFlipBatch::none();
     }
     let Some(exe) = resolve_sw_helper(&app) else { return SwFlipBatch::none() };
-    let mode = helper_mode(readonly);
+    let mode = batch_mode(readonly, reload.unwrap_or(false));
     tauri::async_runtime::spawn_blocking(move || {
         let stem = format!("helios-swflip-{}", uuid::Uuid::new_v4());
         let list = std::env::temp_dir().join(format!("{stem}.txt"));
@@ -177,8 +212,7 @@ pub async fn sw_flip_readonly_batch(app: AppHandle, paths: Vec<String>, readonly
         if fs::write(&list, paths.join("\n")).is_err() {
             return SwFlipBatch::none();
         }
-        // A refused flip retries for ~1.2 s, so scale the limit with the batch.
-        let timeout = HELPER_TIMEOUT + Duration::from_millis(1500 * paths.len().min(400) as u64);
+        let timeout = batch_timeout(mode, paths.len());
         let args = [
             "--batch".to_string(),
             mode.to_string(),
@@ -187,7 +221,7 @@ pub async fn sw_flip_readonly_batch(app: AppHandle, paths: Vec<String>, readonly
         ];
         run_helper_args(&exe, &args, timeout);
         let parsed = fs::read_to_string(&out)
-            .map(|t| parse_flip_results(&t))
+            .map(|t| parse_flip_results(&t, &paths))
             .unwrap_or_else(|_| SwFlipBatch::none());
         let _ = fs::remove_file(&list);
         let _ = fs::remove_file(&out);
@@ -195,6 +229,20 @@ pub async fn sw_flip_readonly_batch(app: AppHandle, paths: Vec<String>, readonly
     })
     .await
     .unwrap_or_else(|_| SwFlipBatch::none())
+}
+
+/// How long a batch helper may run. A refused in-place flip retries for
+/// ~1.2 s, so that scales with the batch; a reload re-reads the document (an
+/// assembly can take a while), so `rwr` gets more per file, capped so a hung
+/// helper can't wedge the flip queue for long. Lines the helper wrote before
+/// being killed still count (see [`parse_flip_results`]).
+fn batch_timeout(mode: &str, n: usize) -> Duration {
+    if mode == "rwr" {
+        let t = Duration::from_secs(60) + Duration::from_secs(20 * n.min(400) as u64);
+        t.min(Duration::from_secs(600))
+    } else {
+        HELPER_TIMEOUT + Duration::from_millis(1500 * n.min(400) as u64)
+    }
 }
 
 /// Run `exe <path> <mode>` (hidden window on Windows) and wait for it, killing
@@ -262,6 +310,7 @@ mod tests {
     fn parses_helper_results() {
         let batch = parse_flip_results(
             "\u{feff}sw\trunning\r\nflipped\tC:\\v\\a.sldprt\r\nnot-open\tC:\\v\\b.sldasm\r\nfailed-dirty\tC:\\v\\c.sldprt\r\n",
+            &[],
         );
         assert!(batch.sw_running);
         let got: Vec<(&str, &str)> =
@@ -278,10 +327,56 @@ mod tests {
 
     #[test]
     fn no_solidworks_means_no_results() {
-        let batch = parse_flip_results("sw\tnone\nnot-open\tC:\\v\\a.sldprt\n");
+        let req = vec!["C:\\v\\a.sldprt".to_string()];
+        let batch = parse_flip_results("sw\tnone\nnot-open\tC:\\v\\a.sldprt\n", &req);
         assert!(!batch.sw_running);
         assert!(batch.results.is_empty());
-        assert!(!parse_flip_results("").sw_running);
+        // Killed before it even connected: no sw line, so nothing is "failed".
+        let empty = parse_flip_results("", &req);
+        assert!(!empty.sw_running);
+        assert!(empty.results.is_empty());
+    }
+
+    #[test]
+    fn a_killed_helper_reports_unfinished_paths_as_failed() {
+        let req: Vec<String> = ["C:\\v\\a.sldprt", "C:\\v\\b.sldprt", "C:\\v\\c.sldprt", "C:\\v\\b.sldprt"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // Partial file, cut off mid-line (a torn line has no tab, so it's ignored).
+        let batch = parse_flip_results("sw\trunning\nreloaded\tC:\\v\\a.sldprt\nstale-di", &req);
+        assert!(batch.sw_running);
+        let got: Vec<(&str, &str)> =
+            batch.results.iter().map(|r| (r.status.as_str(), r.path.as_str())).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("reloaded", "C:\\v\\a.sldprt"),
+                ("failed", "C:\\v\\b.sldprt"),
+                ("failed", "C:\\v\\c.sldprt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn passes_new_statuses_through() {
+        let req = vec!["C:\\v\\a.sldprt".to_string(), "C:\\v\\b.sldprt".to_string()];
+        let batch = parse_flip_results(
+            "sw\trunning\nstale-dirty\tC:\\v\\a.sldprt\nflipped-dirty\tC:\\v\\b.sldprt\n",
+            &req,
+        );
+        let got: Vec<&str> = batch.results.iter().map(|r| r.status.as_str()).collect();
+        assert_eq!(got, vec!["stale-dirty", "flipped-dirty"]);
+    }
+
+    #[test]
+    fn picks_the_batch_mode_and_timeout() {
+        assert_eq!(batch_mode(true, true), "ro");
+        assert_eq!(batch_mode(true, false), "ro");
+        assert_eq!(batch_mode(false, true), "rwr");
+        assert_eq!(batch_mode(false, false), "rw");
+        assert!(batch_timeout("rwr", 1) > batch_timeout("rw", 1));
+        assert_eq!(batch_timeout("rwr", 10_000), Duration::from_secs(600));
     }
 
     #[test]

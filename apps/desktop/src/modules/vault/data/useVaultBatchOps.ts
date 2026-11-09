@@ -21,7 +21,7 @@ import { useRecordProperties } from "./useRecordProperties";
 import { matchLocal, normalizePathForCompare, vaultRelativePath } from "./local-match";
 import { localDestPathStrict } from "./folder-paths";
 import { ledgerRecord, loadLedger } from "./sync-ledger";
-import { setReadonly, flipSwReadonly } from "./fs-readonly";
+import { setReadonly, flipSwReadonly, type SwFlipOptions } from "./fs-readonly";
 import { activeLockMap, classifyCheckIn, classifyCheckOut, lockKind, type ClassifyCtx } from "./batch-classify";
 import { ANSYS_SOLVER_OUTPUT_NOTE } from "./ansys-solver-output";
 import { runPool } from "../lib/pool";
@@ -172,8 +172,8 @@ export function useVaultBatchOps(ctx: BatchCtx) {
    *  old filter (only files with a SOLIDWORKS `~$` lock file) skipped
    *  documents opened read-only, which may have no lock file, and those are
    *  exactly the ones a check-out needs to make editable. */
-  function flipIfOpen(_file: VaultFile, path: string, readonly: boolean) {
-    flipSwReadonly(path, readonly);
+  function flipIfOpen(_file: VaultFile, path: string, readonly: boolean, opts?: SwFlipOptions) {
+    flipSwReadonly(path, readonly, opts);
   }
 
   function holderName(lock: Lock | undefined): string {
@@ -363,6 +363,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
           return;
         }
         const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
+        let downloaded = false;
         if (ver && stale) {
           const got = await download.run(ver.sha256, dest, signal);
           if (signal.aborted) { await releaseLock.run(id); return; }
@@ -375,6 +376,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
             return;
           }
           if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), ver.sha256);
+          downloaded = true;
         }
         await setReadonly(dest, false);
         // Tell an open SOLIDWORKS doc too, so a kept checkout is editable
@@ -382,7 +384,9 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         // checkout is done, so an abort after this point KEEPS the lock
         // (releasing would leave a writable unlocked copy, which sync treats
         // as unsaved edits forever) and the row counts as checked out.
-        flipIfOpen(file, dest, false);
+        // Newer bytes were just downloaded? Then SOLIDWORKS may hold the old
+        // version in memory: reload it rather than unlock the old copy.
+        flipIfOpen(file, dest, false, { reload: downloaded });
       }
       ok++;
     }
@@ -557,7 +561,7 @@ export function useVaultBatchOps(ctx: BatchCtx) {
         // Only freeze on a successful restore: a failed one leaves the edit
         // writable (held back), never a read-only-but-dirty copy.
         await setReadonly(dest, true);
-        flipIfOpen(file, dest, true);
+        flipIfOpen(file, dest, true, { reason: "cancel" });
         if (ctx.vaultId) void ledgerRecord(ctx.vaultId, vaultRelativePath(file, ctx.folders), ver.sha256);
       }
     }

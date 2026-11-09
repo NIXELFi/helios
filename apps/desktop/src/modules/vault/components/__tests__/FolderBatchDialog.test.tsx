@@ -239,6 +239,23 @@ describe("FolderBatchDialog: check out", () => {
     expect(flipped.map(([p]) => p)).toContain("/vault/Brakes/Rotors/hub.sldprt");
   });
 
+  it("asks SOLIDWORKS to RELOAD only the files whose newer version was just downloaded", async () => {
+    vi.mocked(flipSwReadonly).mockClear();
+    renderDialog("checkout", baseCtx({
+      localFiles: [
+        local("Brakes/Rotors/hub.sldprt", "sha-hub", true), // already the latest
+        local("Brakes/Rotors/front.sldprt", "sha-old", true), // stale: v4 over open v3
+      ],
+    }));
+    await act(async () => {}); // ledger load
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /check out 4 files/i })); });
+    await waitFor(() => expect(screen.getByText(/checked out 4 of 4 files/i)).toBeInTheDocument());
+    const byPath = new Map(vi.mocked(flipSwReadonly).mock.calls.map(([p, ro, opts]) => [p, { ro, reload: opts?.reload }]));
+    expect(byPath.get("/vault/Brakes/Rotors/hub.sldprt")).toEqual({ ro: false, reload: false });
+    expect(byPath.get("/vault/Brakes/Rotors/front.sldprt")).toEqual({ ro: false, reload: true });
+    expect(downloadRun).not.toHaveBeenCalledWith("sha-hub", expect.anything(), expect.anything());
+  });
+
   it("reports the check-in failure reason for its own row", async () => {
     checkInRun.mockImplementation(async (id: string, _b: unknown, _c: unknown, opts?: { onError?: (e: Error) => void }) => {
       if (id === "caliper") { opts?.onError?.(new Error("upload: quota exceeded")); return null; }

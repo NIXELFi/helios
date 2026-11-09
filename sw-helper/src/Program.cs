@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 using SolidWorks.Interop.sldworks;
 
 namespace HeliosSwReadonly
@@ -11,9 +15,12 @@ namespace HeliosSwReadonly
     /// (and re-protect it on check-in) even when the SOLIDWORKS add-in isn't
     /// installed / is disabled / is broken.
     ///
-    /// Usage:  HeliosSwReadonly.exe "&lt;full path&gt;" &lt;rw|ro&gt;
-    ///   rw → make writable (clears the open doc's read-only state) — on check-out
-    ///   ro → make read-only — on check-in / cancel
+    /// Usage:  HeliosSwReadonly.exe "&lt;full path&gt;" &lt;rw|rwr|ro&gt;
+    ///   rw  → make writable in place (keeps the in-memory model) — on check-out
+    ///   rwr → make writable by RELOADING from disk — on a check-out that just
+    ///         downloaded newer bytes, so the user edits the new version, not the
+    ///         older one SOLIDWORKS still has in memory
+    ///   ro  → make read-only — on check-in / cancel
     ///
     /// Exit codes: 0 = handled or nothing to do (SW not running / doc not open);
     /// 1 = unexpected error; 2 = bad args. Always best-effort — the on-disk
@@ -22,31 +29,47 @@ namespace HeliosSwReadonly
     /// </summary>
     internal static class Program
     {
+        private enum Mode { Rw, Rwr, Ro }
+
         // Single file (original form, kept for compatibility):
-        //   HeliosSwReadonly.exe "<full path>" <rw|ro>
+        //   HeliosSwReadonly.exe "<full path>" <rw|rwr|ro>
         // Batch (one process and one COM connection for a whole bulk action):
-        //   HeliosSwReadonly.exe --batch <rw|ro> <list file> <result file>
+        //   HeliosSwReadonly.exe --batch <rw|rwr|ro> <list file> <result file>
         //   <list file>: UTF-8, one full path per line.
-        //   <result file>: written as UTF-8 lines. First "sw<TAB>running|none",
-        //   then one "<status><TAB><path>" per input path, where status is
-        //   not-open | already | flipped | reloaded | failed-dirty | failed | ambiguous.
+        //   <result file>: UTF-8 lines, each written and flushed as soon as it is
+        //   known, so a helper killed part-way leaves the results it got to.
+        //   First "sw<TAB>running|none", then one "<status><TAB><path>" per
+        //   input path, where status is
+        //     not-open | already | flipped | reloaded | failed | ambiguous
+        //     failed-dirty  (rw: still read-only, has unsaved changes)
+        //     stale-dirty   (rwr: open with unsaved changes, so not reloaded)
+        //     flipped-dirty (ro: made read-only, but had unsaved changes)
         [STAThread]
         private static int Main(string[] args)
         {
+            // Retry calls a busy SOLIDWORKS rejects (rebuilding, modal dialog)
+            // instead of failing them at once with RPC_E_SERVERCALL_RETRYLATER.
+            IOleMessageFilter previousFilter = null;
+            bool filterRegistered = false;
+            try { filterRegistered = CoRegisterMessageFilter(new RetryMessageFilter(), out previousFilter) == 0; }
+            catch (Exception ex) { Diag("message filter: " + ex.Message); }
             try
             {
                 if (args.Length >= 4 && args[0] == "--batch")
                 {
-                    bool ro = IsRo(args[1]);
-                    var paths = new System.Collections.Generic.List<string>();
-                    foreach (var line in System.IO.File.ReadAllLines(args[2], System.Text.Encoding.UTF8))
-                        if (!string.IsNullOrWhiteSpace(line)) paths.Add(line.Trim());
-                    var lines = Run(paths, ro);
-                    System.IO.File.WriteAllLines(args[3], lines, new System.Text.UTF8Encoding(false));
+                    var mode = ParseMode(args[1]);
+                    var paths = new List<string>();
+                    foreach (var line in File.ReadAllLines(args[2], Encoding.UTF8))
+                        if (!string.IsNullOrWhiteSpace(line)) paths.Add(line.TrimEnd('\r'));
+                    using (var fs = new FileStream(args[3], FileMode.Create, FileAccess.Write, FileShare.Read))
+                    using (var w = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" })
+                    {
+                        Run(paths, mode, line => { w.WriteLine(line); fs.Flush(true); });
+                    }
                     return 0;
                 }
                 if (args.Length < 2 || string.IsNullOrEmpty(args[0])) return 2;
-                Run(new System.Collections.Generic.List<string> { args[0] }, IsRo(args[1]));
+                Run(new List<string> { args[0] }, ParseMode(args[1]), _ => { });
                 return 0;
             }
             catch (Exception ex)
@@ -54,34 +77,47 @@ namespace HeliosSwReadonly
                 Diag("fatal: " + ex);
                 return 1;
             }
+            finally
+            {
+                if (filterRegistered)
+                {
+                    try { CoRegisterMessageFilter(previousFilter, out _); } catch { }
+                }
+            }
         }
 
-        private static bool IsRo(string mode) =>
-            mode.Equals("ro", StringComparison.OrdinalIgnoreCase) || mode == "1";
+        private static Mode ParseMode(string mode)
+        {
+            if (mode.Equals("ro", StringComparison.OrdinalIgnoreCase) || mode == "1") return Mode.Ro;
+            if (mode.Equals("rwr", StringComparison.OrdinalIgnoreCase)) return Mode.Rwr;
+            return Mode.Rw;
+        }
 
         private sealed class OpenDoc
         {
             public IModelDoc2 Doc;
+            public string Path;
             public string Norm;
-            public string Canon;
-            public string File;
+            public bool IdResolved;
+            public string Id;
         }
 
-        private static System.Collections.Generic.List<string> Run(System.Collections.Generic.List<string> targets, bool readOnly)
+        private static void Run(List<string> targets, Mode mode, Action<string> emit)
         {
-            var output = new System.Collections.Generic.List<string>();
             var sw = ConnectToSolidWorks();
-            Diag($"targets={targets.Count} want-ro={readOnly} connected={sw != null}");
-            output.Add(sw == null ? "sw	none" : "sw	running");
+            Diag($"targets={targets.Count} mode={mode} connected={sw != null}");
+            emit(sw == null ? "sw\tnone" : "sw\trunning");
             if (sw == null)
             {
-                foreach (var t in targets) output.Add("not-open	" + t);
-                return output;
+                foreach (var t in targets) emit("not-open\t" + t);
+                return;
             }
 
             // Snapshot the open documents once for the whole batch.
-            var open = new System.Collections.Generic.List<OpenDoc>();
-            if (sw.GetDocuments() is object[] docs)
+            var open = new List<OpenDoc>();
+            object docsObj = null;
+            try { docsObj = sw.GetDocuments(); } catch (Exception ex) { Diag("GetDocuments threw: " + ex.Message); }
+            if (docsObj is object[] docs)
             {
                 foreach (var o in docs)
                 {
@@ -89,8 +125,7 @@ namespace HeliosSwReadonly
                     string path;
                     try { path = doc.GetPathName(); } catch { continue; }
                     if (string.IsNullOrEmpty(path)) continue;
-                    string n = Norm(path);
-                    open.Add(new OpenDoc { Doc = doc, Norm = n, Canon = TryCanon(n), File = System.IO.Path.GetFileName(path).ToLowerInvariant() });
+                    open.Add(new OpenDoc { Doc = doc, Path = path, Norm = Norm(path) });
                     Diag($"  open: {path}");
                 }
             }
@@ -98,38 +133,57 @@ namespace HeliosSwReadonly
             foreach (var target in targets)
             {
                 string status;
-                try { status = FlipOne(open, target, readOnly); }
+                try { status = FlipOne(sw, open, target, mode); }
                 catch (Exception ex) { Diag("  error: " + ex.Message); status = "failed"; }
                 Diag($"  {status}: {target}");
-                output.Add(status + "	" + target);
+                emit(status + "\t" + target);
             }
-            return output;
         }
 
-        private static string FlipOne(System.Collections.Generic.List<OpenDoc> open, string target, bool readOnly)
+        /// <summary>The open document that IS this file: same normalized full
+        /// path, or the same file on disk (volume serial + file index) reached
+        /// through another path form (mapped drive vs UNC, 8.3 short name,
+        /// hard link). Never by file name alone: that flipped an unrelated open
+        /// "bracket.sldprt" from another folder.</summary>
+        private static List<OpenDoc> FindMatches(List<OpenDoc> open, string target)
         {
             string norm = Norm(target);
-            string canon = TryCanon(norm);
-            string file = System.IO.Path.GetFileName(target).ToLowerInvariant();
-
-            // Match by full path (canonical form handles UNC / mapped drives /
-            // 8.3 names). Fall back to the file name only when exactly ONE open
-            // document has that name: two "bracket.sldprt" from different
-            // folders must never flip the wrong one.
-            OpenDoc match = null;
+            var matches = open.FindAll(d => d.Norm == norm);
+            if (matches.Count > 0) return matches;
+            string id = FileIdentity(target);
+            if (id == null) return matches;
             foreach (var d in open)
             {
-                if ((canon != null && d.Canon != null && canon == d.Canon) || d.Norm == norm) { match = d; break; }
+                if (!d.IdResolved) { d.Id = FileIdentity(d.Path); d.IdResolved = true; }
+                if (d.Id != null && d.Id == id) matches.Add(d);
             }
-            if (match == null && !string.IsNullOrEmpty(file))
-            {
-                var byName = open.FindAll(d => d.File == file);
-                if (byName.Count > 1) return "ambiguous";
-                if (byName.Count == 1) match = byName[0];
-            }
-            if (match == null) return "not-open";
+            return matches;
+        }
 
+        private static string FlipOne(ISldWorks sw, List<OpenDoc> open, string target, Mode mode)
+        {
+            var matches = FindMatches(open, target);
+            if (matches.Count == 0) return "not-open";
+            // The same file open twice under different paths: don't guess.
+            if (matches.Count > 1) return "ambiguous";
+            var match = matches[0];
             var doc = match.Doc;
+
+            if (mode == Mode.Rwr)
+            {
+                // The bytes on disk are newer than what SOLIDWORKS loaded, so an
+                // in-place flip would let the user save old-version work over the
+                // new version. Reload instead, but never throw away unsaved edits.
+                bool? staleDirty = SafeIsDirty(doc);
+                if (staleDirty == true) return "stale-dirty";
+                if (staleDirty == null) return "failed";
+                return Reload(sw, doc, match.Path) ? "reloaded" : "failed";
+            }
+
+            bool readOnly = mode == Mode.Ro;
+            // On check-in, unsaved edits in SOLIDWORKS were NOT part of what was
+            // checked in. Read this before the flip so the user can be told.
+            bool? dirtyBefore = readOnly ? SafeIsDirty(doc) : null;
             if (SafeIsReadOnly(doc, !readOnly) == readOnly) return "already";
 
             // SetReadOnlyState flips the session state in place (no reload, the
@@ -140,7 +194,8 @@ namespace HeliosSwReadonly
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 try { doc.SetReadOnlyState(readOnly); } catch (Exception ex) { Diag("  SetReadOnlyState threw: " + ex.Message); }
-                if (SafeIsReadOnly(doc, !readOnly) == readOnly) return "flipped";
+                if (SafeIsReadOnly(doc, !readOnly) == readOnly)
+                    return readOnly && dirtyBefore == true ? "flipped-dirty" : "flipped";
                 System.Threading.Thread.Sleep(400);
             }
 
@@ -149,18 +204,36 @@ namespace HeliosSwReadonly
             // Still read-only. Reloading from the (now writable) file opens it
             // read-write, but throws away in-memory edits, so only when there
             // are none.
-            bool dirty;
-            try { dirty = doc.GetSaveFlag(); } catch { dirty = true; }
-            if (dirty) return "failed-dirty";
+            bool? dirty = SafeIsDirty(doc);
+            if (dirty == true) return "failed-dirty";
+            if (dirty == null) return "failed";
+            return Reload(sw, doc, match.Path) ? "reloaded" : "failed";
+        }
+
+        /// <summary>Reload <paramref name="doc"/> from disk as editable, discarding
+        /// nothing (callers check it isn't dirty first), and verify through a
+        /// FRESH document reference: the old IModelDoc2 may be stale after a
+        /// reload.</summary>
+        private static bool Reload(ISldWorks sw, IModelDoc2 doc, string fallbackPath)
+        {
             string path;
-            try { path = doc.GetPathName(); } catch { return "failed"; }
+            try { path = doc.GetPathName(); } catch { path = fallbackPath; }
+            if (string.IsNullOrEmpty(path)) path = fallbackPath;
+            int rc;
             try
             {
                 // ReloadOrReplace(ReadOnly, ReplaceFileName, DontSave)
-                doc.ReloadOrReplace(false, path, true);
+                rc = doc.ReloadOrReplace(false, path, true);
             }
-            catch (Exception ex) { Diag("  ReloadOrReplace threw: " + ex.Message); return "failed"; }
-            return SafeIsReadOnly(doc, true) ? "failed" : "reloaded";
+            catch (Exception ex) { Diag("  ReloadOrReplace threw: " + ex.Message); return false; }
+            Diag($"  ReloadOrReplace rc={rc}");
+            // swReloadOkay = 0, swDocumentNotChanged = 14, swReadOnlyChanged = 16
+            if (rc != 0 && rc != 14 && rc != 16) return false;
+
+            IModelDoc2 fresh = null;
+            try { fresh = sw.GetOpenDocumentByName(path) as IModelDoc2; }
+            catch (Exception ex) { Diag("  GetOpenDocumentByName threw: " + ex.Message); }
+            return !SafeIsReadOnly(fresh ?? doc, true);
         }
 
         private static bool SafeIsReadOnly(IModelDoc2 doc, bool fallback)
@@ -168,17 +241,59 @@ namespace HeliosSwReadonly
             try { return doc.IsOpenedReadOnly(); } catch { return fallback; }
         }
 
-        private static string Norm(string p) =>
-            (p ?? "").Replace('/', '\\').TrimEnd('\\').ToLowerInvariant();
-
-        /// <summary>Return the canonical (GetFullPath) form of a path for
-        /// identity comparison across UNC, mapped drives, and 8.3 name variants,
-        /// or null if the path cannot be resolved (e.g. file doesn't exist).</summary>
-        private static string TryCanon(string p)
+        /// <summary>The doc's unsaved-changes flag, or null if SOLIDWORKS kept
+        /// refusing to say (the message filter already retries busy rejections;
+        /// this covers other transient failures).</summary>
+        private static bool? SafeIsDirty(IModelDoc2 doc)
         {
-            if (string.IsNullOrEmpty(p)) return null;
-            try { return System.IO.Path.GetFullPath(p).TrimEnd('\\').ToLowerInvariant(); }
-            catch { return null; }
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                try { return doc.GetSaveFlag(); }
+                catch (Exception ex)
+                {
+                    Diag("  GetSaveFlag threw: " + ex.Message);
+                    System.Threading.Thread.Sleep(300);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Lexical normalization only: forward slashes, "." / "..",
+        /// trailing separator, case. GetFullPath does NOT resolve mapped drives,
+        /// UNC shares or 8.3 short names; <see cref="FileIdentity"/> covers those.</summary>
+        private static string Norm(string p)
+        {
+            string s = (p ?? "").Replace('/', '\\');
+            try { if (s.Length > 0) s = Path.GetFullPath(s); } catch { }
+            return s.TrimEnd('\\').ToLowerInvariant();
+        }
+
+        /// <summary>"volume serial:file index" for an existing file, or null when
+        /// it can't be opened or the filesystem reports no index (some network
+        /// shares return 0). Two path strings with the same identity are the same
+        /// file whatever path form reached it.</summary>
+        private static string FileIdentity(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            string p = path.Replace('/', '\\');
+            if (p.Length >= 260 && !p.StartsWith(@"\\?\"))
+                p = p.StartsWith(@"\\") ? @"\\?\UNC\" + p.Substring(2) : @"\\?\" + p;
+            try
+            {
+                using (var h = CreateFileW(p, FILE_READ_ATTRIBUTES, FILE_SHARE_ALL, IntPtr.Zero,
+                                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero))
+                {
+                    if (h.IsInvalid) return null;
+                    if (!GetFileInformationByHandle(h, out var info)) return null;
+                    if (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0) return null;
+                    return $"{info.dwVolumeSerialNumber:x8}:{info.nFileIndexHigh:x8}{info.nFileIndexLow:x8}";
+                }
+            }
+            catch (Exception ex)
+            {
+                Diag("  FileIdentity failed: " + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>Append a line to %TEMP%\helios_sw_helper.log when
@@ -189,8 +304,8 @@ namespace HeliosSwReadonly
             if (System.Environment.GetEnvironmentVariable("HELIOS_SW_HELPER_DEBUG") == null) return;
             try
             {
-                var f = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "helios_sw_helper.log");
-                System.IO.File.AppendAllText(f, DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + System.Environment.NewLine);
+                var f = Path.Combine(Path.GetTempPath(), "helios_sw_helper.log");
+                File.AppendAllText(f, DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + System.Environment.NewLine);
             }
             catch { }
         }
@@ -243,5 +358,67 @@ namespace HeliosSwReadonly
 
         [DllImport("ole32.dll")]
         private static extern int CreateBindCtx(int reserved, out IBindCtx ppbc);
+
+        // ---- OLE message filter: retry calls a busy SOLIDWORKS rejects ----
+
+        [DllImport("ole32.dll")]
+        private static extern int CoRegisterMessageFilter(IOleMessageFilter newFilter, out IOleMessageFilter oldFilter);
+
+        [ComImport, Guid("00000016-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IOleMessageFilter
+        {
+            [PreserveSig] int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo);
+            [PreserveSig] int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType);
+            [PreserveSig] int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType);
+        }
+
+        private sealed class RetryMessageFilter : IOleMessageFilter
+        {
+            private const int SERVERCALL_ISHANDLED = 0;
+            private const int SERVERCALL_RETRYLATER = 2;
+            private const int PENDINGMSG_WAITDEFPROCESS = 2;
+            private const int RetryDelayMs = 100;
+            private const int GiveUpAfterMs = 10000;
+
+            public int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo) =>
+                SERVERCALL_ISHANDLED;
+
+            // dwTickCount = ms since the call was first made. Return a delay to
+            // retry after, or -1 to give up (the call then fails as before).
+            public int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType) =>
+                dwRejectType == SERVERCALL_RETRYLATER && dwTickCount < GiveUpAfterMs ? RetryDelayMs : -1;
+
+            public int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType) =>
+                PENDINGMSG_WAITDEFPROCESS;
+        }
+
+        // ---- File identity (volume serial + file index) ----
+
+        private const uint FILE_READ_ATTRIBUTES = 0x80;
+        private const uint FILE_SHARE_ALL = 0x7; // READ | WRITE | DELETE
+        private const uint OPEN_EXISTING = 3;
+        private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BY_HANDLE_FILE_INFORMATION
+        {
+            public uint dwFileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftCreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftLastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftLastWriteTime;
+            public uint dwVolumeSerialNumber;
+            public uint nFileSizeHigh;
+            public uint nFileSizeLow;
+            public uint nNumberOfLinks;
+            public uint nFileIndexHigh;
+            public uint nFileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+            IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
     }
 }

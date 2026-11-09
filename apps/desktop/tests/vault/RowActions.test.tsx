@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider, useUser } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CheckInButton, CheckOutButton, CancelButton } from "../../src/modules/vault/components/RowActions";
+import { flipSwReadonly } from "../../src/modules/vault/data/fs-readonly";
 
 // Capture the real-vault read-only transitions + download-on-checkout/undo.
 const roCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
@@ -127,7 +128,7 @@ function wrap(client: SupabaseClient, children: React.ReactNode) {
 }
 
 describe("RowActions real-vault read-only transitions", () => {
-  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; dlResult.ok = true; });
+  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; dlResult.ok = true; vi.mocked(flipSwReadonly).mockClear(); });
 
   it("check-out downloads the file if missing, then makes it writable", async () => {
     render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" /><UserProbe /></>));
@@ -164,6 +165,8 @@ describe("RowActions real-vault read-only transitions", () => {
     fireEvent.click(screen.getByRole("button", { name: /check out/i }));
     await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
     expect(dlCalls).toHaveLength(0);
+    // Nothing new was downloaded, so an open SOLIDWORKS copy is current: flip in place.
+    expect(flipSwReadonly).toHaveBeenCalledWith("/v/a.bin", false, { reload: false });
   });
 
   describe("check-out over a writable local copy that differs from the vault", () => {
@@ -193,6 +196,7 @@ describe("RowActions real-vault read-only transitions", () => {
       fireEvent.click(await screen.findByRole("button", { name: /keep my copy/i }));
       await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
       expect(dlCalls).toHaveLength(0);
+      expect(flipSwReadonly).toHaveBeenCalledWith("/v/a.bin", false, { reload: false });
     });
 
     it("Replace with latest downloads over it (the previous behavior)", async () => {
@@ -210,6 +214,9 @@ describe("RowActions real-vault read-only transitions", () => {
       fireEvent.click(screen.getByRole("button", { name: /check out/i }));
       await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
       expect(screen.queryByRole("button", { name: /keep my copy/i })).not.toBeInTheDocument();
+      // A newer version landed over the local copy: SOLIDWORKS may hold the
+      // old one in memory, so it must RELOAD rather than unlock it in place.
+      await waitFor(() => expect(flipSwReadonly).toHaveBeenCalledWith("/v/a.bin", false, { reload: true }));
     });
 
     it("does not ask when the writable copy already matches the latest version", async () => {
@@ -362,6 +369,7 @@ describe("RowActions real-vault read-only transitions", () => {
     fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
     await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
     expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true });
+    expect(flipSwReadonly).toHaveBeenCalledWith("/v/a.bin", true, { reason: "cancel" });
   });
 });
 
