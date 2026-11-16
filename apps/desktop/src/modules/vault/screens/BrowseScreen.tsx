@@ -311,6 +311,7 @@ export function BrowseScreen() {
     // pdm_add_and_lock with guaranteed RLS denials on every scan pass.
     enabled: autoSyncEnabled && canEdit,
     unmatched,
+    folders,
     onAdded: () => {
       refetchAllFiles();
       refetchFolders();

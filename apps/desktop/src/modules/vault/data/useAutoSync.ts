@@ -768,6 +768,9 @@ export function useAutoSync(input: {
   // from spinning the worker at full speed when the vault is already in sync.
   const COOLDOWN_MS = 2000;
   const QUIET_MS = AUTO_SYNC_QUIET_MS;
+  const QUIET_MAX_WAIT_MS = 5_000;
+  // When the oldest trigger not yet served by a pass arrived.
+  const firstTriggerAt = useRef<number | null>(null);
   const lastFinishedAt = useRef(0);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -797,8 +800,16 @@ export function useAutoSync(input: {
     // insert, version insert, file update, lock) a few ms apart; each used to
     // start its own full pass over every vault file. Trailing by QUIET_MS (the
     // cleanup below clears the timer on each new trigger) folds them into one.
-    const wait = Math.max(QUIET_MS, COOLDOWN_MS - (Date.now() - lastFinishedAt.current));
+    // Capped by QUIET_MAX_WAIT_MS: a bulk add whose files land faster than
+    // QUIET_MS apart would otherwise keep restarting the window and run NO
+    // pass (no downloads of teammates' check-ins) until the drop finished.
+    const now = Date.now();
+    if (firstTriggerAt.current === null) firstTriggerAt.current = now;
+    const cooldownLeft = COOLDOWN_MS - (now - lastFinishedAt.current);
+    const quietLeft = Math.min(QUIET_MS, firstTriggerAt.current + QUIET_MAX_WAIT_MS - now);
+    const wait = Math.max(0, cooldownLeft, quietLeft);
     pending.current = setTimeout(() => {
+      firstTriggerAt.current = null;
       pending.current = null;
       void run();
     }, wait);

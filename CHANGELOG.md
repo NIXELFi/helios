@@ -28,8 +28,8 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- **Vault: adding lots of files at once is much faster.** Dropping a folder of test data (or any big batch) into your vault folder used to add only one or two files at a time, then pause, reload the whole vault and start over — a 240-file MoTeC drop took over half an hour of stop-and-go. Auto-add now works through the whole batch in one go and refreshes the vault once at the end.
-- **Vault: far less background traffic while files are being added or checked in.** Search properties are now fetched only for the new files instead of re-downloading them for the entire vault after every change, and repeated refresh requests for the file list and checkouts are merged into one.
+- **Vault: adding lots of files at once is much faster.** Dropping a folder of test data (or any big batch) into your vault folder used to add only one or two files at a time, then pause, reload the whole vault and start over — a 240-file MoTeC drop took over half an hour of stop-and-go. Auto-add now works through the whole batch in one go, refreshes the vault once at the end, and no longer sits idle for up to 30 seconds waiting to notice new files.
+- **Vault: far less background traffic while files are being added or checked in.** Search properties are now fetched only for the new files instead of re-downloading them for the entire vault after every change, repeated refresh requests for the file list and checkouts are merged into one, and the local folder tree is no longer re-created hundreds of times per added file.
 - **Vault: no request flood when your laptop wakes up or changes network.** The "did anything change?" check could fire hundreds of times in a couple of seconds; it now runs at most once at a time.
 
 ## [6.7.1] - 2026-11-09

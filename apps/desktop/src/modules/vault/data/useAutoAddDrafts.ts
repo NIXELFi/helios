@@ -78,8 +78,14 @@ export function useAutoAddDrafts(opts: {
   enabled: boolean;
   unmatched: LocalFile[];
   onAdded: () => void;
+  /** The vault's folder list. Any change to it (realtime refetch after a
+   *  create / rename / move / delete) drops the pass's folder memo, so a
+   *  folder deleted mid-pass is not reused for the remaining files. */
+  folders?: unknown[] | null;
 }): AutoAddStatus {
-  const { vaultId, enabled, unmatched, onAdded } = opts;
+  const { vaultId, enabled, unmatched, onAdded, folders } = opts;
+  const foldersRef = useRef(folders);
+  foldersRef.current = folders;
   const addFile = useAddLocalFile();
   const [status, setStatus] = useState<AutoAddStatus>({ adding: null, failures: [], lastAdded: [] });
   const busyRef = useRef(false);
@@ -149,7 +155,15 @@ export function useAutoAddDrafts(opts: {
         // One folder-lookup memo per pass: files of the same drop share their
         // folder chain instead of each re-querying every path segment.
         const folderCache: FolderLookupCache = new Map();
+        let cacheFolders = foldersRef.current;
         for (const f of candidates) {
+          // A folder change since the memo was filled may be a delete or move
+          // of a memoized folder (pdm_add_and_lock does not refuse a deleted
+          // folder_id) — re-query rather than file into it.
+          if (foldersRef.current !== cacheFolders) {
+            folderCache.clear();
+            cacheFolders = foldersRef.current;
+          }
           if (!isCurrent()) break;
           // An EMPTY latest list is not evidence: BrowseScreen yields [] while
           // its snapshot is inconsistent (a file row whose new folder hasn't

@@ -170,4 +170,32 @@ describe("useAutoAddDrafts pass", () => {
     await releaseNext("1.csv");
     await waitFor(() => expect(result.current.adding).toBeNull());
   });
+
+  it("drops the folder memo when the folder list changes mid-pass (deleted-folder guard)", async () => {
+    const files = [lf("d/1.csv"), lf("d/2.csv")];
+    const caches: Array<Map<string, string>> = [];
+    run.mockImplementation((_v: string, f: LocalFile, _p?: string, _s?: string, cache?: Map<string, string>) => {
+      caches.push(cache!);
+      cache!.set("vault|parent|d", "folder-d"); // the add memoizes its folder
+      return new Promise((resolve) => {
+        addCalls.push({ path: f.relativePath, resolve: () => resolve({ ok: true, lockAcquired: true, alreadyExisted: false }) });
+      });
+    });
+    const { rerender } = renderHook(
+      (p: { folders: unknown[] }) =>
+        useAutoAddDrafts({ vaultId: "v1" as never, enabled: true, unmatched: files, onAdded: () => {}, folders: p.folders }),
+      { initialProps: { folders: [{ id: "a" }] } },
+    );
+    await waitFor(() => expect(addCalls.length).toBe(1));
+    // A realtime folder refetch lands (e.g. someone deleted folder d).
+    rerender({ folders: [{ id: "a" }] });
+    const sizeBefore = caches[0]!.size;
+    await releaseNext("d/1.csv");
+    await waitFor(() => expect(addCalls.length).toBe(1));
+    expect(sizeBefore).toBe(1);
+    // Same Map object, but it was cleared before file 2 ran (then re-filled by the mock).
+    expect(caches[1]).toBe(caches[0]);
+    await releaseNext("d/2.csv");
+    run.mockReset();
+  });
 });

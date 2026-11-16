@@ -581,6 +581,38 @@ describe("useAutoSync", () => {
     await act(async () => { resolveDownload("sha-new-abort", true); });
   });
 
+  it("a stream of triggers faster than the quiet window still runs a pass (max wait)", async () => {
+    // 2026-11-16: the 750 ms trailing quiet window restarts on every trigger;
+    // a bulk add landing files < 750 ms apart must not starve auto-sync.
+    vi.useFakeTimers();
+    try {
+      const base = {
+        enabled: true, localFiles: EMPTY_LOCAL, locks: EMPTY_LOCKS, currentUserId: "u1",
+        vaultRoot: "/tmp/vault", vaultId: null, folders: EMPTY_FOLDERS, onComplete: () => {},
+      };
+      const mk = (i: number) => ({
+        files: [makeFile(`mw${i}`, `mw${i}.bin`)] as VaultFile[],
+        versionsByFileId: new Map<string, Version[]>([[`mw${i}`, [makeVersion(`mw${i}`, `sha-mw-${i}`)]]]),
+      });
+      const { rerender } = renderHook(
+        ({ files, versionsByFileId }) => useAutoSync({ ...base, files, versionsByFileId }),
+        { wrapper, initialProps: mk(0) },
+      );
+      let started = false;
+      for (let i = 1; i <= 16 && !started; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS - 250); });
+        started = [...downloadResolvers.keys()].some((k) => k.startsWith("sha-mw-"));
+        if (!started) rerender(mk(i));
+      }
+      expect(started).toBe(true);
+      for (const k of [...downloadResolvers.keys()]) {
+        if (k.startsWith("sha-mw-")) await act(async () => { resolveDownload(k, true); });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honors the cooldown after a superseded run finishes (lastFinishedAt is not left stale)", async () => {
     // Regression guard for the audit fix: a superseded run skips the final-
     // commit block, so it used to never set `lastFinishedAt`. With the cooldown

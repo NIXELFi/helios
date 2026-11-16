@@ -33,12 +33,16 @@ export async function ensureLocalFolderTree(folders: Folder[], vaultRoot: string
   const prev = materialized.get(folders);
   const now = Date.now();
   if (prev && prev.root === vaultRoot && now - prev.at < REMATERIALIZE_MS) return;
-  materialized.set(folders, { root: vaultRoot, at: now });
+  let anyOk = false;
   for (const p of localFolderPaths(folders, vaultRoot)) {
     try {
       await mkdir(p, { recursive: true });
+      anyOk = true;
     } catch {
       // exists / permission — fine; next sync retries.
     }
   }
+  // Remember only a run that actually reached the disk: if every mkdir failed
+  // (drive not ready, permissions) the next pass must try again at once.
+  if (anyOk) materialized.set(folders, { root: vaultRoot, at: now });
 }
