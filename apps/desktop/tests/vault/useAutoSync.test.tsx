@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { useAutoSync } from "../../src/modules/vault/data/useAutoSync";
+import { useAutoSync, AUTO_SYNC_QUIET_MS } from "../../src/modules/vault/data/useAutoSync";
 import { onLocalDeleteBlocked, onLocalDeletesPropagated } from "../../src/modules/vault/data/local-delete-events";
 import type { Folder, Lock, VaultFile, Version } from "../../src/modules/vault/data/types";
 import type { LocalFile } from "../../src/modules/vault/data/useLocalFolderScan";
@@ -627,14 +627,14 @@ describe("useAutoSync", () => {
         { wrapper, initialProps: { files: filesA, versionsByFileId: versionsA } },
       );
 
-      // gen-1's trigger timer fires (wait=0 since lastFinishedAt starts at 0).
-      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      // gen-1's trigger timer fires (only the quiet window: lastFinishedAt is 0).
+      await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS + 1); });
       expect(downloadResolvers.has("sha-cd-1")).toBe(true);
 
       // Supersede gen-1 with gen-2. gen-2's timer is scheduled with wait=0
       // (lastFinishedAt still 0 here). Let it fire so gen-2 is now in flight.
       rerender({ files: filesB, versionsByFileId: versionsB });
-      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS + 1); });
       expect(downloadResolvers.has("sha-cd-2")).toBe(true);
 
       // NOW let the superseded gen-1 download resolve. Its post-download path

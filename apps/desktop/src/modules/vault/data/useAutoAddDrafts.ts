@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { stat } from "@tauri-apps/plugin-fs";
 
-import { useAddLocalFile } from "./useAddLocalFile";
+import { useAddLocalFile, type FolderLookupCache } from "./useAddLocalFile";
 import { loadLedger, TOMBSTONE_COOLOFF_MS, type SyncLedger } from "./sync-ledger";
 import { normalizePathForCompare } from "./local-match";
 import type { LocalFile } from "./useLocalFolderScan";
@@ -146,6 +146,9 @@ export function useAutoAddDrafts(opts: {
 
         const added: string[] = [];
         const failures: { name: string; error: string }[] = [];
+        // One folder-lookup memo per pass: files of the same drop share their
+        // folder chain instead of each re-querying every path segment.
+        const folderCache: FolderLookupCache = new Map();
         for (const f of candidates) {
           if (!isCurrent()) break;
           // An EMPTY latest list is not evidence: BrowseScreen yields [] while
@@ -158,7 +161,7 @@ export function useAutoAddDrafts(opts: {
           setStatus((s) => ({ ...s, adding: f.basename }));
           // "auto": a huge file is left for a person to add by hand, never
           // a dialog popped up from a background job.
-          const r = await addRunRef.current(vaultId, f, undefined, "auto");
+          const r = await addRunRef.current(vaultId, f, undefined, "auto", folderCache);
           if (r.ok) added.push(f.basename);
           else failures.push({ name: f.basename, error: r.error ?? "failed" });
         }

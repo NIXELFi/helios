@@ -146,3 +146,26 @@ describe("on lookup miss", () => {
     );
   });
 });
+
+it("a shared FolderLookupCache skips repeat lookups within one bulk run (2026-11-16)", async () => {
+  let lookups = 0;
+  const base = folderLookup((name, parent) => {
+    lookups++;
+    if (name === "Testing" && parent === null) return [{ id: "t1", name, parent_id: null }];
+    if (name === "csv" && parent === "t1") return [{ id: "c1", name, parent_id: "t1" }];
+    return [];
+  });
+  const rpc = vi.fn();
+  const client = { from: base, rpc };
+  const cache = new Map<string, string>();
+  const a = await ensureFolderHierarchy(client, "vault-1", ["Testing", "csv"], undefined, cache as never);
+  expect(a.folderId).toBe("c1");
+  expect(lookups).toBe(2);
+  const b = await ensureFolderHierarchy(client, "vault-1", ["Testing", "csv"], undefined, cache as never);
+  expect(b.folderId).toBe("c1");
+  expect(lookups).toBe(2); // second file of the drop: no queries
+  // The memo is keyed by vault: another vault re-queries.
+  await ensureFolderHierarchy(client, "vault-2", ["Testing"], undefined, cache as never);
+  expect(lookups).toBe(3);
+  expect(rpc).not.toHaveBeenCalled();
+});

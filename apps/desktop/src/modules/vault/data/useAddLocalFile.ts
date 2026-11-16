@@ -107,16 +107,34 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * the name (resurrects it empty — previously a permanent unique-violation,
  * audit M2).
  */
+/**
+ * Folder-id memo for one bulk add (vault|parent|exact segment → folder id).
+ * Without it every file re-walked its whole path with one sequential query per
+ * segment — ~1,200 round trips for a 240-file drop five folders deep. Scoped
+ * to a single pass and cleared on any failed add, so the "query live" rule
+ * above still holds across passes (a folder deleted meanwhile costs at most
+ * one failed add, retried later).
+ */
+export type FolderLookupCache = Map<string, FolderId>;
+
 export async function ensureFolderHierarchy(
   client: any,
   vaultId: VaultId,
   relativeDirSegments: string[],
   createdOut?: FolderId[],
+  /** Optional lookup memo shared across ONE bulk run (see FolderLookupCache). */
+  cache?: FolderLookupCache,
 ): Promise<{ folderId: FolderId | null; createdFolderIds: FolderId[] }> {
   let parentId: FolderId | null = null;
   const createdFolderIds: FolderId[] = createdOut ?? [];
 
   for (const seg of relativeDirSegments) {
+    const memoKey: string = `${vaultId}|${parentId ?? ""}|${seg}`;
+    const memo: FolderId | undefined = cache?.get(memoKey);
+    if (memo) {
+      parentId = memo;
+      continue;
+    }
     // Look up: does a folder with (vault_id, parent_id, name) already exist?
     // supabase-js distinguishes `IS NULL` (.is) from value match (.eq) for the
     // parent_id of root-level folders; using .eq with null silently misses.
@@ -157,6 +175,7 @@ export async function ensureFolderHierarchy(
       named.find((r) => r.name === seg) ?? named.find((r) => r.name.toLowerCase() === lowerSeg);
     if (found) {
       parentId = found.id;
+      cache?.set(memoKey, parentId);
       continue;
     }
     const { data, error } = await client.rpc("pdm_create_folder", {
@@ -170,6 +189,7 @@ export async function ensureFolderHierarchy(
     // A row we found live (created:false, resurrected:false = another op won a
     // race) existed anyway — only rows this call materialized are ours to undo.
     if (res.created || res.resurrected) createdFolderIds.push(parentId);
+    cache?.set(memoKey, parentId);
   }
 
   return { folderId: parentId, createdFolderIds };
@@ -210,6 +230,8 @@ export function useAddLocalFile() {
       targetPrefix?: string,
       /** Who asked; decides how the huge-file warning is shown. */
       source: UploadSource = "user",
+      /** Bulk callers: a folder memo shared across this run's files. */
+      folderCache?: FolderLookupCache,
     ): Promise<AddLocalFileResult> => {
       if (!user) {
         const msg = "not authenticated";
@@ -255,7 +277,7 @@ export function useAddLocalFile() {
         const segments = effectiveRelPath.split("/");
         const fileName = segments[segments.length - 1];
         const dirSegments = segments.slice(0, -1);
-        const { folderId } = await ensureFolderHierarchy(client, vaultId, dirSegments, createdFolderIds);
+        const { folderId } = await ensureFolderHierarchy(client, vaultId, dirSegments, createdFolderIds, folderCache);
 
         // 2. Resolve sha256 + size. The local-folder scan already computed and
         //    cached local.sha256 (and sizeBytes) — reuse it instead of
@@ -346,6 +368,9 @@ export function useAddLocalFile() {
         setLoading(false);
         return { ok: true, lockAcquired, alreadyExisted };
       } catch (e) {
+        // A cached folder may be the reason this failed (deleted meanwhile, or
+        // removed by the cleanup just below) — the rest of the run re-queries.
+        folderCache?.clear();
         // Undo folders this add materialized but never filled (audit M5: a
         // failed read/upload/RPC used to strand the just-created chain).
         // Deepest-first so each parent is empty by the time we reach it. The

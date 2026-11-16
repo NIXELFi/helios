@@ -95,6 +95,10 @@ export function nextRetryInMs(map: FailedDownloads, now: number): number | null 
   return earliest === null ? null : Math.max(0, earliest - now);
 }
 
+/** Trailing quiet window before an auto-sync pass starts (see the trigger
+ *  effect): one add / check-in's burst of realtime events runs ONE pass. */
+export const AUTO_SYNC_QUIET_MS = 750;
+
 /**
  * Background syncer for the Vault. Whenever vault rows or local-scan results
  * change, a pass runs that downloads every file the user hasn't locked and
@@ -763,6 +767,7 @@ export function useAutoSync(input: {
   // of the next. Stops dependency churn / rescan-after-pass / realtime ticks
   // from spinning the worker at full speed when the vault is already in sync.
   const COOLDOWN_MS = 2000;
+  const QUIET_MS = AUTO_SYNC_QUIET_MS;
   const lastFinishedAt = useRef(0);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -788,7 +793,11 @@ export function useAutoSync(input: {
       activeAbortRef.current = null;
     }
     if (pending.current) return; // already scheduled
-    const wait = Math.max(0, COOLDOWN_MS - (Date.now() - lastFinishedAt.current));
+    // QUIET_MS: one add or check-in lands as 3–4 realtime events (file
+    // insert, version insert, file update, lock) a few ms apart; each used to
+    // start its own full pass over every vault file. Trailing by QUIET_MS (the
+    // cleanup below clears the timer on each new trigger) folds them into one.
+    const wait = Math.max(QUIET_MS, COOLDOWN_MS - (Date.now() - lastFinishedAt.current));
     pending.current = setTimeout(() => {
       pending.current = null;
       void run();
