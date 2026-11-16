@@ -3,6 +3,9 @@ import { useSupabaseClient } from "@helios/auth";
 import type { VaultId } from "./types";
 import { cursorChanged, fetchVaultCursor, type VaultCursor } from "./vault-cursor";
 
+/** Minimum spacing for the immediate probe an effect re-run fires. */
+export const MIN_PROBE_GAP_MS = 2_000;
+
 /**
  * Periodic safety net behind realtime, WITHOUT the per-cycle full-catalog pull.
  *
@@ -53,14 +56,33 @@ export function useVaultCursor(
     cursor: null,
   });
 
+  // Probe throttle, also kept across effect re-runs and keyed by vault. Every
+  // re-run of the effect below probes immediately, so a dependency that flaps
+  // (2026-11-16: a laptop waking onto a new network) re-armed it hundreds of
+  // times — 291 vault_cursor RPCs in two seconds from one client, each one
+  // reconciling. At most one probe is in flight, and the immediate catch-up
+  // probe is skipped when one ran within MIN_PROBE_GAP_MS.
+  const probeStateRef = useRef<{ vaultId: VaultId | undefined; inFlight: boolean; lastAt: number }>({
+    vaultId: undefined,
+    inFlight: false,
+    lastAt: 0,
+  });
+
   useEffect(() => {
     if (!vaultId || !enabled) return;
     if (lastSeenRef.current.vaultId !== vaultId) {
       lastSeenRef.current = { vaultId, cursor: null };
     }
+    if (probeStateRef.current.vaultId !== vaultId) {
+      probeStateRef.current = { vaultId, inFlight: false, lastAt: 0 };
+    }
+    const gate = probeStateRef.current;
     let disposed = false;
 
     const probe = async () => {
+      if (gate.inFlight) return; // the running probe answers for this tick too
+      gate.inFlight = true;
+      gate.lastAt = Date.now();
       try {
         const next = await fetchVaultCursor(client, vaultId);
         if (disposed) return;
@@ -72,10 +94,14 @@ export function useVaultCursor(
         // full reconcile and leave the baseline untouched so the next good
         // probe compares against the last state we really saw.
         if (!disposed) onChangeRef.current(null, null);
+      } finally {
+        gate.inFlight = false;
       }
     };
 
-    void probe(); // baseline (or catch-up after a hidden stretch), then poll
+    // Baseline (or catch-up after a hidden stretch), then poll — unless a
+    // probe for this vault is running or ran moments ago (a re-run storm).
+    if (!gate.inFlight && Date.now() - gate.lastAt >= MIN_PROBE_GAP_MS) void probe();
     const id = setInterval(() => void probe(), intervalMs);
     return () => {
       disposed = true;

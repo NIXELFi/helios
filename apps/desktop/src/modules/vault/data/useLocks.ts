@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { Lock, QueryResult } from "./types";
 import { fetchAllRows } from "./paginate";
@@ -31,6 +31,9 @@ function sameLocks(a: Lock[], b: Lock[]): boolean {
   return true;
 }
 
+/** Window in which repeated lock-list refetch requests share one pull. */
+export const LOCKS_COALESCE_MS = 250;
+
 export function useLocks(): QueryResult<Lock[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<Lock[] | null>(null);
@@ -46,9 +49,23 @@ export function useLocks(): QueryResult<Lock[]> {
   // force-unlock triggers an immediate refetch — instead of waiting for the
   // useVaultRealtime onLock event to land. Closes the brief staleness
   // window that the audit identified.
-  useEffect(() => {
-    return subscribeLockChanges(() => setTick((t) => t + 1));
+  // Coalesced refetch: one add or check-in signals a lock change several times
+  // within a few hundred ms (the local notify, the realtime lock event, the
+  // cursor reconcile). Each used to start its own paginated pull of every
+  // active lock; requests inside LOCKS_COALESCE_MS now share one pull.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetch = useCallback(() => {
+    if (timerRef.current) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setTick((t) => t + 1);
+    }, LOCKS_COALESCE_MS);
   }, []);
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  useEffect(() => subscribeLockChanges(refetch), [refetch]);
 
   useEffect(() => {
     // `mounted` doubles as the supersede guard: the cleanup below runs when a
@@ -68,6 +85,7 @@ export function useLocks(): QueryResult<Lock[]> {
           .select("*")
           .is("released_at", null)
           .order("id", { ascending: true }),
+        () => !mounted,
       );
       if (!mounted) return;
       if (err) {
@@ -86,7 +104,6 @@ export function useLocks(): QueryResult<Lock[]> {
     };
   }, [client, tick]);
 
-  const refetch = useCallback(() => setTick((t) => t + 1), []);
   // Project the optimistic overlay onto the canonical list. Same reference as
   // `data` when the overlay is empty (the common case), so this adds no churn.
   const view = useMemo(
