@@ -31,6 +31,8 @@ import {
   versionIdsToFetch,
   buildPropertiesMap,
   DEBOUNCE_MS,
+  MAX_WAIT_MS,
+  SW_RECHECK_MS,
   type CachedVersionProps,
 } from "../useVaultProperties";
 
@@ -52,23 +54,28 @@ async function flush() {
 
 describe("pure helpers", () => {
   it("fetches uncached ids, and re-checks only SOLIDWORKS files cached as empty", () => {
+    const T = 1_000_000_000;
     const cache = new Map<string, CachedVersionProps>([
-      ["v1", { fileId: "a", properties: null }],
-      ["v2", { fileId: "b", properties: null }],
-      ["v3", { fileId: "c", properties: [{ name: "Material", value: "Al" } as never] }],
+      ["v1", { fileId: "a", properties: null, checkedAt: T }],
+      ["v2", { fileId: "b", properties: null, checkedAt: T }],
+      ["v3", { fileId: "c", properties: [{ name: "Material", value: "Al" } as never], checkedAt: T }],
+      ["v5", { fileId: "f", properties: null, checkedAt: T }],
     ]);
-    const out = versionIdsToFetch(
-      [file("a", "v1", "a.csv"), file("b", "v2", "b.SLDPRT"), file("c", "v3"), file("d", "v4"), file("e", null)],
-      cache,
-    );
-    expect(out).toEqual(["v2", "v4"]);
+    const files = [
+      file("a", "v1", "a.csv"), file("b", "v2", "b.SLDPRT"), file("c", "v3"),
+      file("d", "v4"), file("e", null), file("f", "v5", "f.sldasm"),
+    ];
+    // Just checked: only the never-cached id.
+    expect(versionIdsToFetch(files, cache, T + 1_000)).toEqual(["v4"]);
+    // After the recheck window: SOLIDWORKS "none" rows are asked again, the csv is not.
+    expect(versionIdsToFetch(files, cache, T + SW_RECHECK_MS)).toEqual(["v2", "v4", "v5"]);
   });
 
   it("builds the map keyed by the current file id, skipping empty rows", () => {
     const p = [{ name: "Material", value: "Al" }] as never;
     const cache = new Map<string, CachedVersionProps>([
-      ["v1", { fileId: "old", properties: p }],
-      ["v2", { fileId: "b", properties: null }],
+      ["v1", { fileId: "old", properties: p, checkedAt: 0 }],
+      ["v2", { fileId: "b", properties: null, checkedAt: 0 }],
     ]);
     const map = buildPropertiesMap([file("a", "v1"), file("b", "v2")], cache);
     expect([...map.keys()]).toEqual(["a"]);
@@ -103,6 +110,34 @@ describe("useVaultProperties", () => {
     rerender({ files: [file("a", "v1"), file("b", "v2"), file("c", "v3")] });
     await flush();
     expect(inCalls).toEqual([["v1", "v2", "v3"]]);
+  });
+
+  it("does not re-ask for a SOLIDWORKS file without properties on every change", async () => {
+    const { rerender } = renderHook(
+      (p: { files: never[] }) => useVaultProperties("vault" as never, p.files),
+      { initialProps: { files: [file("a", "v1", "a.sldprt")] } },
+    );
+    await flush();
+    inCalls.length = 0;
+    rerender({ files: [file("a", "v1", "a.sldprt"), file("b", "v2")] });
+    await flush();
+    expect(inCalls).toEqual([["v2"]]);
+  });
+
+  it("still refreshes during a burst that never pauses (max wait)", async () => {
+    const { rerender } = renderHook(
+      (p: { files: never[] }) => useVaultProperties("vault" as never, p.files),
+      { initialProps: { files: [file("a", "v1")] } },
+    );
+    const files: never[] = [file("a", "v1")];
+    for (let i = 2; i < 20; i++) {
+      files.push(file(`f${i}`, `v${i}`));
+      rerender({ files: [...files] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(DEBOUNCE_MS - 100); });
+    }
+    // 18 changes × 650 ms ≈ 11.7 s with no pause: at least two refreshes ran.
+    expect(inCalls.length).toBeGreaterThanOrEqual(2);
+    expect(MAX_WAIT_MS).toBeLessThan(18 * (DEBOUNCE_MS - 100));
   });
 
   it("resets on a vault switch", async () => {

@@ -148,7 +148,12 @@ export function useAutoAddDrafts(opts: {
         const failures: { name: string; error: string }[] = [];
         for (const f of candidates) {
           if (!isCurrent()) break;
-          if (!stillUnmatched(latestUnmatchedRef.current, f)) continue;
+          // An EMPTY latest list is not evidence: BrowseScreen yields [] while
+          // its snapshot is inconsistent (a file row whose new folder hasn't
+          // been fetched yet — every add into a fresh subfolder). Keep going;
+          // re-adding an existing row is idempotent (created:false).
+          const latest = latestUnmatchedRef.current;
+          if (latest.length > 0 && !stillUnmatched(latest, f)) continue;
           attemptsRef.current.set(f.relativePath, Date.now());
           setStatus((s) => ({ ...s, adding: f.basename }));
           // "auto": a huge file is left for a person to add by hand, never
@@ -163,7 +168,9 @@ export function useAutoAddDrafts(opts: {
         if (added.length > 0) onAddedRef.current();
       } finally {
         busyRef.current = false;
-        if (isCurrent()) setStatus((s) => (s.adding === null ? s : { ...s, adding: null }));
+        // Always clear the "Vaulting …" banner, even for a pass a vault switch
+        // stopped — the same hook instance carries on into the new vault.
+        setStatus((s) => (s.adding === null ? s : { ...s, adding: null }));
         // Something changed while we were busy (new files, a vault switch, a
         // fresh tick) — look again now that we're free.
         if (rerunRef.current) {

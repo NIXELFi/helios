@@ -52,17 +52,33 @@ export function useLocks(): QueryResult<Lock[]> {
   // Coalesced refetch: one add or check-in signals a lock change several times
   // within a few hundred ms (the local notify, the realtime lock event, the
   // cursor reconcile). Each used to start its own paginated pull of every
-  // active lock; requests inside LOCKS_COALESCE_MS now share one pull.
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refetch = useCallback(() => {
-    if (timerRef.current) return;
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      setTick((t) => t + 1);
-    }, LOCKS_COALESCE_MS);
-  }, []);
+  // active lock; now the first starts at once and the rest of the burst
+  // (inside LOCKS_COALESCE_MS) shares one follow-up pull.
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchPendingRef = useRef(false);
   useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = null;
+    refetchPendingRef.current = false;
+  }, []);
+  // Leading edge: an idle hook refetches AT ONCE (a fresh checkout must not
+  // wait); further requests inside the window collapse into one trailing pull.
+  const refetch = useCallback(() => {
+    if (refetchTimerRef.current) {
+      refetchPendingRef.current = true;
+      return;
+    }
+    setTick((t) => t + 1);
+    const close = () => {
+      if (refetchPendingRef.current) {
+        refetchPendingRef.current = false;
+        setTick((t) => t + 1);
+        refetchTimerRef.current = setTimeout(close, LOCKS_COALESCE_MS);
+      } else {
+        refetchTimerRef.current = null;
+      }
+    };
+    refetchTimerRef.current = setTimeout(close, LOCKS_COALESCE_MS);
   }, []);
 
   useEffect(() => subscribeLockChanges(refetch), [refetch]);

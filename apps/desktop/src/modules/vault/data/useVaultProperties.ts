@@ -14,10 +14,13 @@
 // requests per added file, 4–6 overlapping copies of the same chunks, ~4.9 k
 // requests in two hours, plus the main-thread work of rebuilding the map each
 // time. Now:
-//   - results are cached per version id (versions are append-only, so a
-//     version's properties only ever go from "not parsed yet" to set),
+//   - results are cached per version id. A version's properties are written
+//     at check-in or by the data-card backfill, so "none" can later become
+//     set — only for SOLIDWORKS files, which are re-checked at most every
+//     SW_RECHECK_MS. (A rare overwrite of already-set properties is picked up
+//     on the file's next check-in, i.e. its next version id.)
 //   - only version ids not in the cache are fetched — usually the one new file,
-//   - bursts of catalog changes are coalesced (DEBOUNCE_MS),
+//   - bursts of catalog changes are coalesced (DEBOUNCE_MS, at most MAX_WAIT_MS),
 //   - a superseded fetch stops between chunks,
 //   - the previous map stays visible while a refresh is in flight (same vault).
 
@@ -33,10 +36,18 @@ export type VaultPropertiesMap = Map<string, SwProperty[]>;
 export interface CachedVersionProps {
   fileId: string;
   properties: SwProperty[] | null;
+  /** When this row was fetched (epoch ms). */
+  checkedAt: number;
 }
 
 /** Collapse a burst of catalog changes (one per add/check-in) into one fetch. */
 export const DEBOUNCE_MS = 750;
+/** A continuous stream of changes (a bulk add) still refreshes this often. */
+export const MAX_WAIT_MS = 5_000;
+/** How long a SOLIDWORKS file's "no properties" answer is trusted. Most such
+ *  files never get any (add / auto-add / batch check-in don't record them),
+ *  so re-asking on every catalog change re-pulled thousands of rows. */
+export const SW_RECHECK_MS = 5 * 60_000;
 
 // Only SOLIDWORKS files ever get properties written, and possibly AFTER their
 // version row exists (check-in records them right after, and the lazy backfill
@@ -51,12 +62,14 @@ function mayGainProperties(name: string): boolean {
 /**
  * Pure planning step (exported for tests): which latest-version ids still need
  * a fetch, given what is cached. A version is fetched when it was never cached,
- * or when it is cached as "no properties" but belongs to a SOLIDWORKS file
- * (whose properties may have been recorded since).
+ * or when it is cached as "no properties", belongs to a SOLIDWORKS file (whose
+ * properties may have been recorded since) and was last checked at least
+ * SW_RECHECK_MS ago.
  */
 export function versionIdsToFetch(
   files: Pick<VaultFile, "name" | "latest_version_id">[],
   cache: Map<string, CachedVersionProps>,
+  now: number = Date.now(),
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -65,7 +78,12 @@ export function versionIdsToFetch(
     if (!vid || seen.has(vid)) continue;
     seen.add(vid);
     const hit = cache.get(vid);
-    if (!hit || (hit.properties === null && mayGainProperties(f.name))) out.push(vid);
+    if (
+      !hit ||
+      (hit.properties === null && mayGainProperties(f.name) && now - hit.checkedAt >= SW_RECHECK_MS)
+    ) {
+      out.push(vid);
+    }
   }
   return out;
 }
@@ -114,6 +132,9 @@ export function useVaultProperties(
     rows: new Map(),
   });
 
+  // When the oldest not-yet-served catalog change arrived (for MAX_WAIT_MS).
+  const firstPendingRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!vaultId || !files) {
       setPropsMap(null);
@@ -128,7 +149,13 @@ export function useVaultProperties(
     const cache = cacheRef.current.rows;
 
     let cancelled = false;
+    // Trailing debounce with a ceiling: each change restarts the wait, but a
+    // burst that never pauses still refreshes MAX_WAIT_MS after it began.
+    const now = Date.now();
+    if (firstPendingRef.current === null) firstPendingRef.current = now;
+    const delay = Math.min(DEBOUNCE_MS, Math.max(0, firstPendingRef.current + MAX_WAIT_MS - now));
     const timer = setTimeout(() => {
+      firstPendingRef.current = null;
       void (async () => {
         const missing = versionIdsToFetch(files, cache);
         try {
@@ -141,12 +168,12 @@ export function useVaultProperties(
             const got = new Set<string>();
             for (const row of (data ?? []) as Array<{ id: string; file_id: string; properties: SwProperty[] | null }>) {
               got.add(row.id);
-              cache.set(row.id, { fileId: row.file_id, properties: row.properties ?? null });
+              cache.set(row.id, { fileId: row.file_id, properties: row.properties ?? null, checkedAt: Date.now() });
             }
             // An id RLS hid (or that vanished) comes back empty: remember it as
             // "none" so it isn't re-requested on every catalog change.
             for (const id of chunk) {
-              if (!got.has(id) && !cache.has(id)) cache.set(id, { fileId: "", properties: null });
+              if (!got.has(id) && !cache.has(id)) cache.set(id, { fileId: "", properties: null, checkedAt: Date.now() });
             }
           }
         } catch {
@@ -162,7 +189,7 @@ export function useVaultProperties(
         for (const id of cache.keys()) if (!live.has(id)) cache.delete(id);
         setPropsMap(buildPropertiesMap(files, cache));
       })();
-    }, DEBOUNCE_MS);
+    }, delay);
 
     return () => {
       cancelled = true;

@@ -142,4 +142,32 @@ describe("useAutoAddDrafts pass", () => {
     await releaseNext("late.csv");
     await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(2));
   });
+
+  it("keeps going when the unmatched list is transiently empty (new-folder snapshot gap)", async () => {
+    const files = [lf("new/1.csv"), lf("new/2.csv")];
+    const onAdded = vi.fn();
+    const { rerender } = renderHook((p: { unmatched: LocalFile[] }) =>
+      useAutoAddDrafts({ vaultId: "v1" as never, enabled: true, unmatched: p.unmatched, onAdded }),
+      { initialProps: { unmatched: files } },
+    );
+    await waitFor(() => expect(addCalls.length).toBe(1));
+    // BrowseScreen yields [] while the new folder's row is still in flight.
+    rerender({ unmatched: [] });
+    await releaseNext("new/1.csv");
+    await releaseNext("new/2.csv");
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+  });
+
+  it("clears the 'Vaulting …' status when a vault switch stops the pass", async () => {
+    const files = [lf("1.csv"), lf("2.csv")];
+    const { result, rerender } = renderHook(
+      (p: { vaultId: string; unmatched: LocalFile[] }) =>
+        useAutoAddDrafts({ vaultId: p.vaultId as never, enabled: true, unmatched: p.unmatched, onAdded: () => {} }),
+      { initialProps: { vaultId: "v1", unmatched: files } },
+    );
+    await waitFor(() => expect(result.current.adding).toBe("1.csv"));
+    rerender({ vaultId: "v2", unmatched: [] });
+    await releaseNext("1.csv");
+    await waitFor(() => expect(result.current.adding).toBeNull());
+  });
 });
