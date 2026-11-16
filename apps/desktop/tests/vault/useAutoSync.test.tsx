@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { useAutoSync } from "../../src/modules/vault/data/useAutoSync";
+import { useAutoSync, AUTO_SYNC_QUIET_MS } from "../../src/modules/vault/data/useAutoSync";
 import { onLocalDeleteBlocked, onLocalDeletesPropagated } from "../../src/modules/vault/data/local-delete-events";
 import type { Folder, Lock, VaultFile, Version } from "../../src/modules/vault/data/types";
 import type { LocalFile } from "../../src/modules/vault/data/useLocalFolderScan";
@@ -581,6 +581,38 @@ describe("useAutoSync", () => {
     await act(async () => { resolveDownload("sha-new-abort", true); });
   });
 
+  it("a stream of triggers faster than the quiet window still runs a pass (max wait)", async () => {
+    // 2026-11-16: the 750 ms trailing quiet window restarts on every trigger;
+    // a bulk add landing files < 750 ms apart must not starve auto-sync.
+    vi.useFakeTimers();
+    try {
+      const base = {
+        enabled: true, localFiles: EMPTY_LOCAL, locks: EMPTY_LOCKS, currentUserId: "u1",
+        vaultRoot: "/tmp/vault", vaultId: null, folders: EMPTY_FOLDERS, onComplete: () => {},
+      };
+      const mk = (i: number) => ({
+        files: [makeFile(`mw${i}`, `mw${i}.bin`)] as VaultFile[],
+        versionsByFileId: new Map<string, Version[]>([[`mw${i}`, [makeVersion(`mw${i}`, `sha-mw-${i}`)]]]),
+      });
+      const { rerender } = renderHook(
+        ({ files, versionsByFileId }) => useAutoSync({ ...base, files, versionsByFileId }),
+        { wrapper, initialProps: mk(0) },
+      );
+      let started = false;
+      for (let i = 1; i <= 16 && !started; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS - 250); });
+        started = [...downloadResolvers.keys()].some((k) => k.startsWith("sha-mw-"));
+        if (!started) rerender(mk(i));
+      }
+      expect(started).toBe(true);
+      for (const k of [...downloadResolvers.keys()]) {
+        if (k.startsWith("sha-mw-")) await act(async () => { resolveDownload(k, true); });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honors the cooldown after a superseded run finishes (lastFinishedAt is not left stale)", async () => {
     // Regression guard for the audit fix: a superseded run skips the final-
     // commit block, so it used to never set `lastFinishedAt`. With the cooldown
@@ -627,14 +659,14 @@ describe("useAutoSync", () => {
         { wrapper, initialProps: { files: filesA, versionsByFileId: versionsA } },
       );
 
-      // gen-1's trigger timer fires (wait=0 since lastFinishedAt starts at 0).
-      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      // gen-1's trigger timer fires (only the quiet window: lastFinishedAt is 0).
+      await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS + 1); });
       expect(downloadResolvers.has("sha-cd-1")).toBe(true);
 
       // Supersede gen-1 with gen-2. gen-2's timer is scheduled with wait=0
       // (lastFinishedAt still 0 here). Let it fire so gen-2 is now in flight.
       rerender({ files: filesB, versionsByFileId: versionsB });
-      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_SYNC_QUIET_MS + 1); });
       expect(downloadResolvers.has("sha-cd-2")).toBe(true);
 
       // NOW let the superseded gen-1 download resolve. Its post-download path

@@ -24,6 +24,10 @@ const MAX_ROWS = 5_000_000;
 
 export async function fetchAllRows<T>(
   buildQuery: () => any,
+  /** Checked before each page: once it returns true the loop stops and
+   *  returns what it has. A superseded catalog pull used to keep paging to the
+   *  end of the vault even though its result was going to be thrown away. */
+  isCancelled?: () => boolean,
 ): Promise<{ rows: T[]; error: Error | null }> {
   const out: T[] = [];
   // Effective page size: PAGE until the first response tells us the server
@@ -37,6 +41,7 @@ export async function fetchAllRows<T>(
           `The data source did not terminate as expected.`,
       );
     }
+    if (iter > 0 && isCancelled?.()) break;
     const to = from + pageSize - 1;
     const { data, error } = await buildQuery().range(from, to);
     if (error) {

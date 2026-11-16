@@ -3,6 +3,22 @@ import { useSupabaseClient } from "@helios/auth";
 import type { VaultId } from "./types";
 import { cursorChanged, fetchVaultCursor, type VaultCursor } from "./vault-cursor";
 
+/** A probe slower than this counts as failed (full reconcile, gate freed). */
+export const PROBE_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("vault_cursor timed out")), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+/** Minimum spacing between the catch-up probes effect re-runs fire. */
+export const MIN_PROBE_GAP_MS = 500;
+
 /**
  * Periodic safety net behind realtime, WITHOUT the per-cycle full-catalog pull.
  *
@@ -53,16 +69,40 @@ export function useVaultCursor(
     cursor: null,
   });
 
+  // Probe throttle, also kept across effect re-runs and keyed by vault.
+  // 2026-11-16 a client sent 291 vault_cursor RPCs in two seconds right after
+  // its laptop moved networks. The trigger is unconfirmed — every re-run of
+  // the effect below probes at once, and nothing stopped hung probes from
+  // piling up and landing together. Both are now bounded: at most one probe is
+  // in flight (with a timeout), and a catch-up probe that
+  // would land within MIN_PROBE_GAP_MS of the last one is DEFERRED (trailing),
+  // not dropped — a quick hide/show still reconciles promptly, while a storm
+  // of re-runs collapses to one probe per gap.
+  const probeStateRef = useRef<{ vaultId: VaultId | undefined; inFlight: boolean; lastAt: number }>({
+    vaultId: undefined,
+    inFlight: false,
+    lastAt: 0,
+  });
+
   useEffect(() => {
     if (!vaultId || !enabled) return;
     if (lastSeenRef.current.vaultId !== vaultId) {
       lastSeenRef.current = { vaultId, cursor: null };
     }
+    if (probeStateRef.current.vaultId !== vaultId) {
+      probeStateRef.current = { vaultId, inFlight: false, lastAt: 0 };
+    }
+    const gate = probeStateRef.current;
     let disposed = false;
 
     const probe = async () => {
+      if (gate.inFlight) return; // the running probe answers for this tick too
+      gate.inFlight = true;
+      gate.lastAt = Date.now();
       try {
-        const next = await fetchVaultCursor(client, vaultId);
+        // Bounded: a request hung on a half-open socket (network change) would
+        // otherwise hold `inFlight` and silence the safety net until it died.
+        const next = await withTimeout(fetchVaultCursor(client, vaultId), PROBE_TIMEOUT_MS);
         if (disposed) return;
         const prev = lastSeenRef.current.cursor;
         lastSeenRef.current = { vaultId, cursor: next };
@@ -72,14 +112,29 @@ export function useVaultCursor(
         // full reconcile and leave the baseline untouched so the next good
         // probe compares against the last state we really saw.
         if (!disposed) onChangeRef.current(null, null);
+      } finally {
+        gate.inFlight = false;
       }
     };
 
-    void probe(); // baseline (or catch-up after a hidden stretch), then poll
+    // Baseline (or catch-up after a hidden stretch), then poll. If a probe for
+    // this vault is running or ran moments ago, wait and try again; a re-run
+    // clears the pending timer, so a storm leaves only the last one standing.
+    let catchUp: ReturnType<typeof setTimeout> | null = null;
+    const kick = () => {
+      catchUp = null;
+      const wait = gate.inFlight
+        ? MIN_PROBE_GAP_MS
+        : Math.max(0, MIN_PROBE_GAP_MS - (Date.now() - gate.lastAt));
+      if (wait === 0) void probe();
+      else catchUp = setTimeout(kick, wait);
+    };
+    kick();
     const id = setInterval(() => void probe(), intervalMs);
     return () => {
       disposed = true;
       clearInterval(id);
+      if (catchUp) clearTimeout(catchUp);
     };
   }, [client, vaultId, enabled, intervalMs]);
 }

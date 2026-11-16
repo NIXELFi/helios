@@ -31,6 +31,9 @@ export type MergeScope = { folderId: FolderId | null } | { ids: FileId[] };
 /** PostgREST rejects very long URLs, so an `in.(…)` list is sent in batches. */
 const ID_BATCH = 200;
 
+/** Window in which repeated full-catalog refetch requests share one pull. */
+export const REFETCH_COALESCE_MS = 250;
+
 /** Shallow value equality, one level deep so the embedded `latest` object is
  *  compared by value too. Rows always come back as FRESH objects from
  *  PostgREST, so reference equality can never answer "did this row change?" —
@@ -162,6 +165,7 @@ export function useAllFiles(vault_id: VaultId | undefined): VaultFiles {
           // (useDeletedFiles) fetches them, and the reaper removes local copies.
           .is("deleted_at", null)
           .order("id", { ascending: true }),
+        () => !mounted,
       );
       if (!mounted) return;
       if (err) {
@@ -177,7 +181,38 @@ export function useAllFiles(vault_id: VaultId | undefined): VaultFiles {
     };
   }, [client, vault_id, tick]);
 
-  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  // Coalesced: a single add / check-in can ask for the catalog several times
+  // within a few hundred ms (auto-add's pass end, the cursor reconcile, a
+  // realtime REFETCH fallback). Each request used to start its own multi-page
+  // pull — 4–6 overlapping copies of a 3,000-file catalog per added file on
+  // 2026-11-16. Requests inside REFETCH_COALESCE_MS of a pull share ONE
+  // follow-up pull.
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchPendingRef = useRef(false);
+  useEffect(() => () => {
+    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = null;
+    refetchPendingRef.current = false;
+  }, []);
+  // Leading edge: an idle hook refetches AT ONCE (a fresh checkout must not
+  // wait); further requests inside the window collapse into one trailing pull.
+  const refetch = useCallback(() => {
+    if (refetchTimerRef.current) {
+      refetchPendingRef.current = true;
+      return;
+    }
+    setTick((t) => t + 1);
+    const close = () => {
+      if (refetchPendingRef.current) {
+        refetchPendingRef.current = false;
+        setTick((t) => t + 1);
+        refetchTimerRef.current = setTimeout(close, REFETCH_COALESCE_MS);
+      } else {
+        refetchTimerRef.current = null;
+      }
+    };
+    refetchTimerRef.current = setTimeout(close, REFETCH_COALESCE_MS);
+  }, []);
   const patch = useCallback((updater: (rows: VaultFile[]) => VaultFile[] | RefetchSignal) => {
     const prev = dataRef.current;
     if (prev === null) return; // not loaded yet — the in-flight/next fetch covers it

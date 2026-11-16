@@ -375,6 +375,13 @@ export function useLocalFolderScan(
   // the latest value without needing to re-subscribe.
   const pausedRef = useRef<boolean>(paused ?? false);
   useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
+  // A rescan was wanted while paused (watcher / interval / focus suppressed, or
+  // a scan's commit dropped because a pause began mid-walk). Nothing used to
+  // reschedule it, so new files waited for the next 30 s interval tick — a
+  // dead gap of up to 30 s with no network activity on every bulk add
+  // (2026-11-16), since auto-sync pauses the scan after each catalog change.
+  // Now the pause lifting runs the missed rescan.
+  const pendingRef = useRef(false);
 
   // sha cache lives for the hook's lifetime; clears on unmount (e.g. logout).
   const shaCacheRef = useRef<ShaCache>(new Map());
@@ -422,6 +429,8 @@ export function useLocalFolderScan(
     // the walk, we drop the commit. The next unpaused scan publishes a clean
     // snapshot.
     const startedPaused = pausedRef.current;
+    // This scan answers any request made while we were paused.
+    pendingRef.current = false;
     setLoading(true);
     setError(null);
     (async () => {
@@ -503,8 +512,9 @@ export function useLocalFolderScan(
           );
           setLoading(false);
         } else if (mounted) {
-          // Clear the loading flag but leave `files` untouched — a later
-          // unpaused refetch will publish fresh results.
+          // Clear the loading flag but leave `files` untouched — the rescan
+          // queued here runs as soon as the pause lifts.
+          pendingRef.current = true;
           setLoading(false);
         }
       } catch (e) {
@@ -525,15 +535,26 @@ export function useLocalFolderScan(
     if (!rootPath || !intervalMs || intervalMs <= 0) return;
     const id = window.setInterval(() => {
       if (!pausedRef.current) refetch();
+      else pendingRef.current = true;
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [rootPath, intervalMs, refetch]);
+
+  // Run the rescan that was requested while paused, once the pause lifts.
+  useEffect(() => {
+    if (paused || !rootPath || !pendingRef.current) return;
+    pendingRef.current = false;
+    refetch();
+  }, [paused, rootPath, refetch]);
 
   // Re-scan when the user comes back to the window — covers the common case
   // of editing a file in another app and tabbing back. Throttled: alt-tabbing
   // between Helios and SOLIDWORKS fired a full disk walk on every switch.
   useThrottledFocus(
-    () => { if (!pausedRef.current) refetch(); },
+    () => {
+      if (!pausedRef.current) refetch();
+      else pendingRef.current = true;
+    },
     10_000,
     Boolean(rootPath) && rescanOnFocus,
   );
@@ -551,7 +572,10 @@ export function useLocalFolderScan(
         const stop = await watch(
           rootPath,
           () => {
-            if (pausedRef.current) return;
+            if (pausedRef.current) {
+              pendingRef.current = true;
+              return;
+            }
             // A parallel auto-sync pass still yields one event per file per
             // debounce window. Coalescing into a single rescan ~1.5 s after
             // the last event keeps the UI responsive and lets the sha-cache

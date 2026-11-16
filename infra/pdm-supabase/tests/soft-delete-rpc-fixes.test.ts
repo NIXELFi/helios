@@ -186,6 +186,58 @@ describe("add_and_lock: resurrect re-anchors soft-deleted ancestor folders (2026
 });
 
 // ---------------------------------------------------------------------------
+// 20261116000000 — add_and_lock refuses a NEW file inside a soft-deleted folder
+// ---------------------------------------------------------------------------
+
+describe("add_and_lock: refuses a brand-new file in a soft-deleted folder (20261116000000)", () => {
+  beforeEach(async () => { await resetAuthUsers(); });
+  afterEach(async () => { await resetAuthUsers(); });
+
+  it("raises instead of landing a live file inside a deleted folder", async () => {
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const editor = await createTestUser(uniqueEmail("editor"));
+    await setRole(editor.id, "editor");
+    const { vaultId, folderId } = await seedVault(admin.id);
+    const svc = serviceClient();
+    await svc.from("folders").update({ deleted_at: new Date().toISOString(), deleted_by: admin.id }).eq("id", folderId);
+
+    const c = await signInAs(editor.email!);
+    const { data, error } = await c.rpc("pdm_add_and_lock", {
+      p_vault_id: vaultId,
+      p_folder_id: folderId,
+      p_name: "new-in-deleted.csv",
+      p_sha256: "d".repeat(64),
+      p_size: 1,
+      p_comment: null,
+    });
+    expect(data).toBeNull();
+    expect(error?.message ?? "").toMatch(/target folder was deleted/);
+    const { data: rows } = await svc.from("files").select("id").eq("folder_id", folderId).eq("name", "new-in-deleted.csv");
+    expect(rows ?? []).toHaveLength(0);
+  });
+
+  it("still adds normally into a live folder", async () => {
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const editor = await createTestUser(uniqueEmail("editor"));
+    await setRole(editor.id, "editor");
+    const { vaultId, folderId } = await seedVault(admin.id);
+    const c = await signInAs(editor.email!);
+    const { data, error } = await c.rpc("pdm_add_and_lock", {
+      p_vault_id: vaultId,
+      p_folder_id: folderId,
+      p_name: "ok.csv",
+      p_sha256: "e".repeat(64),
+      p_size: 1,
+      p_comment: null,
+    });
+    expect(error).toBeNull();
+    expect((data as any).created).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Bug 7 — import_version resurrects a soft-deleted file
 // ---------------------------------------------------------------------------
 

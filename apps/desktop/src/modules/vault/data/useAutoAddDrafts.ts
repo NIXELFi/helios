@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { stat } from "@tauri-apps/plugin-fs";
 
-import { useAddLocalFile } from "./useAddLocalFile";
+import { useAddLocalFile, type FolderLookupCache } from "./useAddLocalFile";
 import { loadLedger, TOMBSTONE_COOLOFF_MS, type SyncLedger } from "./sync-ledger";
 import { normalizePathForCompare } from "./local-match";
 import type { LocalFile } from "./useLocalFolderScan";
@@ -78,8 +78,14 @@ export function useAutoAddDrafts(opts: {
   enabled: boolean;
   unmatched: LocalFile[];
   onAdded: () => void;
+  /** The vault's folder list. Any change to it (realtime refetch after a
+   *  create / rename / move / delete) drops the pass's folder memo, so a
+   *  folder deleted mid-pass is not reused for the remaining files. */
+  folders?: unknown[] | null;
 }): AutoAddStatus {
-  const { vaultId, enabled, unmatched, onAdded } = opts;
+  const { vaultId, enabled, unmatched, onAdded, folders } = opts;
+  const foldersRef = useRef(folders);
+  foldersRef.current = folders;
   const addFile = useAddLocalFile();
   const [status, setStatus] = useState<AutoAddStatus>({ adding: null, failures: [], lastAdded: [] });
   const busyRef = useRef(false);
@@ -92,19 +98,32 @@ export function useAutoAddDrafts(opts: {
   // stability window — nothing else re-triggers the effect for them.
   const [tick, setTick] = useState(0);
 
+  // The newest unmatched list, read by an in-flight pass to skip files that
+  // were matched (or changed / vanished) after the pass took its snapshot.
+  const latestUnmatchedRef = useRef(unmatched);
+  latestUnmatchedRef.current = unmatched;
+  // Set when the effect fires while a pass is running: the pass re-checks once
+  // it drains, so a file that appeared mid-pass is never stranded.
+  const rerunRef = useRef(false);
+  // Pass generation. ONLY a vault switch, auto-add being turned off, or unmount
+  // invalidates a running pass. The `unmatched` list changing does NOT: every
+  // add changes it (the realtime patch lands the new row), and cancelling on
+  // that made each pass add one or two files, then restart from the top with a
+  // fresh ledger load + stat of every unmatched file and a full vault refetch
+  // in between. A 240-file test-data drop (2026-11-16) ran at ~10–40 s a file.
+  const genRef = useRef(0);
+  useEffect(() => () => { genRef.current++; }, [vaultId, enabled]);
+
   useEffect(() => {
     if (!enabled || !vaultId || unmatched.length === 0) return;
-    // A prior run is still in flight. The deps that brought us here (a changed
-    // `unmatched` list, a new tick) won't fire again on their own once that run
-    // finishes, so without a re-trigger any candidate observed during the busy
-    // window would stall until something ELSE re-runs the effect. Schedule a
-    // re-check shortly after the current run should have drained.
     if (busyRef.current) {
-      const t = setTimeout(() => setTick((x) => x + 1), 1_000);
-      return () => clearTimeout(t);
+      rerunRef.current = true;
+      return;
     }
-    let cancelled = false;
+    const gen = genRef.current;
+    const isCurrent = () => genRef.current === gen;
     busyRef.current = true;
+    rerunRef.current = false;
 
     void (async () => {
       try {
@@ -126,34 +145,69 @@ export function useAutoAddDrafts(opts: {
           const m = mtimes.get(f.relativePath);
           return f.sha256 && m != null && now - m < STABLE_AGE_MS;
         });
-        if (deferredFresh && !cancelled) {
+        if (deferredFresh && isCurrent()) {
           setTimeout(() => setTick((t) => t + 1), STABLE_AGE_MS + 500);
         }
         if (candidates.length === 0) return;
 
         const added: string[] = [];
         const failures: { name: string; error: string }[] = [];
+        // One folder-lookup memo per pass: files of the same drop share their
+        // folder chain instead of each re-querying every path segment.
+        const folderCache: FolderLookupCache = new Map();
+        let cacheFolders = foldersRef.current;
         for (const f of candidates) {
-          if (cancelled) break;
+          // A folder change since the memo was filled may be a delete or move
+          // of a memoized folder (pdm_add_and_lock does not refuse a deleted
+          // folder_id) — re-query rather than file into it.
+          if (foldersRef.current !== cacheFolders) {
+            folderCache.clear();
+            cacheFolders = foldersRef.current;
+          }
+          if (!isCurrent()) break;
+          // An EMPTY latest list is not evidence: BrowseScreen yields [] while
+          // its snapshot is inconsistent (a file row whose new folder hasn't
+          // been fetched yet — every add into a fresh subfolder). Keep going;
+          // re-adding an existing row is idempotent (created:false).
+          const latest = latestUnmatchedRef.current;
+          if (latest.length > 0 && !stillUnmatched(latest, f)) continue;
           attemptsRef.current.set(f.relativePath, Date.now());
           setStatus((s) => ({ ...s, adding: f.basename }));
           // "auto": a huge file is left for a person to add by hand, never
           // a dialog popped up from a background job.
-          const r = await addRunRef.current(vaultId, f, undefined, "auto");
+          const r = await addRunRef.current(vaultId, f, undefined, "auto", folderCache);
           if (r.ok) added.push(f.basename);
           else failures.push({ name: f.basename, error: r.error ?? "failed" });
         }
+        if (!isCurrent()) return;
         setStatus({ adding: null, failures, lastAdded: added });
+        // ONE catalog/locks refetch + rescan for the whole pass, not per file.
         if (added.length > 0) onAddedRef.current();
       } finally {
         busyRef.current = false;
-        if (!cancelled) setStatus((s) => (s.adding === null ? s : { ...s, adding: null }));
+        // Always clear the "Vaulting …" banner, even for a pass a vault switch
+        // stopped — the same hook instance carries on into the new vault.
+        setStatus((s) => (s.adding === null ? s : { ...s, adding: null }));
+        // Something changed while we were busy (new files, a vault switch, a
+        // fresh tick) — look again now that we're free.
+        if (rerunRef.current) {
+          rerunRef.current = false;
+          setTick((t) => t + 1);
+        }
       }
     })();
-
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, vaultId, unmatched, tick]);
 
   return status;
+}
+
+/**
+ * Is `f` still waiting to be added, per the newest unmatched list? False once
+ * the file is in the vault (matched), gone from disk, or its content changed
+ * since the pass snapshot (the next pass picks up the new bytes). Exported for
+ * tests.
+ */
+export function stillUnmatched(latest: LocalFile[], f: LocalFile): boolean {
+  return latest.some((u) => u.relativePath === f.relativePath && u.sha256 === f.sha256);
 }

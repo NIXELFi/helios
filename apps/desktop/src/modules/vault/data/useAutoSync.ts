@@ -95,6 +95,10 @@ export function nextRetryInMs(map: FailedDownloads, now: number): number | null 
   return earliest === null ? null : Math.max(0, earliest - now);
 }
 
+/** Trailing quiet window before an auto-sync pass starts (see the trigger
+ *  effect): one add / check-in's burst of realtime events runs ONE pass. */
+export const AUTO_SYNC_QUIET_MS = 750;
+
 /**
  * Background syncer for the Vault. Whenever vault rows or local-scan results
  * change, a pass runs that downloads every file the user hasn't locked and
@@ -763,6 +767,10 @@ export function useAutoSync(input: {
   // of the next. Stops dependency churn / rescan-after-pass / realtime ticks
   // from spinning the worker at full speed when the vault is already in sync.
   const COOLDOWN_MS = 2000;
+  const QUIET_MS = AUTO_SYNC_QUIET_MS;
+  const QUIET_MAX_WAIT_MS = 5_000;
+  // When the oldest trigger not yet served by a pass arrived.
+  const firstTriggerAt = useRef<number | null>(null);
   const lastFinishedAt = useRef(0);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -788,8 +796,20 @@ export function useAutoSync(input: {
       activeAbortRef.current = null;
     }
     if (pending.current) return; // already scheduled
-    const wait = Math.max(0, COOLDOWN_MS - (Date.now() - lastFinishedAt.current));
+    // QUIET_MS: one add or check-in lands as 3–4 realtime events (file
+    // insert, version insert, file update, lock) a few ms apart; each used to
+    // start its own full pass over every vault file. Trailing by QUIET_MS (the
+    // cleanup below clears the timer on each new trigger) folds them into one.
+    // Capped by QUIET_MAX_WAIT_MS: a bulk add whose files land faster than
+    // QUIET_MS apart would otherwise keep restarting the window and run NO
+    // pass (no downloads of teammates' check-ins) until the drop finished.
+    const now = Date.now();
+    if (firstTriggerAt.current === null) firstTriggerAt.current = now;
+    const cooldownLeft = COOLDOWN_MS - (now - lastFinishedAt.current);
+    const quietLeft = Math.min(QUIET_MS, firstTriggerAt.current + QUIET_MAX_WAIT_MS - now);
+    const wait = Math.max(0, cooldownLeft, quietLeft);
     pending.current = setTimeout(() => {
+      firstTriggerAt.current = null;
       pending.current = null;
       void run();
     }, wait);
